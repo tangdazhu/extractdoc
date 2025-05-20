@@ -287,6 +287,33 @@ def main():
             logger.warning(f"No content elements extracted from {filename}.")
             doc.add_paragraph(f"[No content could be extracted from {filename}]\n")
         else:
+            # 新增：如果全部是 [bbox, (text, score)]，自动还原表格
+            if all(isinstance(e, list) and len(e) == 2 for e in layout_elements):
+                import numpy as np
+                def group_boxes_by_lines(elements, y_threshold=20):
+                    lines = []
+                    for elem in elements:
+                        bbox, (text, score) = elem
+                        y_center = np.mean([point[1] for point in bbox])
+                        placed = False
+                        for line in lines:
+                            if abs(line[0]['y_center'] - y_center) < y_threshold:
+                                line.append({'bbox': bbox, 'text': text, 'y_center': y_center})
+                                placed = True
+                                break
+                        if not placed:
+                            lines.append([{'bbox': bbox, 'text': text, 'y_center': y_center}])
+                    lines = sorted(lines, key=lambda l: l[0]['y_center'])
+                    for line in lines:
+                        line.sort(key=lambda cell: np.mean([point[0] for point in cell['bbox']]))
+                    return lines
+                lines = group_boxes_by_lines(layout_elements)
+                table = doc.add_table(rows=len(lines), cols=max(len(line) for line in lines))
+                for r, line in enumerate(lines):
+                    for c, cell in enumerate(line):
+                        table.cell(r, c).text = cell['text']
+                doc.add_paragraph()  # 表格后加空行
+                continue  # 跳过后续的单行文本输出
             for element in layout_elements:
                 # Check if the element is in the expected dictionary format for layout analysis
                 if isinstance(element, dict):
