@@ -1,0 +1,425 @@
+{
+  "version": 1,
+  "rules": [
+    {
+  "name": "禁止伪造或生成假数据",
+  "description": "所有数据输出必须真实，数据缺失时应如实为空或报错，严禁自动补全、生成示例或占位数据",
+  "pattern": "数据缺失时不允许生成假数据或占位数据，必须如实反映数据缺失情况，或直接报错。",
+  "examples": [
+    {
+      "good": "if not flight_data: raise ValueError('未能提取到航班数据')",
+      "bad": "if not flight_data: flight_data = [{\"airline\": \"未知航空公司\", ...}]"
+    }
+  ]
+}，
+     {
+      "name": "用中文回复且基于事实",
+      "description": "所有回复都必须使用中文，并且内容必须基于事实，不得造假",
+      "pattern": "使用中文回复问题，并确保回复内容的真实性和准确性",
+      "examples": [
+        {
+          "good": "根据代码分析，该错误是由于数据库连接超时引起的，需要调整config.yaml中的timeout参数。",
+          "bad": "这可能是系统问题，重启一下服务器就好了。"
+        }
+      ]
+    },
+    {
+      "name": "编程方案引用出处",
+      "description": "所有编程方案必须有正确的引用出处，不得伪造或臆造方案",
+      "pattern": "提供的编程解决方案需附带引用出处或依据标准规范",
+      "examples": [
+        {
+          "good": "根据NumPy官方文档（https://numpy.org/doc/stable/reference/generated/numpy.array.html），处理多维数组应该使用以下方法：\nnp.array([[1, 2], [3, 4]])",
+          "bad": "处理多维数组的最佳方法是：\narray_utils.create_matrix([[1, 2], [3, 4]])"
+        }
+      ]
+    },
+    {
+      "name": "中文注释",
+      "description": "使用中文注释来解释代码",
+      "pattern": "注释应该使用中文",
+      "examples": [
+        {
+          "good": "# 这是一个配置管理器\ndef get_config_manager():",
+          "bad": "# This is a config manager\ndef get_config_manager():"
+        }
+      ]
+    },
+    {
+      "name": "文件头部注释格式",
+      "description": "所有Python文件应包含UTF-8编码声明和文件说明",
+      "pattern": "#!/usr/bin/env python3\n# -*- coding: utf-8 -*-\n\n\"\"\"\n{文件描述}\n\"\"\"",
+      "examples": [
+        {
+          "good": "#!/usr/bin/env python3\n# -*- coding: utf-8 -*-\n\n\"\"\"\nKube_AI_Agent 监控模块\n\"\"\"",
+          "bad": "\"\"\"Monitor module\"\"\"\n\nimport os"
+        }
+      ]
+    },
+    {
+      "name": "函数文档字符串",
+      "description": "所有函数应该有中文文档字符串，包含参数和返回值说明",
+      "pattern": "def function_name(params):\n    \"\"\"函数功能描述\n    \n    Args:\n        param1: 参数1描述\n        \n    Returns:\n        返回值描述\n    \"\"\"",
+      "examples": [
+        {
+          "good": "def get_monitoring_agent(config_manager=None):\n    \"\"\"获取监控Agent实例\n    \n    Args:\n        config_manager: 配置管理器实例，如果为None则创建一个新实例\n        \n    Returns:\n        MonitoringAgent: 监控Agent实例\n    \"\"\"",
+          "bad": "def get_monitoring_agent(config_manager=None):\n    # Get monitoring agent\n    from agents.monitoring.monitoring_agent import MonitoringAgent"
+        }
+      ]
+    },
+    {
+      "name": "项目模块导入顺序",
+      "description": "导入模块应按照标准库、第三方库、项目模块的顺序排列",
+      "pattern": "# 先导入标准库\nimport os\nimport sys\n\n# 再导入第三方库\nimport yaml\nimport requests\n\n# 最后导入项目模块\nfrom utils.config_manager import ConfigManager",
+      "examples": [
+        {
+          "good": "import os\nimport sys\nimport logging\n\nimport yaml\nimport requests\n\nfrom utils.logger import setup_logger",
+          "bad": "from utils.logger import setup_logger\nimport os\nimport yaml"
+        }
+      ]
+    },
+    {
+      "name": "变量命名",
+      "description": "使用下划线命名法命名变量和函数",
+      "pattern": "变量和函数名应使用小写字母加下划线",
+      "examples": [
+        {
+          "good": "monitoring_agent = MonitoringAgent()\nconfig_manager = ConfigManager()",
+          "bad": "monitoringAgent = MonitoringAgent()\nconfigManager = ConfigManager()"
+        }
+      ]
+    },
+    {
+      "name": "类命名",
+      "description": "使用驼峰命名法命名类",
+      "pattern": "类名应使用驼峰命名法",
+      "examples": [
+        {
+          "good": "class ConfigManager:\n    pass\n\nclass MonitoringAgent:\n    pass",
+          "bad": "class config_manager:\n    pass\n\nclass monitoring_agent:\n    pass"
+        }
+      ]
+    },
+    {
+      "name": "日志使用",
+      "description": "使用项目的logger模块记录日志",
+      "pattern": "from utils.logger import setup_logger\n\nlogger = setup_logger(\"模块名\")\n\ndef function():\n    logger.info(\"信息\")\n    logger.error(\"错误\")",
+      "examples": [
+        {
+          "good": "from utils.logger import setup_logger\n\nlogger = setup_logger(\"monitoring\")\n\ndef deploy():\n    logger.info(\"开始部署监控系统\")",
+          "bad": "def deploy():\n    print(\"开始部署监控系统\")"
+        }
+      ]
+    },
+    {
+      "name": "异常处理",
+      "description": "使用try-except捕获并记录异常",
+      "pattern": "try:\n    # 代码\nexcept Exception as e:\n    logger.error(f\"错误信息: {e}\")",
+      "examples": [
+        {
+          "good": "try:\n    monitoring_agent.deploy()\nexcept Exception as e:\n    logger.error(f\"部署监控系统时出错: {e}\")",
+          "bad": "monitoring_agent.deploy()"
+        }
+      ]
+    },
+    {
+      "name": "配置管理",
+      "description": "使用ConfigManager管理配置",
+      "pattern": "from utils.config_manager import get_config_manager\n\nconfig_manager = get_config_manager()\nconfig = config_manager.load_config(\"config_name\")",
+      "examples": [
+        {
+          "good": "from utils.config_manager import get_config_manager\n\nconfig_manager = get_config_manager()\nmonitoring_config = config_manager.load_config(\"monitoring_config\")",
+          "bad": "with open('config.yaml', 'r') as f:\n    config = yaml.safe_load(f)"
+        }
+      ]
+    },
+    {
+      "name": "使用项目配置环境信息",
+      "description": "每个模块必须使用现有的项目配置环境信息(config.yaml)",
+      "pattern": "从config.yaml读取配置而不是硬编码",
+      "examples": [
+        {
+          "good": "from utils.config_manager import get_config_manager\n\nconfig_manager = get_config_manager()\nconfig = config_manager.config\nregistry_host = config.get('registry', {}).get('host')",
+          "bad": "registry_host = '172.17.61.57:5000'"
+        }
+      ]
+    },
+    {
+      "name": "使用本地镜像仓库",
+      "description": "必须使用服务器本地的镜像仓库，仓库信息在config.yaml中",
+      "pattern": "从config.yaml读取镜像仓库信息",
+      "examples": [
+        {
+          "good": "from utils.config_manager import get_config_manager\n\nconfig_manager = get_config_manager()\nregistry_host = config_manager.get_registry_host()",
+          "bad": "registry_host = 'docker.io'"
+        }
+      ]
+    },
+    {
+      "name": "使用镜像仓库中的镜像和版本",
+      "description": "必须使用镜像仓库里的image和版本，信息存放在registry_images.json",
+      "pattern": "从registry_images.json读取镜像版本",
+      "examples": [
+        {
+          "good": "import json\nwith open('registry_images.json', 'r') as f:\n    registry_images = json.load(f)\nprometheus_version = registry_images.get('prometheus/prometheus', ['latest'])[0]",
+          "bad": "prometheus_version = 'v2.44.0'"
+        }
+      ]
+    },
+
+    {
+      "name": "使用已有工具类",
+      "description": "优先使用项目里已有的工具类，不要每次都开发新的工具类，工具类都位于utils目录",
+      "pattern": "导入并使用utils中的现有工具类",
+      "examples": [
+        {
+          "good": "from utils.ssh_client import SSHClient\nfrom utils.helm_manager import HelmManager\nssh_client = SSHClient(host, username, password)",
+          "bad": "# 自己实现SSH连接\nimport paramiko\nssh = paramiko.SSHClient()\nssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())"
+        }
+      ]
+    },
+    {
+      "name": "聚焦功能修复",
+      "description": "Fix bug和重构代码时，需要聚焦在功能本身，而不要发散大面积重构",
+      "pattern": "bug修复和重构应集中在特定功能上",
+      "examples": [
+        {
+          "good": "# 只修复特定的问题\ndef deploy():\n    # 修复部署超时问题\n    client.timeout = 300",
+          "bad": "# 修复问题时重构整个模块\n# 完全重写的deploy函数\ndef deploy():\n    # 大量新增和修改的代码..."
+        }
+      ]
+    },
+    {
+      "name": "日志存放位置",
+      "description": "所有的日志存放到项目logs目录下",
+      "pattern": "日志文件应存放在logs目录",
+      "examples": [
+        {
+          "good": "log_file_path = os.path.join(project_root, 'logs', 'app.log')",
+          "bad": "log_file_path = 'app.log'"
+        }
+      ]
+    },
+    {
+      "name": "项目文档维护",
+      "description": "在每个项目的一级子目录下生成readme.md，解释清楚每个子目录下的每个文件的用途",
+      "pattern": "每个一级子目录应该有readme.md文件",
+      "examples": [
+        {
+          "good": "# agents/README.md\n# Agents模块\n\n## 文件说明\n\n- monitoring_agent.py: 监控系统代理\n- logging_agent.py: 日志系统代理",
+          "bad": "# 没有README.md的目录结构"
+        }
+      ]
+    },
+    {
+      "name": "控制台输出使用ASCII字符",
+      "description": "在控制台输出时，特别是在Windows环境下，应使用ASCII字符而非Unicode符号，以避免GBK编码问题",
+      "pattern": "使用ASCII字符而非Unicode特殊符号用于控制台输出",
+      "examples": [
+        {
+          "good": "print(f\"[OK] 操作成功\")\nprint(f\"[FAIL] 操作失败\")",
+          "bad": "print(f\"✓ 操作成功\")\nprint(f\"✗ 操作失败\")"
+        }
+      ]
+    },
+    {
+      "name": "使用配置文件而非命令行参数",
+      "description": "Python命令执行时使用外部配置文件，不要通过命令行参数传递配置，同时不要hardcode配置文件路径到Python代码里",
+      "pattern": "使用配置文件而非命令行参数",
+      "examples": [
+        {
+          "good": "# 使用配置文件\nconfig_path = os.path.join(project_root, 'config', 'config.yaml')\nwith open(config_path, 'r') as f:\n    config = yaml.safe_load(f)",
+          "bad": "# 使用命令行参数\nparser.add_argument('--registry-host', help='Registry地址')\nargs = parser.parse_args()\nregistry_host = args.registry_host"
+        }
+      ]
+    },
+    {
+      "name": "严格依赖配置文件无默认值",
+      "description": "代码应强依赖于配置文件，不得设置配置项的默认值，当配置缺失时应直接报错而非使用默认值",
+      "pattern": "加载配置时不提供默认值，配置缺失时抛出异常",
+      "examples": [
+        {
+          "good": "def load_config():\n    config_path = os.path.join('config', 'config.yaml')\n    with open(config_path, 'r') as f:\n        config = yaml.safe_load(f)\n    if not all(key in config for key in required_keys):\n        raise ValueError(\"配置文件缺少必要参数\")\n    return config",
+          "bad": "def load_config():\n    config_path = os.path.join('config', 'config.yaml')\n    try:\n        with open(config_path, 'r') as f:\n            config = yaml.safe_load(f)\n    except Exception:\n        # 使用默认值\n        return {'host': 'localhost', 'port': 8080}\n    return config"
+        }
+      ]
+    },
+    {
+      "name": "FastAPI 函数类型",
+      "description": "使用def用于纯函数和async def用于异步操作",
+      "pattern": "使用正确的函数类型声明",
+      "examples": [
+        {
+          "good": "def get_config():\n    return config\n\nasync def fetch_data():\n    result = await database.fetch_one(query)",
+          "bad": "async def get_config():\n    return config\n\ndef fetch_data():\n    result = database.fetch_one(query)"
+        }
+      ]
+    },
+    {
+      "name": "FastAPI 类型提示",
+      "description": "所有函数签名都应使用类型提示，首选Pydantic模型而非原始字典用于输入验证",
+      "pattern": "使用类型提示和Pydantic模型",
+      "examples": [
+        {
+          "good": "from pydantic import BaseModel\n\nclass UserCreate(BaseModel):\n    username: str\n    email: str\n\ndef create_user(user: UserCreate) -> dict:",
+          "bad": "def create_user(user):"
+        }
+      ]
+    },
+    {
+      "name": "FastAPI 错误处理",
+      "description": "优先处理错误和边缘情况，在函数开始处使用早期返回",
+      "pattern": "在函数开始处处理错误条件",
+      "examples": [
+        {
+          "good": "def process_user(user_id: int):\n    if not user_id:\n        raise HTTPException(status_code=400, detail=\"用户ID不能为空\")\n        \n    user = get_user(user_id)\n    if not user:\n        raise HTTPException(status_code=404, detail=\"用户不存在\")\n    \n    # 处理有效用户的代码",
+          "bad": "def process_user(user_id):\n    user = get_user(user_id)\n    if user:\n        # 处理有效用户的代码\n    else:\n        raise HTTPException(status_code=404, detail=\"用户不存在\")"
+        }
+      ]
+    },
+    {
+      "name": "FastAPI 路由定义",
+      "description": "使用声明式路由定义，带有明确的返回类型注解",
+      "pattern": "声明式路由定义并包含返回类型注解",
+      "examples": [
+        {
+          "good": "from fastapi import APIRouter\nfrom typing import List\n\nrouter = APIRouter()\n\n@router.get(\"/users/\", response_model=List[UserResponse])\nasync def get_users():\n    return await user_service.get_all()",
+          "bad": "@router.get(\"/users/\")\ndef get_users():\n    return user_service.get_all()"
+        }
+      ]
+    },
+    {
+      "name": "FastAPI 依赖注入",
+      "description": "使用FastAPI的依赖注入系统来管理状态和共享资源",
+      "pattern": "使用依赖注入管理共享资源",
+      "examples": [
+        {
+          "good": "from fastapi import Depends\n\ndef get_db():\n    db = SessionLocal()\n    try:\n        yield db\n    finally:\n        db.close()\n\n@router.get(\"/items/\")\ndef read_items(db = Depends(get_db)):",
+          "bad": "@router.get(\"/items/\")\ndef read_items():\n    db = SessionLocal()\n    items = db.query(Item).all()\n    db.close()\n    return items"
+        }
+      ]
+    },
+    {
+      "name": "FastAPI 生命周期管理",
+      "description": "优先使用lifespan上下文管理器而非@app.on_event装饰器管理启动和关闭事件",
+      "pattern": "使用lifespan上下文管理器",
+      "examples": [
+        {
+          "good": "from contextlib import asynccontextmanager\n\n@asynccontextmanager\nasync def lifespan(app: FastAPI):\n    # 启动前的操作\n    await initialize_db()\n    yield\n    # 关闭操作\n    await close_db_connection()",
+          "bad": "@app.on_event(\"startup\")\nasync def startup():\n    await initialize_db()\n\n@app.on_event(\"shutdown\")\nasync def shutdown():\n    await close_db_connection()"
+        }
+      ]
+    },
+    {
+      "name": "FastAPI 性能优化",
+      "description": "最小化阻塞I/O操作，对所有数据库调用和外部API请求使用异步操作",
+      "pattern": "使用异步操作处理I/O密集型任务",
+      "examples": [
+        {
+          "good": "async def get_user_data(user_id: int):\n    db_result = await database.fetch_one(query)\n    external_data = await external_api.get_user_info(user_id)\n    return {**db_result, **external_data}",
+          "bad": "def get_user_data(user_id: int):\n    db_result = database.fetch_one(query)\n    external_data = requests.get(f\"https://api.example.com/users/{user_id}\").json()\n    return {**db_result, **external_data}"
+        }
+      ]
+    },
+    {
+      "name": "Python 3.12 基本规范",
+      "description": "使用Python 3.12的最新特性和最佳实践",
+      "pattern": "遵循Python 3.12规范",
+      "examples": [
+        {
+          "good": "# 使用Python 3.12的模式匹配\ndef process_data(data):\n    match data:\n        case {'type': 'user', 'id': id}:\n            return get_user(id)\n        case {'type': 'product', 'id': id}:\n            return get_product(id)\n        case _:\n            return None",
+          "bad": "# 使用旧风格的条件判断\ndef process_data(data):\n    if 'type' in data and data['type'] == 'user' and 'id' in data:\n        return get_user(data['id'])\n    elif 'type' in data and data['type'] == 'product' and 'id' in data:\n        return get_product(data['id'])\n    else:\n        return None"
+        }
+      ]
+    },
+    {
+      "name": "使用Poetry依赖管理",
+      "description": "项目应使用Poetry进行依赖管理，而不是pip或其他工具",
+      "pattern": "使用Poetry管理项目依赖",
+      "examples": [
+        {
+          "good": "# pyproject.toml\n[tool.poetry]\nname = \"my-project\"\nversion = \"0.1.0\"\n\n[tool.poetry.dependencies]\npython = \"^3.12\"\nfastapi = \"^0.104.0\"\n\n[tool.poetry.dev-dependencies]\npylint = \"^2.17.5\"\npytest = \"^7.4.0\"",
+          "bad": "# requirements.txt\nfastapi==0.104.0\nuvicorn==0.23.2\npylint==2.17.5\npytest==7.4.0"
+        }
+      ]
+    },
+    {
+      "name": "FastAPI辅助库使用",
+      "description": "使用FastAPI生态系统中的推荐辅助库",
+      "pattern": "使用FastAPI推荐的辅助库",
+      "examples": [
+        {
+          "good": "from fastapi import FastAPI, Depends\nfrom fastapi_users import FastAPIUsers\nfrom fastapi_jwt_auth import AuthJWT\nfrom fastapi_cache import FastAPICache\nfrom fastapi_pagination import Page, add_pagination",
+          "bad": "# 使用自定义实现而非标准库\nfrom fastapi import FastAPI\n\napp = FastAPI()\n\nclass CustomAuth:\n    # 自定义认证实现\n    pass"
+        }
+      ]
+    },
+    {
+      "name": "Django MVT模式",
+      "description": "遵循Django的Model-View-Template设计模式",
+      "pattern": "严格遵循Django的MVT模式",
+      "examples": [
+        {
+          "good": "# models.py\nfrom django.db import models\n\nclass Product(models.Model):\n    name = models.CharField(max_length=100)\n    price = models.DecimalField(max_digits=10, decimal_places=2)\n\n# views.py\nfrom django.views.generic import ListView\nfrom .models import Product\n\nclass ProductListView(ListView):\n    model = Product\n    template_name = 'products/list.html'",
+          "bad": "# views.py - 混合了模型定义和视图逻辑\nfrom django.shortcuts import render\nfrom django.db import models\n\nclass Product(models.Model):\n    name = models.CharField(max_length=100)\n    \ndef product_list(request):\n    products = Product.objects.all()\n    return render(request, 'products/list.html', {'products': products})"
+        }
+      ]
+    },
+    {
+      "name": "Django ORM优化",
+      "description": "使用Django ORM的select_related和prefetch_related优化查询性能",
+      "pattern": "优化Django ORM查询",
+      "examples": [
+        {
+          "good": "# 优化的查询 - 预加载相关对象\nproducts = Product.objects.select_related('category').prefetch_related('tags').all()\n\n# 遍历时不会产生额外查询\nfor product in products:\n    print(f\"{product.name} - {product.category.name}\")\n    print(f\"Tags: {', '.join(tag.name for tag in product.tags.all())}\")",
+          "bad": "# 未优化的查询 - 导致N+1问题\nproducts = Product.objects.all()\n\n# 每次访问关联对象都会产生新的数据库查询\nfor product in products:\n    print(f\"{product.name} - {product.category.name}\")\n    print(f\"Tags: {', '.join(tag.name for tag in product.tags.all())}\")"
+        }
+      ]
+    },
+    {
+      "name": "使用类型提示",
+      "description": "使用类型提示提高代码可读性和可维护性",
+      "pattern": "为所有函数和变量添加类型提示",
+      "examples": [
+        {
+          "good": "from typing import List, Dict, Optional\n\ndef get_user_data(user_id: int) -> Dict[str, any]:\n    user: Optional[User] = User.objects.filter(id=user_id).first()\n    if not user:\n        return {}\n    return {\"id\": user.id, \"name\": user.name}",
+          "bad": "def get_user_data(user_id):\n    user = User.objects.filter(id=user_id).first()\n    if not user:\n        return {}\n    return {\"id\": user.id, \"name\": user.name}"
+        }
+      ]
+    },
+    {
+      "name": "使用列表推导式",
+      "description": "优先使用列表推导式而非传统循环创建列表",
+      "pattern": "适当情况下使用列表推导式",
+      "examples": [
+        {
+          "good": "# 使用列表推导式\neven_numbers = [x for x in range(10) if x % 2 == 0]\n\n# 使用生成器表达式处理大量数据\nsum_of_squares = sum(x*x for x in range(10000))",
+          "bad": "# 使用传统循环\neven_numbers = []\nfor x in range(10):\n    if x % 2 == 0:\n        even_numbers.append(x)\n\n# 不必要地创建全部列表\nsum_of_squares = sum([x*x for x in range(10000)])"
+        }
+      ]
+    },
+    {
+      "name": "使用虚拟环境",
+      "description": "使用虚拟环境隔离项目依赖",
+      "pattern": "每个项目使用独立的虚拟环境",
+      "examples": [
+        {
+          "good": "# 使用Poetry创建和管理虚拟环境\n$ poetry new my-project\n$ cd my-project\n$ poetry add fastapi uvicorn\n$ poetry run python -m app",
+          "bad": "# 不使用虚拟环境\n$ pip install fastapi uvicorn\n$ python -m app"
+        }
+      ]
+    },
+    {
+      "name": "文件头部注释风格",
+      "description": "使用一致的文件头部注释风格",
+      "pattern": "每个源文件开头应有一致的注释风格",
+      "examples": [
+        {
+          "good": "#!/usr/bin/env python3\n# -*- coding: utf-8 -*-\n\"\"\"\n文件名称: users_api.py\n创建日期: 2023-10-01\n作者: 开发团队\n描述: 用户API相关功能的实现\n\"\"\"\n\nimport os\nimport json\n\nfrom fastapi import APIRouter",
+          "bad": "import os\nimport json\n\nfrom fastapi import APIRouter\n\n# 这个文件处理用户API"
+        }
+      ]
+    }
+   
+  ]
+} 

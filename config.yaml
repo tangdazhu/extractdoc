@@ -1,0 +1,3 @@
+input_directory: "his_pic"
+output_filename: "extracted_text.docx"
+log_file: "app.log" 
