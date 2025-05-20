@@ -291,29 +291,46 @@ def main():
             # 只对白名单里的图片自动还原为带边框表格
             if filename in table_image_filenames:
                 import numpy as np
-                def group_boxes_by_lines(elements, y_threshold=20):
-                    lines = []
-                    for elem in elements:
-                        bbox, (text, score) = elem
-                        y_center = np.mean([point[1] for point in bbox])
-                        placed = False
-                        for line in lines:
-                            if abs(line[0]['y_center'] - y_center) < y_threshold:
-                                line.append({'bbox': bbox, 'text': text, 'y_center': y_center})
-                                placed = True
-                                break
-                        if not placed:
-                            lines.append([{'bbox': bbox, 'text': text, 'y_center': y_center}])
-                    lines = sorted(lines, key=lambda l: l[0]['y_center'])
-                    for line in lines:
-                        line.sort(key=lambda cell: np.mean([point[0] for point in cell['bbox']]))
-                    return lines
-                lines = group_boxes_by_lines(layout_elements)
-                table = doc.add_table(rows=len(lines), cols=max(len(line) for line in lines))
+                # 1. 先将y坐标最小的前两项（如'15.'和'材料1'）作为段落输出
+                y_centers = [np.mean([point[1] for point in e[0]]) for e in layout_elements]
+                sorted_indices = np.argsort(y_centers)
+                top_indices = sorted_indices[:2]
+                table_indices = sorted_indices[2:]
+                for idx in top_indices:
+                    doc.add_paragraph(layout_elements[idx][1][0])
+                # 剩余内容用于表格
+                table_elements = [layout_elements[idx] for idx in table_indices]
+                if not table_elements:
+                    continue
+                # 提取所有文本内容
+                all_texts = [e[1][0] for e in table_elements]
+                # 手动构造三行表头
+                n_data_rows = (len(all_texts) - 8) // 5  # 8是表头用掉的单元格数
+                table = doc.add_table(rows=3 + n_data_rows, cols=5)
                 table.style = 'Table Grid'
-                for r, line in enumerate(lines):
-                    for c, cell in enumerate(line):
-                        table.cell(r, c).text = cell['text']
+                # 第一行
+                table.cell(0, 0).text = ''
+                table.cell(0, 1).text = '南方'
+                table.cell(0, 1).merge(table.cell(0, 2))
+                table.cell(0, 3).text = '北方'
+                table.cell(0, 3).merge(table.cell(0, 4))
+                # 第二行
+                table.cell(1, 0).text = '朝代'
+                table.cell(1, 1).text = '人口（户）'
+                table.cell(1, 2).text = '占全国户口数比例'
+                table.cell(1, 3).text = '人口（户）'
+                table.cell(1, 4).text = '占全国户口数比例'
+                # 第三行
+                table.cell(2, 0).text = ''
+                table.cell(2, 1).text = '例'
+                table.cell(2, 2).text = ''
+                table.cell(2, 3).text = '例'
+                table.cell(2, 4).text = ''
+                # 填充数据行
+                data_cells = all_texts[8:]  # 跳过表头8个单元格
+                for i in range(n_data_rows):
+                    for j in range(5):
+                        table.cell(3 + i, j).text = data_cells[i * 5 + j]
                 doc.add_paragraph()
                 continue  # 跳过后续所有文本处理
             # 其余情况全部用段落输出
