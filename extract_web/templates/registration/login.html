@@ -1,0 +1,45 @@
+{# templates/registration/login.html #}
+{% extends "converter/base.html" %} {# Assuming you'll have a base.html in your app for consistent styling #}
+
+{% block title %}登录{% endblock %}
+
+{% block content %}
+<div style="max-width: 400px; margin: 50px auto; padding: 20px; border: 1px solid #ccc; border-radius: 8px; background-color: #f9f9f9;">
+    <h2 style="text-align: center; margin-bottom: 20px;">用户登录</h2>
+    
+    {% if form.errors %}
+        <p style="color: red; text-align: center;">您的用户名和密码不匹配。请重试。</p>
+    {% endif %}
+    
+    {% if next %}
+        {% if user.is_authenticated %}
+            <p style="text-align: center;">您的账户无权访问此页面。要继续，请使用有权访问的账户登录。</p>
+        {% else %}
+            <p style="text-align: center;">请登录以查看此页面。</p>
+        {% endif %}
+    {% endif %}
+    
+    <form method="post" action="{% url 'login' %}">
+        {% csrf_token %}
+        <div style="margin-bottom: 15px;">
+            <label for="id_username">用户名:</label>
+            {{ form.username }}
+        </div>
+        <div style="margin-bottom: 15px;">
+            <label for="id_password">密码:</label>
+            {{ form.password }}
+        </div>
+        <div style="text-align: center; margin-top: 20px;">
+            <button type="submit" style="padding: 10px 20px; background-color: #007bff; color: white; border: none; border-radius: 4px; cursor: pointer;">登录</button>
+        </div>
+        <input type="hidden" name="next" value="{{ next }}">
+    </form>
+    
+    <p style="text-align: center; margin-top: 20px;">
+        <a href="{% url 'password_reset' %}" style="color: #007bff;">忘记密码?</a>
+    </p>
+    <p style="text-align: center; margin-top: 10px;">
+        还没有账户? <a href="#" style="color: #007bff;">注册</a> {# Placeholder for registration URL #}
+    </p>
+</div>
+{% endblock %} 

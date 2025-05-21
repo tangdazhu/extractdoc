@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}文本转换器{% endblock %}</title>
+    <style>
+        body { font-family: sans-serif; margin: 0; background-color: #f4f4f9; color: #333; }
+        .header {
+            background-color: #fff;
+            padding: 10px 20px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .header h1 a { color: #333; text-decoration: none; font-size: 24px; }
+        .header .user-actions a {
+            margin-left: 15px;
+            color: #007bff;
+            text-decoration: none;
+            font-size: 14px;
+        }
+        .header .user-actions a:hover { text-decoration: underline; }
+        .content {
+            padding: 20px;
+        }
+        /* Basic styling for form elements often inherited by auth forms */
+        input[type="text"], input[type="password"], input[type="email"] {
+            width: calc(100% - 22px); /* Account for padding and border */
+            padding: 10px;
+            margin-top: 5px;
+            margin-bottom: 10px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            box-sizing: border-box;
+        }
+        label {
+            font-weight: bold;
+            display: block;
+        }
+    </style>
+    {% block extra_head %}{% endblock %}
+</head>
+<body>
+    <div class="header">
+        <h1><a href="{% url 'converter:index' %}">文本转换器</a></h1>
+        <div class="user-actions">
+            {% if user.is_authenticated %}
+                {% if user.is_superuser %}
+                    <a href="{% url 'admin:index' %}">管理控制台</a>
+                {% endif %}
+                <a href="#">历史转换记录</a> {# Placeholder #}
+                <a href="{% url 'logout' %}">登出 ({{ user.username }})</a>
+            {% else %}
+                <a href="#">注册</a> {# Placeholder, will be a URL to registration page #}
+                <a href="{% url 'login' %}">登录</a>
+            {% endif %}
+        </div>
+    </div>
+
+    <div class="content">
+        {% block content %}
+        {% endblock %}
+    </div>
+
+    {% block extra_js %}{% endblock %}
+</body>
+</html> 
