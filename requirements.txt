@@ -1,7 +1,8 @@
-PyYAML==6.0.1
-paddleocr==2.7.3
-pillow==10.3.0
-python-docx==1.1.2
-beautifulsoup4==4.12.3
-numpy==1.26.4
-protobuf==3.20.3 
+# 必需依赖包
+PyYAML==6.0.1         # 配置文件解析
+paddleocr==2.7.3      # OCR文字识别
+pillow==10.3.0        # 图像处理
+python-docx==1.1.2    # Word文档生成
+beautifulsoup4==4.12.3 # HTML表格辅助解析
+numpy==1.26.4         # 数值计算辅助
+protobuf==3.20.3      # paddleocr依赖 
