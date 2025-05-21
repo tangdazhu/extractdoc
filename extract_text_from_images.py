@@ -242,6 +242,64 @@ def natural_sort_key(s):
     """Sort strings with numbers in natural order (1.jpg, 2.jpg, ..., 10.jpg)."""
     return [int(text) if text.isdigit() else text.lower() for text in re.split(r'(\d+)', s)]
 
+# ====== 特殊表格处理函数注册表及实现 ======
+def handle_table_6jpg(doc, layout_elements):
+    import numpy as np
+    # 1. 先输出"15."和"材料1"为段落
+    y_centers = [np.mean([point[1] for point in e[0]]) for e in layout_elements]
+    sorted_indices = np.argsort(y_centers)
+    top_indices = sorted_indices[:2]
+    for idx in top_indices:
+        doc.add_paragraph(layout_elements[idx][1][0])
+    # 2. 遍历OCR结果，找到"西汉""唐代""北宋"各自的索引
+    ocr_texts = [e[1][0] for e in layout_elements]
+    dynasty_indices = []
+    for dynasty in ['西汉', '唐代', '北宋']:
+        try:
+            idx = ocr_texts.index(dynasty)
+            dynasty_indices.append(idx)
+        except ValueError:
+            pass
+    # 3. 构造表头两行
+    table = doc.add_table(rows=2 + len(dynasty_indices), cols=5)
+    table.style = 'Table Grid'
+    # 第一行
+    table.cell(0, 0).text = ''
+    table.cell(0, 1).text = '南方'
+    table.cell(0, 1).merge(table.cell(0, 2))
+    table.cell(0, 3).text = '北方'
+    table.cell(0, 3).merge(table.cell(0, 4))
+    # 第二行
+    table.cell(1, 0).text = '朝代'
+    table.cell(1, 1).text = '人口（户）'
+    table.cell(1, 2).text = '占全国户口数比例'
+    table.cell(1, 3).text = '人口（户）'
+    table.cell(1, 4).text = '占全国户口数比例'
+    # 4. 依次填入三行数据
+    for row, idx in enumerate(dynasty_indices):
+        row_cells = ocr_texts[idx:idx+6]  # 朝代+5个数据
+        for col in range(6):
+            if col < len(row_cells) and col < 6:
+                if col < 5:
+                    table.cell(2 + row, col).text = row_cells[col]
+    doc.add_paragraph()
+    # 5. 只输出表格最后一个数据单元格（如'37.1%'）之后的内容为段落
+    try:
+        last_table_idx = ocr_texts.index('37.1%')
+    except ValueError:
+        last_table_idx = max(idx+5 for idx in dynasty_indices) if dynasty_indices else -1
+    for i, text in enumerate(ocr_texts):
+        if i > last_table_idx:
+            doc.add_paragraph(text)
+
+special_table_handlers = {
+    "6.jpg": handle_table_6jpg,
+    # 未来可继续添加更多特殊表格图片
+}
+#所有特殊表格图片的处理逻辑都通过 special_table_handlers 字典注册，key为图片文件名，value为处理函数。
+#6.jpg 的特殊还原逻辑已封装为 handle_table_6jpg，未来只需新增类似函数并注册即可。
+#主循环自动分发，无需写一堆 if-else，结构清晰，易于维护和扩展。
+# #非特殊图片自动走通用表格还原逻辑。
 def main():
     global logger # Declare logger as global to assign the initialized logger
 
@@ -283,7 +341,6 @@ def main():
     
     logger.info(f"Found {len(image_files)} image(s) to process.")
 
-    table_image_filenames = {"6.jpg"}  # 只对这些图片自动还原为表格
     for image_idx, image_path in enumerate(image_files):
         filename = os.path.basename(image_path)
         doc.add_heading(f"Content from {filename}", level=1)
@@ -295,160 +352,52 @@ def main():
             logger.warning(f"No content elements extracted from {filename}.")
             doc.add_paragraph(f"[No content could be extracted from {filename}]\n")
         else:
-            # 只对白名单里的图片自动还原为带边框表格
-            if filename in table_image_filenames:
-                import numpy as np
-                # 1. 先输出"15."和"材料1"为段落
-                y_centers = [np.mean([point[1] for point in e[0]]) for e in layout_elements]
-                sorted_indices = np.argsort(y_centers)
-                top_indices = sorted_indices[:2]
-                for idx in top_indices:
-                    doc.add_paragraph(layout_elements[idx][1][0])
-                # 2. 遍历OCR结果，找到"西汉""唐代""北宋"各自的索引
-                ocr_texts = [e[1][0] for e in layout_elements]
-                dynasty_indices = []
-                for dynasty in ['西汉', '唐代', '北宋']:
-                    try:
-                        idx = ocr_texts.index(dynasty)
-                        dynasty_indices.append(idx)
-                    except ValueError:
-                        pass
-                # 3. 构造表头两行
-                table = doc.add_table(rows=2 + len(dynasty_indices), cols=5)
-                table.style = 'Table Grid'
-                # 第一行
-                table.cell(0, 0).text = ''
-                table.cell(0, 1).text = '南方'
-                table.cell(0, 1).merge(table.cell(0, 2))
-                table.cell(0, 3).text = '北方'
-                table.cell(0, 3).merge(table.cell(0, 4))
-                # 第二行
-                table.cell(1, 0).text = '朝代'
-                table.cell(1, 1).text = '人口（户）'
-                table.cell(1, 2).text = '占全国户口数比例'
-                table.cell(1, 3).text = '人口（户）'
-                table.cell(1, 4).text = '占全国户口数比例'
-                # 4. 依次填入三行数据
-                for row, idx in enumerate(dynasty_indices):
-                    row_cells = ocr_texts[idx:idx+6]  # 朝代+5个数据
-                    for col in range(6):
-                        if col < len(row_cells) and col < 6:
-                            if col < 5:
-                                table.cell(2 + row, col).text = row_cells[col]
-                doc.add_paragraph()
-                # 5. 其余内容全部用段落输出
-                used_indices = set()
-                for idx in top_indices:
-                    used_indices.add(idx)
-                for idx in dynasty_indices:
-                    used_indices.update(range(idx, idx+6))
-                header_texts = {'南方', '北方', '朝代', '人口（户）', '占全国户口数比例', '例'}
-                # 只输出表格最后一个数据单元格（如'37.1%'）之后的内容为段落
-                try:
-                    last_table_idx = ocr_texts.index('37.1%')
-                except ValueError:
-                    last_table_idx = max(used_indices) if used_indices else -1
-                for i, text in enumerate(ocr_texts):
-                    if i > last_table_idx:
-                        doc.add_paragraph(text)
+            if filename in special_table_handlers:
+                # ====== 特殊表格处理注册表自动分发 ======
+                special_table_handlers[filename](doc, layout_elements)
                 continue  # 跳过后续所有文本处理
-            # 其余情况全部用段落输出
+            # ====== 通用表格自动还原逻辑 ======
+            has_table = False
             for element in layout_elements:
-                # Check if the element is in the expected dictionary format for layout analysis
-                if isinstance(element, dict):
-                    element_type = element.get('type', '').lower()
-                    # logger.debug(f"Layout Element (dict): {element}")
-
-                    if element_type == 'table':
-                        html_content = element.get('res', {}).get('html')
-                        if html_content:
-                            logger.info(f"Found table in {filename}. Attempting to add to document.")
-                            try:
-                                add_table_from_html_to_docx(doc, html_content)
-                                doc.add_paragraph() 
-                            except Exception as e:
-                                logger.error(f"Failed to add table from HTML for {filename}: {e}", exc_info=True)
-                                doc.add_paragraph(f"[Error processing table from {filename}. Falling back to text extraction.]")
-                                raw_text_from_table = []
-                                if isinstance(element.get('res'), dict) and 'cells' in element.get('res', {}):
-                                    for cell_data in element.get('res', {}).get('cells', []):
-                                        if isinstance(cell_data, dict) and 'text' in cell_data:
-                                            # Ensure cell_data['text'] is a list of strings, or a single string
-                                            cell_text_content = cell_data['text']
-                                            if isinstance(cell_text_content, list):
-                                                raw_text_from_table.extend(cell_text_content)
-                                            elif isinstance(cell_text_content, str):
-                                                raw_text_from_table.append(cell_text_content)
-                                if raw_text_from_table:
-                                    text_to_add = '\n'.join(raw_text_from_table)
-                                    paragraphs = segment_text(text_to_add)
-                                    for p_text in paragraphs: doc.add_paragraph(p_text)
-                                else:
-                                    doc.add_paragraph("[Could not extract fallback text from table structure]")
-                        else:
-                            logger.warning(f"Table element found in {filename} but no HTML content. Treating as text.")
+                if isinstance(element, dict) and element.get('type', '').lower() == 'table':
+                    html_content = element.get('res', {}).get('html')
+                    if html_content:
+                        logger.info(f"检测到通用表格，自动还原为Word表格: {filename}")
+                        add_table_from_html_to_docx(doc, html_content)
+                        doc.add_paragraph()
+                        has_table = True
+            if not has_table:
+                # 没有检测到表格，按普通段落输出
+                for element in layout_elements:
+                    if isinstance(element, dict):
+                        element_type = element.get('type', '').lower()
+                        if element_type == 'text':
                             text_content_list = element.get('res')
                             extracted_lines = []
                             if isinstance(text_content_list, list):
                                 for item in text_content_list:
                                     if isinstance(item, tuple) and len(item) == 2:
-                                        if isinstance(item[1], tuple) and len(item[1]) == 2: extracted_lines.append(item[1][0])
-                                        elif isinstance(item[0], str): extracted_lines.append(item[0])
-                                    elif isinstance(item, str): extracted_lines.append(item)
+                                        if isinstance(item[1], tuple) and len(item[1]) == 2:
+                                            extracted_lines.append(item[1][0])
+                                        elif isinstance(item[0], str):
+                                            extracted_lines.append(item[0])
+                                    elif isinstance(item, str):
+                                        extracted_lines.append(item)
                             elif isinstance(text_content_list, tuple) and len(text_content_list) == 2 and isinstance(text_content_list[0], str):
                                 extracted_lines.append(text_content_list[0])
-                            
                             if extracted_lines:
                                 full_text = '\n'.join(extracted_lines)
                                 paragraphs = segment_text(full_text)
-                                for paragraph_text in paragraphs: doc.add_paragraph(paragraph_text)
-                            else:
-                                doc.add_paragraph(f"[Table detected in {filename}, but no parsable content found.]")
-
-                    elif element_type == 'text':
-                        text_content_list = element.get('res')
-                        extracted_lines = []
-                        if isinstance(text_content_list, list):
-                            for item in text_content_list:
-                                if isinstance(item, tuple) and len(item) == 2:
-                                    if isinstance(item[1], tuple) and len(item[1]) == 2:
-                                        extracted_lines.append(item[1][0])
-                                    elif isinstance(item[0], str):
-                                         extracted_lines.append(item[0])
-                                elif isinstance(item, str):
-                                    extracted_lines.append(item)
-                        elif isinstance(text_content_list, tuple) and len(text_content_list) == 2 and isinstance(text_content_list[0], str):
-                             extracted_lines.append(text_content_list[0])
-                        # else: logger.warning(f"Text element in {filename} has unexpected 'res' format: {type(text_content_list)}")
-                        
-                        if extracted_lines:
-                            full_text = '\n'.join(extracted_lines)
-                            paragraphs = segment_text(full_text)
-                            for paragraph_text in paragraphs: doc.add_paragraph(paragraph_text)
-
-                    elif element_type == 'figure':
-                        logger.info(f"Figure detected in {filename}, placeholder added.")
-                        doc.add_paragraph(f"[Figure detected in {filename} - content not extracted]")
-                    # else: logger.info(f"Unhandled layout element type '{element_type}' in {filename}.")
-                
-                # Handle case where element is a list (e.g., [bbox, (text, score)]) from non-layout or failed layout OCR
-                elif isinstance(element, list) and len(element) == 2:
-                    # Assuming it matches [bbox, (text, score)] structure
-                    # logger.debug(f"Layout Element (list - likely text line): {element}")
-                    text_tuple = element[1]
-                    if isinstance(text_tuple, tuple) and len(text_tuple) == 2 and isinstance(text_tuple[0], str):
-                        text_line = text_tuple[0]
-                        if text_line.strip(): # Add if there is actual text
-                            # Here, we treat each such list as a single line of text.
-                            # For multiple lines, they should appear as separate elements in layout_elements.
-                            paragraphs = segment_text(text_line) # segment_text expects a block of text
-                            for paragraph_text in paragraphs:
-                                doc.add_paragraph(paragraph_text)
-                    # else: logger.warning(f"Skipping list element in layout_elements, unexpected structure: {str(element)[:100]}")
-                
-                # else:
-                    # if logger:
-                        # logger.warning(f"Skipping element of unexpected type in layout_elements: {type(element)} - {str(element)[:100]}")
+                                for paragraph_text in paragraphs:
+                                    doc.add_paragraph(paragraph_text)
+                    elif isinstance(element, list) and len(element) == 2:
+                        text_tuple = element[1]
+                        if isinstance(text_tuple, tuple) and len(text_tuple) == 2 and isinstance(text_tuple[0], str):
+                            text_line = text_tuple[0]
+                            if text_line.strip():
+                                paragraphs = segment_text(text_line)
+                                for paragraph_text in paragraphs:
+                                    doc.add_paragraph(paragraph_text)
 
         if image_idx < len(image_files) - 1: # Add page break if not the last image
             doc.add_page_break()
