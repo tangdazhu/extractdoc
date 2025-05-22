@@ -10,4 +10,5 @@ urlpatterns = [
     path("admin-console/file-management/", views.admin_file_management, name="admin_file_management"),
     path("admin-console/user/delete/<int:user_id>/", views.admin_delete_user, name="admin_delete_user"),
     path("admin-console/user/edit/<int:user_id>/", views.admin_edit_user, name="admin_edit_user"),
+    path("process-image-to-word/", views.process_image_to_word_view, name="process_image_to_word"),
 ] 

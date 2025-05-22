@@ -8,6 +8,7 @@
 import os
 import glob
 import re
+import sys # Added to access command line arguments
 
 # import yaml # No longer needed here
 # import logging # No longer needed here, managed by utils
@@ -356,14 +357,13 @@ special_table_handlers = {
 # 6.jpg 的特殊还原逻辑已封装为 handle_table_6jpg，未来只需新增类似函数并注册即可。
 # 主循环自动分发，无需写一堆 if-else，结构清晰，易于维护和扩展。
 # #非特殊图片自动走通用表格还原逻辑。
-def main():
+def main(input_image_path_arg=None, output_docx_path_arg=None):
     global logger  # Declare logger as global to assign the initialized logger
 
     # Load configuration using the utility function
     config = load_config()  # Uses new function from utils
 
     # Setup logging using the utility function, providing the logger name from config or a default
-    # The logger name in utils.py defaults to 'app_logger', which is fine.
     logger_name = config.get(
         "logger_name", "ocr_app"
     )  # Example: allow configuring logger name
@@ -395,21 +395,38 @@ def main():
 
     logger.info("Using PaddleOCR for Chinese text recognition...")
 
-    input_dir = config.get("input_directory", "his_pic")
-    logger.info(f"Looking for JPG images in directory: '{input_dir}'")
+    image_files_to_process = []
+    output_file_path = output_docx_path_arg # Use argument if provided
 
-    image_files = glob.glob(os.path.join(input_dir, "*.jpg"))
-    image_files.sort(key=natural_sort_key)
+    if input_image_path_arg and output_docx_path_arg:
+        logger.info(f"Processing single image from argument: {input_image_path_arg}")
+        if os.path.exists(input_image_path_arg):
+            image_files_to_process.append(input_image_path_arg)
+        else:
+            logger.error(f"Input image from argument not found: {input_image_path_arg}")
+            return # Exit if the specified image doesn't exist
+    else:
+        logger.info("No single image path provided via argument, falling back to config directory scan.")
+        input_dir = config.get("input_directory", "his_pic")
+        logger.info(f"Looking for JPG images in directory: '{input_dir}'")
+        image_files_to_process = glob.glob(os.path.join(input_dir, "*.jpg"))
+        image_files_to_process.sort(key=natural_sort_key)
+        output_file_path = config.get("output_filename", "extracted_text.docx") # Use config output for multi-file
 
-    if not image_files:
-        logger.warning(f"No JPG files found in the '{input_dir}' directory.")
+    if not image_files_to_process:
+        logger.warning(f"No JPG files found to process.")
+        # If called with specific args and file not found, we would have returned already.
+        # This warning now primarily covers the directory scan scenario.
         return
 
-    logger.info(f"Found {len(image_files)} image(s) to process.")
+    logger.info(f"Found {len(image_files_to_process)} image(s) to process.")
 
-    for image_idx, image_path in enumerate(image_files):
+    for image_idx, image_path in enumerate(image_files_to_process):
         filename = os.path.basename(image_path)
-        doc.add_heading(f"Content from {filename}", level=1)
+        # If processing multiple files (not from args), add heading and page break
+        if not (input_image_path_arg and output_docx_path_arg):
+            doc.add_heading(f"Content from {filename}", level=1)
+        
         logger.info(f"Processing {filename}...")
 
         layout_elements = extract_layout_elements(image_path, ocr)
@@ -419,78 +436,85 @@ def main():
             doc.add_paragraph(f"[No content could be extracted from {filename}]\n")
         else:
             if filename in special_table_handlers:
-                # ====== 特殊表格处理注册表自动分发 ======
                 special_table_handlers[filename](doc, layout_elements)
-                continue  # 跳过后续所有文本处理
-            # ====== 通用表格自动还原逻辑 ======
-            has_table = False
-            for element in layout_elements:
-                if (
-                    isinstance(element, dict)
-                    and element.get("type", "").lower() == "table"
-                ):
-                    html_content = element.get("res", {}).get("html")
-                    if html_content:
-                        logger.info(f"检测到通用表格，自动还原为Word表格: {filename}")
-                        add_table_from_html_to_docx(doc, html_content)
-                        doc.add_paragraph()
-                        has_table = True
-            if not has_table:
-                # 没有检测到表格，按普通段落输出
+            else: # Generic table/text processing
+                has_table = False
                 for element in layout_elements:
-                    if isinstance(element, dict):
-                        element_type = element.get("type", "").lower()
-                        if element_type == "text":
-                            text_content_list = element.get("res")
-                            extracted_lines = []
-                            if isinstance(text_content_list, list):
-                                for item in text_content_list:
-                                    if isinstance(item, tuple) and len(item) == 2:
-                                        if (
-                                            isinstance(item[1], tuple)
-                                            and len(item[1]) == 2
-                                        ):
-                                            extracted_lines.append(item[1][0])
-                                        elif isinstance(item[0], str):
-                                            extracted_lines.append(item[0])
-                                    elif isinstance(item, str):
-                                        extracted_lines.append(item)
-                            elif (
-                                isinstance(text_content_list, tuple)
-                                and len(text_content_list) == 2
-                                and isinstance(text_content_list[0], str)
+                    if (
+                        isinstance(element, dict)
+                        and element.get("type", "").lower() == "table"
+                    ):
+                        html_content = element.get("res", {}).get("html")
+                        if html_content:
+                            logger.info(f"检测到通用表格，自动还原为Word表格: {filename}")
+                            add_table_from_html_to_docx(doc, html_content)
+                            doc.add_paragraph()
+                            has_table = True
+                if not has_table:
+                    # 没有检测到表格，按普通段落输出
+                    for element in layout_elements:
+                        if isinstance(element, dict):
+                            element_type = element.get("type", "").lower()
+                            if element_type == "text":
+                                text_content_list = element.get("res")
+                                extracted_lines = []
+                                if isinstance(text_content_list, list):
+                                    for item in text_content_list:
+                                        if isinstance(item, tuple) and len(item) == 2:
+                                            if (
+                                                isinstance(item[1], tuple)
+                                                and len(item[1]) == 2
+                                            ):
+                                                extracted_lines.append(item[1][0])
+                                            elif isinstance(item[0], str):
+                                                extracted_lines.append(item[0])
+                                        elif isinstance(item, str):
+                                            extracted_lines.append(item)
+                                elif (
+                                    isinstance(text_content_list, tuple)
+                                    and len(text_content_list) == 2
+                                    and isinstance(text_content_list[0], str)
+                                ):
+                                    extracted_lines.append(text_content_list[0])
+                                if extracted_lines:
+                                    full_text = "\n".join(extracted_lines)
+                                    paragraphs = segment_text(full_text)
+                                    for paragraph_text in paragraphs:
+                                        doc.add_paragraph(paragraph_text)
+                        elif isinstance(element, list) and len(element) == 2:
+                            text_tuple = element[1]
+                            if (
+                                isinstance(text_tuple, tuple)
+                                and len(text_tuple) == 2
+                                and isinstance(text_tuple[0], str)
                             ):
-                                extracted_lines.append(text_content_list[0])
-                            if extracted_lines:
-                                full_text = "\n".join(extracted_lines)
-                                paragraphs = segment_text(full_text)
-                                for paragraph_text in paragraphs:
-                                    doc.add_paragraph(paragraph_text)
-                    elif isinstance(element, list) and len(element) == 2:
-                        text_tuple = element[1]
-                        if (
-                            isinstance(text_tuple, tuple)
-                            and len(text_tuple) == 2
-                            and isinstance(text_tuple[0], str)
-                        ):
-                            text_line = text_tuple[0]
-                            if text_line.strip():
-                                paragraphs = segment_text(text_line)
-                                for paragraph_text in paragraphs:
-                                    doc.add_paragraph(paragraph_text)
+                                text_line = text_tuple[0]
+                                if text_line.strip():
+                                    paragraphs = segment_text(text_line)
+                                    for paragraph_text in paragraphs:
+                                        doc.add_paragraph(paragraph_text)
 
-        if image_idx < len(image_files) - 1:  # Add page break if not the last image
+        # If processing multiple files (not from args) and not the last image, add page break
+        if not (input_image_path_arg and output_docx_path_arg) and image_idx < len(image_files_to_process) - 1:
             doc.add_page_break()
 
-    output_file = config.get("output_filename", "extracted_text.docx")
     try:
-        doc.save(output_file)
-        logger.info(f"Content extraction complete. Document saved as '{output_file}'")
+        doc.save(output_file_path) # Use determined output_file_path
+        logger.info(f"Content extraction complete. Document saved as '{output_file_path}'")
     except Exception as e:
-        logger.error(f"Error saving document '{output_file}': {e}", exc_info=True)
+        logger.error(f"Error saving document '{output_file_path}': {e}", exc_info=True)
 
     logger.info("Script finished.")
 
 
 if __name__ == "__main__":
-    main()
+    # Check for command-line arguments
+    if len(sys.argv) == 3:
+        input_path = sys.argv[1]
+        output_path = sys.argv[2]
+        main(input_image_path_arg=input_path, output_docx_path_arg=output_path)
+    elif len(sys.argv) == 1:
+        main() # Run with default behavior (scan directory from config)
+    else:
+        print("Usage: python extract_text_from_images.py [<input_image_path> <output_docx_path>]")
+        sys.exit(1)
