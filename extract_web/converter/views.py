@@ -18,6 +18,7 @@ from docx.oxml import OxmlElement # For adding content from sub-documents
 from docx.oxml.ns import qn
 from pathlib import Path # 新增
 from datetime import datetime # 新增 datetime
+from django.urls import reverse
 
 # 尝试导入 docx2pdf，如果失败则记录错误，但脚本仍可生成docx
 try:
@@ -247,9 +248,7 @@ def process_images_view(request): # 重命名视图函数
         logger.debug(f"Attempting to merge {len(temp_files_for_script_processing)} DOCX files for date {today_date_str}.")
         random_chars = ''.join(random.choices(string.ascii_lowercase + string.digits, k=8))
         
-        # 合并后的文件名基础部分 (无扩展名)
         merged_base_filename = f"{request.user.username}_{today_date_str}_{random_chars}"
-        # 合并后的 .docx 路径 (总是先合并为 .docx)
         merged_docx_path = os.path.join(user_converted_dir, f"{merged_base_filename}.docx")
         logger.debug(f"Merged DOCX filename will be: {merged_docx_path}")
 
@@ -297,11 +296,20 @@ def process_images_view(request): # 重命名视图函数
                     messages.warning(request, "PDF转换库不可用，已生成DOCX文件。")
             
             if os.path.exists(final_merged_path):
-                relative_media_path = os.path.join(request.user.username, today_date_str, 'converted_files', final_merged_filename).replace("\\\\", "/")
+                # Save original names to a .meta file for the merged output
+                meta_file_path_merged = f"{final_merged_path}.meta"
+                merged_original_names_list = [info['original_name'] for info in temp_files_for_script_processing]
+                try:
+                    with open(meta_file_path_merged, 'w', encoding='utf-8') as mf:
+                        mf.write(",".join(merged_original_names_list))
+                    logger.info(f"Saved meta file for merged output: {meta_file_path_merged}")
+                except Exception as e:
+                    logger.error(f"Error saving .meta file {meta_file_path_merged}: {e}")
+
+                relative_media_path = os.path.join(request.user.username, today_date_str, 'converted_files', final_merged_filename).replace("\\", "/")
                 download_url = f"{settings.MEDIA_URL}{relative_media_path}"
-                merged_original_names = ", ".join([info['original_name'] for info in temp_files_for_script_processing])
                 processed_results = [{
-                    'original_name': f"Merged: {merged_original_names}",
+                    'original_name': ",".join(merged_original_names_list), # Display actual original filenames for merged result on main page
                     'converted_name': final_merged_filename,
                     'download_url': download_url,
                     'status': 'success'
@@ -347,8 +355,17 @@ def process_images_view(request): # 重命名视图函数
                         # Fallback: keep the docx and serve that if PDF fails
                         final_output_filename = f"{base_filename_no_ext}.docx"
                         final_output_path = temp_docx_for_individual_conversion # The original docx path
-                        messages.warning(request, f"文件 {original_image_name} 的PDF转换失败，已生成DOCX。")
-                        conversion_successful = True # Still successful as docx
+                        # messages.warning(request, f"文件 {original_image_name} 的PDF转换失败，已生成DOCX。") # Message already in process_images_view
+                        # conversion_successful = True # Already set in process_images_view
+
+                        # For individual files, save original name to a .meta file
+                        meta_file_path = f"{final_output_path}.meta"
+                        try:
+                            with open(meta_file_path, 'w', encoding='utf-8') as mf:
+                                mf.write(original_image_name)
+                            logger.info(f"Saved meta file for individual conversion: {meta_file_path}")
+                        except Exception as e:
+                            logger.error(f"Error saving .meta file {meta_file_path}: {e}")
                 else:
                     logger.error("PDF conversion for individual file requested, but docx2pdf not available. Serving DOCX.")
                     final_output_filename = f"{base_filename_no_ext}.docx"
@@ -372,7 +389,16 @@ def process_images_view(request): # 重命名视图函数
                     conversion_successful = True
             
             if conversion_successful and os.path.exists(final_output_path):
-                relative_media_path = os.path.join(request.user.username, today_date_str, 'converted_files', final_output_filename).replace("\\\\", "/")
+                # Save original name to a .meta file for the individual output
+                meta_file_path_individual = f"{final_output_path}.meta"
+                try:
+                    with open(meta_file_path_individual, 'w', encoding='utf-8') as mf:
+                        mf.write(original_image_name)
+                    logger.info(f"Saved meta file for individual conversion: {meta_file_path_individual}")
+                except Exception as e:
+                    logger.error(f"Error saving .meta file {meta_file_path_individual}: {e}")
+
+                relative_media_path = os.path.join(request.user.username, today_date_str, 'converted_files', final_output_filename).replace("\\", "/")
                 download_url = f"{settings.MEDIA_URL}{relative_media_path}"
                 processed_results.append({
                     'original_name': original_image_name,
@@ -383,7 +409,7 @@ def process_images_view(request): # 重命名视图函数
             elif os.path.exists(temp_docx_for_individual_conversion): # Fallback if final path doesn't exist but temp docx does
                  logger.warning(f"Final path {final_output_path} not found, but temp docx {temp_docx_for_individual_conversion} exists. Serving temp docx.")
                  final_output_filename = os.path.basename(temp_docx_for_individual_conversion)
-                 relative_media_path = os.path.join(request.user.username, today_date_str, 'converted_files', final_output_filename).replace("\\\\", "/")
+                 relative_media_path = os.path.join(request.user.username, today_date_str, 'converted_files', final_output_filename).replace("\\", "/")
                  download_url = f"{settings.MEDIA_URL}{relative_media_path}"
                  processed_results.append({
                     'original_name': original_image_name,
@@ -413,4 +439,128 @@ def process_images_view(request): # 重命名视图函数
             })
 
     logger.debug(f"Final processed_results before JsonResponse: {processed_results}")
-    return JsonResponse({'results': processed_results})
+    logger.info(f"Final processed results to be sent to client: {processed_results}")
+    return JsonResponse({'results': processed_results, 'merge_output': merge_output})
+
+@login_required
+def conversion_history_view(request):
+    user = request.user
+    user_history_base_dir = os.path.join(settings.BASE_DIR, 'his_pic', user.username)
+    
+    available_dates = []
+    if os.path.exists(user_history_base_dir):
+        for item in os.listdir(user_history_base_dir):
+            if os.path.isdir(os.path.join(user_history_base_dir, item)):
+                if len(item) == 8 and item.isdigit():
+                    available_dates.append(item)
+        available_dates.sort(reverse=True)
+
+    selected_date_str = request.GET.get('date', None)
+    converted_files_info = []
+
+    if selected_date_str and selected_date_str in available_dates:
+        date_specific_converted_dir = os.path.join(user_history_base_dir, selected_date_str, 'converted_files')
+        if os.path.exists(date_specific_converted_dir):
+            for filename in os.listdir(date_specific_converted_dir):
+                if filename.endswith('.meta'): # Skip .meta files themselves
+                    continue
+
+                file_path = os.path.join(date_specific_converted_dir, filename)
+                if os.path.isfile(file_path):
+                    original_name_display = os.path.splitext(filename)[0] # Fallback
+                    meta_file_path = f"{file_path}.meta"
+                    if os.path.exists(meta_file_path):
+                        try:
+                            with open(meta_file_path, 'r', encoding='utf-8') as mf:
+                                original_name_display = mf.read()
+                        except Exception as e:
+                            logger.error(f"Error reading .meta file {meta_file_path}: {e}")
+                    
+                    download_url = f"{settings.MEDIA_URL}{user.username}/{selected_date_str}/converted_files/{filename}"
+                    delete_url = reverse('converter:delete_converted_file', args=[selected_date_str, filename])
+
+                    converted_files_info.append({
+                        'original_name': original_name_display,
+                        'converted_name': filename,
+                        'download_url': download_url,
+                        'delete_url': delete_url, # Use the generated one, not from request
+                        'status': '已完成'
+                    })
+    
+    context = {
+        'available_dates': available_dates,
+        'selected_date': selected_date_str,
+        'converted_files': converted_files_info,
+        'page_title': '历史转换记录',
+        'current_nav': 'history'
+    }
+    return render(request, 'converter/conversion_history.html', context)
+
+@login_required
+@require_POST
+def delete_converted_file_view(request, date_str, filename):
+    user = request.user
+    file_path = os.path.join(settings.BASE_DIR, 'his_pic', user.username, date_str, 'converted_files', filename)
+    meta_file_path = f"{file_path}.meta"
+
+    file_deleted = False
+    if os.path.exists(file_path) and os.path.isfile(file_path):
+        try:
+            os.remove(file_path)
+            messages.success(request, f"文件 '{filename}' 已成功删除。")
+            logger.info(f"User {user.username} deleted file: {file_path}")
+            file_deleted = True
+            
+            # Attempt to delete corresponding .meta file
+            if os.path.exists(meta_file_path):
+                try:
+                    os.remove(meta_file_path)
+                    logger.info(f"User {user.username} deleted meta file: {meta_file_path}")
+                except OSError as e:
+                    logger.warning(f"Error deleting meta file {meta_file_path} for user {user.username}: {e}")
+            
+            # Check if the converted_files directory is now empty
+            converted_dir_path = os.path.dirname(file_path)
+            if not os.listdir(converted_dir_path):
+                try:
+                    os.rmdir(converted_dir_path)
+                    logger.info(f"Removed empty directory: {converted_dir_path}")
+                    # Check if the parent date directory is now empty (uploads might still be there)
+                    date_dir_path = os.path.dirname(converted_dir_path)
+                    # We only remove the date dir if both 'uploads' and 'converted_files' are gone or empty
+                    uploads_dir_path = os.path.join(date_dir_path, 'uploads')
+                    can_delete_date_dir = True
+                    if os.path.exists(uploads_dir_path) and os.listdir(uploads_dir_path):
+                        can_delete_date_dir = False
+                    
+                    if not os.path.exists(converted_dir_path) and not os.path.exists(uploads_dir_path): # both gone
+                         pass # can delete
+                    elif not os.path.exists(converted_dir_path) and os.path.exists(uploads_dir_path) and not os.listdir(uploads_dir_path): # converted gone, uploads empty
+                        os.rmdir(uploads_dir_path) # remove empty uploads
+                        logger.info(f"Removed empty directory: {uploads_dir_path}")
+                    elif can_delete_date_dir : # converted was removed, uploads never existed or was already removed
+                        pass
+                    else: # uploads still has content or converted_files was not empty
+                        can_delete_date_dir = False
+
+
+                    if can_delete_date_dir and not os.listdir(date_dir_path): # Check if date_dir is truly empty now
+                        os.rmdir(date_dir_path)
+                        logger.info(f"Removed empty date directory: {date_dir_path}")
+
+                except OSError as e:
+                    logger.error(f"Error removing directory for user {user.username} after file deletion: {e}")
+                    # Don't send this specific error to user, file deletion was successful.
+
+        except OSError as e:
+            messages.error(request, f"删除文件 '{filename}' 时出错: {e}")
+            logger.error(f"Error deleting file {file_path} for user {user.username}: {e}")
+    else:
+        messages.error(request, "文件未找到或无法删除。")
+        logger.warning(f"Attempt to delete non-existent file by {user.username}: {file_path}")
+
+    # Redirect to the history page, maintaining the selected date if possible
+    redirect_url = reverse('converter:conversion_history')
+    if date_str:
+        redirect_url += f'?date={date_str}'
+    return redirect(redirect_url)

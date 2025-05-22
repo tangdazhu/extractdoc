@@ -1,0 +1,172 @@
+{% extends "converter/base.html" %}
+
+{% block title %}历史转换记录 - {{ block.super }}{% endblock %}
+
+{% block content %}
+<style>
+    .history-container {
+        display: flex;
+        margin-top: 20px;
+    }
+    .history-dates {
+        width: 200px; /* Fixed width for the date navigation */
+        margin-right: 20px;
+        border-right: 1px solid #ddd;
+        padding-right: 20px;
+    }
+    .history-dates h4 {
+        margin-top: 0;
+        font-size: 1.1em;
+        color: #333;
+    }
+    .history-dates ul {
+        list-style-type: none;
+        padding-left: 0;
+    }
+    .history-dates ul li a {
+        display: block;
+        padding: 8px 10px;
+        text-decoration: none;
+        color: #007bff;
+        border-radius: 4px;
+        margin-bottom: 5px;
+    }
+    .history-dates ul li a:hover {
+        background-color: #f0f0f0;
+        text-decoration: underline;
+    }
+    .history-dates ul li a.active-date {
+        background-color: #e9ecef;
+        color: #0056b3;
+        font-weight: bold;
+    }
+    .history-files {
+        flex-grow: 1; /* Takes up the remaining space */
+    }
+    .history-files h3 {
+        margin-top: 0;
+        color: #333;
+    }
+    .files-table {
+        width: 100%;
+        border-collapse: collapse;
+        margin-top: 15px;
+    }
+    .files-table th, .files-table td {
+        border: 1px solid #ddd;
+        padding: 10px;
+        text-align: left;
+        font-size: 0.9em;
+    }
+    .files-table th {
+        background-color: #f8f9fa;
+    }
+    .no-files {
+        color: #777;
+        margin-top: 20px;
+    }
+    .delete-btn {
+        color: #dc3545;
+        text-decoration: none;
+        padding: 3px 7px;
+        border: 1px solid #dc3545;
+        border-radius: 4px;
+        font-size: 0.9em;
+    }
+    .delete-btn:hover {
+        background-color: #dc3545;
+        color: white;
+    }
+    .download-link {
+        margin-right: 10px;
+    }
+</style>
+
+<h2>历史转换记录</h2>
+<p><a href="{% url 'converter:index' %}" style="text-decoration: none;">&laquo; 返回主页</a></p>
+
+{% if messages %}
+    <div style="margin-top: 15px;">
+        {% for message in messages %}
+            <div class="alert alert-{{ message.tags }} alert-dismissible fade show" role="alert">
+                {{ message }}
+                <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+            </div>
+        {% endfor %}
+    </div>
+{% endif %}
+
+<div class="history-container">
+    <div class="history-dates">
+        {% if available_dates %}
+            <ul>
+                <li>
+                    <a href="{% url 'converter:conversion_history' %}" 
+                       class="{% if not selected_date %}active-date{% endif %}">
+                       选择日期查看记录
+                    </a>
+                </li>
+                {% for date_item in available_dates %}
+                    <li>
+                        <a href="?date={{ date_item }}" 
+                           class="{% if date_item == selected_date %}active-date{% endif %}">
+                            {{ date_item }}
+                        </a>
+                    </li>
+                {% endfor %}
+            </ul>
+        {% else %}
+            <p>暂无历史转换记录。</p>
+        {% endif %}
+    </div>
+
+    <div class="history-files">
+        {% if selected_date %}
+            <h3>转换文件</h3>
+        {% else %}
+            <h3>转换文件列表</h3>
+            <p>请从左侧选择一个日期以查看转换文件。</p>
+        {% endif %}
+
+        {% if selected_date and converted_files %}
+            <table class="files-table">
+                <thead>
+                    <tr>
+                        <th>原始文件名</th>
+                        <th>转换后文件名</th>
+                        <th>状态</th>
+                        <th>操作</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for file_info in converted_files %}
+                    <tr>
+                        <td>{{ file_info.original_name }}</td>
+                        <td>{{ file_info.converted_name }}</td>
+                        <td><span class="badge bg-success">{{ file_info.status }}</span></td>
+                        <td>
+                            <a href="{{ file_info.download_url }}" class="download-link" target="_blank" style="margin-right: 10px; text-decoration: none; color: #007bff;">下载</a>
+                            <form id="delete-form-{{ forloop.counter }}" action="{{ file_info.delete_url }}" method="post" style="display: inline;">
+                                {% csrf_token %}
+                                <a href="#" onclick="if(confirm('确定要删除这个文件吗？此操作无法撤销。')) { document.getElementById('delete-form-{{ forloop.counter }}').submit(); } return false;" style="text-decoration: none; color: #dc3545; margin-left: 5px;">删除</a>
+                            </form>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        {% elif selected_date %}
+            <p class="no-files">选定日期内没有转换文件。</p>
+        {% endif %}
+    </div>
+</div>
+
+<script>
+// Optional: Add any specific JavaScript for this page if needed later
+document.addEventListener('DOMContentLoaded', function() {
+    // Example: If you want to make the selected date link more prominent or add other JS interactions
+    // This is mostly handled by template logic for active class, but JS can enhance it.
+});
+</script>
+
+{% endblock %} 

@@ -51,7 +51,7 @@
                 {% if user.is_superuser %}
                     <a href="{% url 'converter:admin_console_index' %}">管理控制台</a>
                 {% endif %}
-                <a href="#">历史转换记录</a> {# Placeholder #}
+                <a href="{% url 'converter:conversion_history' %}">历史转换记录</a>
                 <form id="logout-form" method="post" action="{% url 'logout' %}" style="display: inline;">
                     {% csrf_token %}
                     <a href="#" onclick="document.getElementById('logout-form').submit(); return false;">登出 ({{ user.username }})</a>
