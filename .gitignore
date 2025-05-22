@@ -81,3 +81,6 @@ report/
 # helm and images files
 helm/
 images
+
+# project history generated files
+his_pic/

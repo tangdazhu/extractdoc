@@ -184,7 +184,7 @@ def process_image_to_word_view(request):
             original_name = up_file_info['name']
             input_image_path = up_file_info['path']
             temp_output_filename = f"{os.path.splitext(original_name)[0]}.docx"
-            temp_output_docx_path = os.path.join(user_converted_dir, temp_output_filename) # This now uses the corrected user_converted_dir
+            temp_output_docx_path = os.path.join(user_converted_dir, temp_output_filename)
 
             try:
                 python_executable = 'python' 
@@ -237,32 +237,41 @@ def process_image_to_word_view(request):
         logger.debug(f"Attempting to merge {len(temp_docx_files)} files.")
         random_chars = ''.join(random.choices(string.ascii_lowercase + string.digits, k=8))
         merged_filename = f"{request.user.username}_{random_chars}.docx"
-        merged_docx_path = os.path.join(user_converted_dir, merged_filename) # This now uses the corrected user_converted_dir
+        merged_docx_path = os.path.join(user_converted_dir, merged_filename)
         logger.debug(f"Merged filename will be: {merged_docx_path}")
         logger.debug(f"Target directory for merged file ({user_converted_dir}) exists: {os.path.exists(user_converted_dir)}")
         
-        master_doc = Document()
+        # 修改合并逻辑：第一个文档作为基础，后续文档追加
+        first_doc_path = temp_docx_files[0]['path']
+        logger.debug(f"Initializing master_doc with the first document: {first_doc_path} ({temp_docx_files[0]['original_name']})")
+        master_doc = Document(first_doc_path) # 直接加载第一个文档
         
         try:
-            logger.debug("Starting loop to append documents for merging.")
-            for i, doc_info in enumerate(temp_docx_files):
-                logger.debug(f"Merging document: {doc_info['path']}")
-                sub_doc = Document(doc_info['path'])
-                if i > 0: 
-                    logger.debug("Adding page break.")
-                    master_doc.add_page_break()
-                append_document(sub_doc, master_doc)
-                logger.debug(f"Appended {doc_info['original_name']} to master document.")
+            # 从第二个文档开始追加 (如果存在)
+            if len(temp_docx_files) > 1:
+                logger.debug("Starting loop to append subsequent documents for merging.")
+                for i, doc_info in enumerate(temp_docx_files[1:], start=1): # 从列表的第二个元素开始，索引从1开始
+                    logger.debug(f"Processing subsequent document for merge: {doc_info['path']} ({doc_info['original_name']}) at index {i}")
+                    sub_doc = Document(doc_info['path'])
+                    
+                    logger.debug("Adding page break before appending to master document.")
+                    master_doc.add_page_break() # 在追加当前子文档内容前，先添加分页符
+                    
+                    append_document(sub_doc, master_doc)
+                    logger.debug(f"Appended {doc_info['original_name']} to master document.")
+            else:
+                logger.debug("Only one document to merge, no further appends needed after initialization.")
             
             logger.debug(f"Attempting to save merged document to: {merged_docx_path}")
             master_doc.save(merged_docx_path)
+            
             if os.path.exists(merged_docx_path):
                 logger.debug(f"SUCCESS: Merged document confirmed to exist at {merged_docx_path} after save.")
             else:
                 logger.error(f"FAILURE: Merged document NOT FOUND at {merged_docx_path} immediately after save call.")
             
-            logger.debug("Cleaning up temporary files.")
-            for doc_info in temp_docx_files:
+            logger.debug("Cleaning up temporary files (all original individual .docx files).")
+            for doc_info in temp_docx_files: # 清理所有临时的 individual docx 文件
                 try:
                     if os.path.exists(doc_info['path']): 
                         os.remove(doc_info['path'])
