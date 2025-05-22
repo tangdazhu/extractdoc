@@ -138,7 +138,50 @@
     let isConverting = false;
     const uploadedFiles = []; // Array to store File objects
 
+    function updateFileUploadAcceptType() {
+        const fileUploadInput = document.getElementById('fileUpload');
+        let acceptTypes = '';
+
+        switch (currentSelectedMainTab) {
+            case 'imgToFile':
+                acceptTypes = '.jpg,.jpeg,.png,.bmp';
+                break;
+            case 'fileToPdf':
+                switch (currentSelectedSubTab) {
+                    case 'wordToPdf':
+                        acceptTypes = '.doc,.docx';
+                        break;
+                    case 'excelToPdf':
+                        acceptTypes = '.xls,.xlsx';
+                        break;
+                    case 'pptToPdf':
+                        acceptTypes = '.ppt,.pptx';
+                        break;
+                    case 'txtToPdf':
+                        acceptTypes = '.txt';
+                        break;
+                    default:
+                        acceptTypes = ''; // Or a generic one if fileToPdf itself allows any before sub-tab selection
+                        break;
+                }
+                break;
+            case 'pdfToFile':
+                acceptTypes = '.pdf';
+                break;
+            default:
+                acceptTypes = ''; // Allow all files if no specific tab is known
+                break;
+        }
+        fileUploadInput.accept = acceptTypes;
+        console.log("File input accept types updated to: ", acceptTypes);
+    }
+
     function showTab(tabId) {
+        // Clear file list and conversion results when switching main tabs
+        if (currentSelectedMainTab !== tabId) { // Only clear if actually switching to a different main tab
+            clearFileList();
+        }
+
         document.querySelectorAll('.tab-content').forEach(tab => tab.classList.add('hidden'));
         document.getElementById(tabId + 'Content').classList.remove('hidden');
 
@@ -146,33 +189,33 @@
         document.getElementById('btn' + tabId.charAt(0).toUpperCase() + tabId.slice(1)).classList.add('active');
         
         currentSelectedMainTab = tabId;
-        // Automatically select the first sub-tab of the newly shown main tab
         const firstSubTabButton = document.getElementById(tabId + 'Content').querySelector('.sub-tab-button');
         if (firstSubTabButton) {
-            // Extract subTabType carefully from onclick attribute
             const onclickAttr = firstSubTabButton.getAttribute('onclick');
             const match = onclickAttr.match(/selectSubTab\(this, \'([^\']+)\'\)/);
             if (match && match[1]) {
-                 selectSubTab(firstSubTabButton, match[1]);
+                 selectSubTab(firstSubTabButton, match[1], false); // Pass false to avoid double update initially
             } else {
                 console.warn("Could not determine subTabType for default selection in main tab: ", tabId);
-                currentSelectedSubTab = null; // Or a sensible default
+                currentSelectedSubTab = null; 
             }
         } else {
-            currentSelectedSubTab = null; // No sub-tabs for this main tab
+            currentSelectedSubTab = null; 
         }
+        updateFileUploadAcceptType(); // Update for the new main tab and its default sub-tab
         console.log("Current main tab: ", currentSelectedMainTab, "Current sub tab: ", currentSelectedSubTab);
     }
 
-    function selectSubTab(buttonElement, subTabType) {
-        // Deactivate other sub-tabs within the same parent sub-tabs container
+    function selectSubTab(buttonElement, subTabType, shouldUpdateAccept = true) {
         if (buttonElement && buttonElement.parentElement) {
             buttonElement.parentElement.querySelectorAll('.sub-tab-button').forEach(btn => btn.classList.remove('active'));
             buttonElement.classList.add('active');
         }
         currentSelectedSubTab = subTabType;
+        if (shouldUpdateAccept) {
+            updateFileUploadAcceptType();
+        }
         console.log("当前选择的转换类型 (sub-tab): ", currentSelectedSubTab);
-        // updateFileUploadTips(currentSelectedSubTab); // This can be re-enabled if specific tips are needed
     }
 
     function getCookie(name) {
@@ -355,7 +398,7 @@
     // Initialize with the default tab active
     document.addEventListener('DOMContentLoaded', function() {
         showTab(currentSelectedMainTab);
-         // The call to selectSubTab for the default sub-tab is now inside showTab
+        // updateFileUploadAcceptType(); // Called within showTab now after default sub-tab is set
     });
 
 </script>
