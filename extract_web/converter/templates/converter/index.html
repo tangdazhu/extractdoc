@@ -291,8 +291,24 @@
             }
         } else {
             // Placeholder for other main tab conversion logic if they were to be implemented
-            alert("当前仅支持 图片转文件 功能。");
-            return;
+            console.warn(`Conversion started for ${currentSelectedMainTab} which is not fully implemented.`);
+            // For example, if it's fileToPdf, and sub-tab is wordToPdf, outputFormat should be pdf.
+            // If it's pdfToFile, and sub-tab is pdfToWord, outputFormat should be docx.
+            // For now, we'll just let it use the 'docx' default or whatever was last set if it reaches here.
+            // This is NOT a complete solution for those tabs.
+            if (currentSelectedMainTab === 'fileToPdf') {
+                outputFormat = 'pdf'; // Assuming all sub-options under fileToPdf output a PDF
+            } else if (currentSelectedMainTab === 'pdfToFile') {
+                // This needs more granular logic based on the sub-tab (e.g., pdfToWord -> docx, pdfToExcel -> xlsx)
+                // For now, as a placeholder, we can set a common one or leave as default
+                // outputFormat = 'docx'; // Example placeholder
+                console.error('PDF转文件 功能的输出格式需要根据子类型确定，此处尚未完全实现!');
+                // alert('PDF转文件功能尚未完全指定输出格式，请在JS中完善此逻辑。');
+                // return; // Stop if critical logic is missing for these paths
+            } else {
+                 alert("未知的转换类型或功能尚未实现。");
+                 return;
+            }
         }
 
         const conversionBtn = document.getElementById('startConversionBtn');
@@ -309,6 +325,8 @@
         });
         formData.append('merge_output', document.getElementById('mergeOutputCheckbox').checked);
         formData.append('output_format', outputFormat); // Pass the determined output format
+        formData.append('main_tab', currentSelectedMainTab); // Pass current main tab
+        formData.append('sub_tab', currentSelectedSubTab);   // Pass current sub tab
 
         const csrfToken = getCookie('csrftoken');
 

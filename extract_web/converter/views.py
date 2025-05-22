@@ -163,114 +163,168 @@ def process_images_view(request): # 重命名视图函数
     os.makedirs(user_converted_dir, exist_ok=True)
     logger.info(f"Ensured daily directories exist: Uploads='{user_upload_dir}', Converted='{user_converted_dir}'")
 
-    script_path = os.path.join(settings.BASE_DIR.parent, 'extract_text_from_images.py')
-    
     merge_output = request.POST.get('merge_output', 'false').lower() == 'true'
-    output_format = request.POST.get('output_format', 'docx').lower() # 新增：获取输出格式
+    output_format = request.POST.get('output_format', 'docx').lower()
+    main_tab = request.POST.get('main_tab', 'imgToFile') # Get main_tab
+    sub_tab = request.POST.get('sub_tab', '') # Get sub_tab
 
-    logger.debug(f"Process Images Request: User={request.user.username}, Date={today_date_str}, Merge={merge_output}, Format={output_format}")
+    logger.debug(f"Process Request: User={request.user.username}, Date={today_date_str}, Merge={merge_output}, Format={output_format}, MainTab={main_tab}, SubTab={sub_tab}")
 
-    if output_format == 'pdf' and not DOCX2PDF_AVAILABLE_IN_VIEW:
-        logger.error("PDF output requested by view, but docx2pdf is not available in the Django view environment.")
-        # 可以考虑返回一个特定的错误信息给前端，告知用户PDF转换不可用
-        # For now, let it proceed, script will also check and might fallback or error.
+    if output_format == 'pdf' and not DOCX2PDF_AVAILABLE_IN_VIEW and main_tab != 'imgToFile': # PDF for non-image relies on this
+        logger.error("PDF output requested for non-image file, but docx2pdf is not available in the Django view environment.")
+        return JsonResponse({'results': [{'original_name': 'Conversion', 'status': 'error', 'message': 'PDF转换库不可用，无法处理此请求。'}], 'merge_output': merge_output})
 
-    uploaded_files_raw_info = []
-    for uploaded_file in request.FILES.getlist('images'):
+    uploaded_files_info_from_frontend = []
+    for uploaded_file in request.FILES.getlist('images'): # 'images' is the key from FormData
         original_filename = uploaded_file.name
-        # 保存上传文件到当天的日期目录下
         uploaded_file_path = os.path.join(user_upload_dir, original_filename)
         try:
             with open(uploaded_file_path, 'wb+') as destination:
                 for chunk in uploaded_file.chunks():
                     destination.write(chunk)
-            uploaded_files_raw_info.append({'name': original_filename, 'status': 'uploaded', 'path': uploaded_file_path})
+            uploaded_files_info_from_frontend.append({'name': original_filename, 'status': 'uploaded', 'path': uploaded_file_path})
         except Exception as e:
             logger.error(f"Error uploading file {original_filename} to {user_upload_dir}: {e}")
-            uploaded_files_raw_info.append({'name': original_filename, 'status': 'upload_error', 'message': str(e)})
+            uploaded_files_info_from_frontend.append({'name': original_filename, 'status': 'upload_error', 'message': str(e)})
     
     processed_results = []
-    temp_files_for_script_processing = [] # Stores paths for script to generate initial docx
+    temp_files_for_final_processing = [] # Will store paths of files ready for final conversion/merge (docx or original non-image files)
 
-    # 第一阶段：调用脚本为每个图片生成单独的 .docx 文件 (即使最终目标是PDF)
-    for up_file_info in uploaded_files_raw_info:
-        if up_file_info['status'] == 'uploaded':
-            original_name = up_file_info['name']
-            input_image_path = up_file_info['path']
-            # 脚本总是先输出 .docx，即使目标是 pdf
-            # 这个 .docx 文件名是临时的，如果合并，它们会被合并到另一个 .docx，然后可能转PDF
-            # 如果不合并且目标是PDF，这个 .docx 会被转成PDF
-            temp_script_output_docx_filename = f"{os.path.splitext(original_name)[0]}_tempScriptOutput.docx"
-            temp_script_output_docx_path = os.path.join(user_converted_dir, temp_script_output_docx_filename)
+    if main_tab == 'imgToFile':
+        logger.info("Processing via imgToFile (script-based OCR to DOCX first)")
+        # 第一阶段 (imgToFile): 调用脚本为每个图片生成单独的 .docx 文件
+        script_path = os.path.join(settings.BASE_DIR.parent, 'extract_text_from_images.py')
+        for up_file_info in uploaded_files_info_from_frontend:
+            if up_file_info['status'] == 'uploaded':
+                original_name = up_file_info['name']
+                input_image_path = up_file_info['path']
+                temp_script_output_docx_filename = f"{os.path.splitext(original_name)[0]}_tempScriptOutput.docx"
+                temp_script_output_docx_path = os.path.join(user_converted_dir, temp_script_output_docx_filename)
+                try:
+                    python_executable = 'python' 
+                    command = [python_executable, script_path, input_image_path, temp_script_output_docx_path, '--format', 'docx']
+                    logger.debug(f"Executing script command: {' '.join(command)}")
+                    result = subprocess.run(command, capture_output=True, text=True, check=False, encoding='utf-8', errors='replace')
+                    if result.returncode == 0 and os.path.exists(temp_script_output_docx_path):
+                        logger.info(f"Script successfully created DOCX: {temp_script_output_docx_path} for {original_name}")
+                        temp_files_for_final_processing.append({
+                            'path': temp_script_output_docx_path, 
+                            'original_name': original_name,
+                            'base_filename_no_ext': os.path.splitext(original_name)[0]
+                        })
+                    else: 
+                        error_message = result.stderr or result.stdout or "Script execution failed."
+                        if not os.path.exists(temp_script_output_docx_path):
+                             error_message += " Script output DOCX file not found."
+                        logger.error(f"Error converting {original_name} by script: {error_message}")
+                        processed_results.append({ 
+                            'original_name': original_name,
+                            'converted_name': '',
+                            'download_url': '',
+                            'status': 'conversion_error',
+                            'message': error_message
+                        })
+                except Exception as e:
+                    logger.exception(f"Exception during script execution for {original_name}")
+                    processed_results.append({
+                        'original_name': original_name, 'status': 'conversion_error',
+                        'message': f'服务器内部错误: {str(e)}'
+                    })
+            else: 
+                processed_results.append(up_file_info)
+    
+    elif main_tab == 'fileToPdf' and sub_tab == 'wordToPdf':
+        logger.info(f"Processing via fileToPdf/wordToPdf (direct DOCX to PDF)")
+        # 直接使用上传的Word文档进行后续处理
+        for up_file_info in uploaded_files_info_from_frontend:
+            if up_file_info['status'] == 'uploaded':
+                original_name = up_file_info['name']
+                # For Word to PDF, the uploaded file itself is the source for conversion or merge.
+                # We need to copy it to user_converted_dir if we intend to merge or convert from there,
+                # or use its path from user_upload_dir directly if not merging before conversion.
+                # For consistency with the merge logic, let's copy to converted_dir first.
+                
+                # Ensure it is a doc/docx file (though frontend should filter)
+                if not (original_name.lower().endswith('.doc') or original_name.lower().endswith('.docx')):
+                    logger.warning(f"Skipping non-Word file {original_name} in wordToPdf mode.")
+                    processed_results.append({
+                        'original_name': original_name, 'status': 'error',
+                        'message': '文件类型不是 Word (.doc/.docx)。'
+                    })
+                    continue
 
-            try:
-                python_executable = 'python' 
-                command = [
-                    python_executable, 
-                    script_path, 
-                    input_image_path, 
-                    temp_script_output_docx_path, # output_path for script
-                    '--format', 'docx' # Script always generates docx initially in this view's flow
-                ]
-                logger.debug(f"Executing script command: {' '.join(command)}")
-                result = subprocess.run(command, capture_output=True, text=True, check=False, encoding='utf-8', errors='replace')
-
-                if result.returncode == 0 and os.path.exists(temp_script_output_docx_path):
-                    logger.info(f"Script successfully created DOCX: {temp_script_output_docx_path} for {original_name}")
-                    temp_files_for_script_processing.append({
-                        'path': temp_script_output_docx_path, 
+                # Path of the uploaded file in 'uploads' directory
+                source_word_path = up_file_info['path'] 
+                
+                # Define a temporary path in 'converted_files' for this Word file before final PDF conversion
+                # This path will be used by the merging logic or direct conversion logic below.
+                # If not merging, this file will be directly converted to PDF.
+                # If merging, these files will be merged into another DOCX, then that to PDF.
+                temp_word_in_converted_dir_filename = f"{os.path.splitext(original_name)[0]}_prePdf.docx" # Ensure it's .docx for our merge logic
+                temp_word_in_converted_dir_path = os.path.join(user_converted_dir, temp_word_in_converted_dir_filename)
+                
+                try:
+                    # If the source is .doc, we might need to convert to .docx first if merging relies on python-docx strictly for .docx
+                    # For now, assume python-docx can handle .doc for reading, or direct docx2pdf can handle .doc
+                    # Copy the file to the converted_files directory before processing
+                    import shutil
+                    shutil.copy(source_word_path, temp_word_in_converted_dir_path)
+                    logger.info(f"Copied Word file {original_name} to {temp_word_in_converted_dir_path} for PDF conversion process.")
+                    
+                    temp_files_for_final_processing.append({
+                        'path': temp_word_in_converted_dir_path, # This is the path to the .docx (or copied .doc as .docx)
                         'original_name': original_name,
                         'base_filename_no_ext': os.path.splitext(original_name)[0]
                     })
-                else: 
-                    error_message = result.stderr or result.stdout or "Script execution failed."
-                    if not os.path.exists(temp_script_output_docx_path):
-                         error_message += " Script output DOCX file not found."
-                    logger.error(f"Error converting {original_name} by script: {error_message}")
-                    processed_results.append({ 
-                        'original_name': original_name,
-                        'converted_name': '',
-                        'download_url': '',
-                        'status': 'conversion_error',
-                        'message': error_message
+                except Exception as e:
+                    logger.exception(f"Error preparing Word file {original_name} for conversion: {e}")
+                    processed_results.append({
+                        'original_name': original_name, 'status': 'error',
+                        'message': f'准备Word文件时出错: {str(e)}'
                     })
-            except Exception as e:
-                logger.exception(f"Exception during script execution for {original_name}")
-                processed_results.append({
-                    'original_name': original_name, 'status': 'conversion_error',
-                    'message': f'服务器内部错误: {str(e)}'
-                })
-        else: 
-            processed_results.append(up_file_info)
+            else:
+                processed_results.append(up_file_info)
+    else:
+        logger.warning(f"Unhandled main_tab '{main_tab}' or sub_tab '{sub_tab}'. Cannot process files.")
+        return JsonResponse({'results': [{'original_name': '-', 'status': 'error', 'message': '未实现的处理类型。'}], 'merge_output': merge_output})
 
-    # 第二阶段：处理和合并 (如果需要)
-    if merge_output and temp_files_for_script_processing:
-        logger.debug(f"Attempting to merge {len(temp_files_for_script_processing)} DOCX files for date {today_date_str}.")
+    # 第二阶段：处理和合并 (现在 temp_files_for_final_processing 包含了需要处理的文件路径)
+    # This section is largely the same, but operates on temp_files_for_final_processing
+    # which contains paths to .docx files (either from script OCR or copied Word files)
+    
+    if merge_output and temp_files_for_final_processing:
+        # ... (merging logic as before, using temp_files_for_final_processing) ...
+        # Ensure that if the input was .doc, the merge logic handles it or it was converted to .docx before this stage.
+        # Current merge logic uses Document(first_doc_path), assumes python-docx can handle format.
+        # final_merged_filename and final_merged_path will be determined.
+        # .meta file saving for merged output will store original_names from temp_files_for_final_processing.
+        # processed_results will be populated for the merged file.
+        logger.debug(f"Attempting to merge {len(temp_files_for_final_processing)} files for date {today_date_str} (MainTab: {main_tab}).")
         random_chars = ''.join(random.choices(string.ascii_lowercase + string.digits, k=8))
-        
         merged_base_filename = f"{request.user.username}_{today_date_str}_{random_chars}"
         merged_docx_path = os.path.join(user_converted_dir, f"{merged_base_filename}.docx")
         logger.debug(f"Merged DOCX filename will be: {merged_docx_path}")
 
-        first_doc_path = temp_files_for_script_processing[0]['path']
-        master_doc = Document(first_doc_path)
-        
+        if not temp_files_for_final_processing: # Should not happen if merge_output is true and this block is reached
+            logger.error("Merge requested but no files available in temp_files_for_final_processing.")
+            return JsonResponse({'results': [{'original_name': 'Merge Error', 'status': 'error', 'message': '没有可合并的文件。'}], 'merge_output': merge_output})
+
+        first_doc_path = temp_files_for_final_processing[0]['path']
         try:
-            if len(temp_files_for_script_processing) > 1:
-                for doc_info in temp_files_for_script_processing[1:]:
+            master_doc = Document(first_doc_path) # python-docx might struggle with .doc if not OLE based
+            if len(temp_files_for_final_processing) > 1:
+                for doc_info in temp_files_for_final_processing[1:]:
                     sub_doc = Document(doc_info['path'])
                     master_doc.add_page_break()
                     append_document(sub_doc, master_doc)
-            
             master_doc.save(merged_docx_path)
             logger.info(f"Merged DOCX saved successfully: {merged_docx_path}")
 
-            # 清理单个图片生成的临时 DOCX 文件 (合并场景下)
-            for doc_info in temp_files_for_script_processing:
-                try: os.remove(doc_info['path']); logger.debug(f"Cleaned up temp script output: {doc_info['path']}")
-                except OSError as e: logger.warning(f"Could not clean up temp docx {doc_info['path']}: {e}")
+            for doc_info in temp_files_for_final_processing:
+                try: os.remove(doc_info['path']); logger.debug(f"Cleaned up temp file after merge: {doc_info['path']}")
+                except OSError as e: logger.warning(f"Could not clean up temp file {doc_info['path']}: {e}")
 
-            final_merged_filename = f"{merged_base_filename}.{output_format}"
+            final_merged_filename = f"{merged_base_filename}.{output_format}" # output_format should be 'pdf' for wordToPdf
             final_merged_path = os.path.join(user_converted_dir, final_merged_filename)
 
             if output_format == 'pdf':
@@ -283,97 +337,86 @@ def process_images_view(request): # 重命名视图函数
                         except OSError as e: logger.warning(f"Could not remove merged DOCX {merged_docx_path}: {e}")
                     except Exception as e:
                         logger.error(f"Error converting merged DOCX to PDF: {e}", exc_info=True)
-                        # PDF转换失败，但合并的DOCX仍然存在，将其作为结果
-                        output_format = 'docx' # Fallback to docx
+                        output_format = 'docx' # Fallback
                         final_merged_filename = f"{merged_base_filename}.docx"
                         final_merged_path = merged_docx_path
-                        messages.warning(request, "PDF转换失败，已生成DOCX文件。") # Inform user via messages
-                else:
+                        messages.warning(request, "合并文件PDF转换失败，已生成DOCX文件。")
+                else: # docx2pdf not available
                     logger.error("PDF conversion for merged file requested, but docx2pdf is not available. Serving DOCX.")
-                    output_format = 'docx' # Fallback to docx
+                    output_format = 'docx' # Fallback
                     final_merged_filename = f"{merged_base_filename}.docx"
                     final_merged_path = merged_docx_path
-                    messages.warning(request, "PDF转换库不可用，已生成DOCX文件。")
+                    messages.warning(request, "PDF转换库不可用，已为合并文件生成DOCX文件。")
             
             if os.path.exists(final_merged_path):
-                # Save original names to a .meta file for the merged output
                 meta_file_path_merged = f"{final_merged_path}.meta"
-                merged_original_names_list = [info['original_name'] for info in temp_files_for_script_processing]
+                merged_original_names_list = [info['original_name'] for info in temp_files_for_final_processing]
                 try:
                     with open(meta_file_path_merged, 'w', encoding='utf-8') as mf:
                         mf.write(",".join(merged_original_names_list))
                     logger.info(f"Saved meta file for merged output: {meta_file_path_merged}")
-                except Exception as e:
-                    logger.error(f"Error saving .meta file {meta_file_path_merged}: {e}")
-
+                except Exception as e: logger.error(f"Error saving .meta file {meta_file_path_merged}: {e}")
+                
                 relative_media_path = os.path.join(request.user.username, today_date_str, 'converted_files', final_merged_filename).replace("\\", "/")
                 download_url = f"{settings.MEDIA_URL}{relative_media_path}"
                 processed_results = [{
-                    'original_name': ",".join(merged_original_names_list), # Display actual original filenames for merged result on main page
+                    'original_name': ",".join(merged_original_names_list),
                     'converted_name': final_merged_filename,
                     'download_url': download_url,
                     'status': 'success'
                 }]
             else:
                  logger.error(f"Final merged file {final_merged_path} not found after processing.")
-                 processed_results.append({'original_name': "Merged Document", 'status': 'conversion_error', 'message': '合并后的最终文件未找到。'})
+                 processed_results = [{'original_name': "Merged Document", 'status': 'conversion_error', 'message': '合并后的最终文件未找到。'}]
 
         except Exception as e:
             logger.exception("Error during merging or final conversion of merged document")
-            # Cleanup any intermediate merged docx if it exists and an error occurred
-            if os.path.exists(merged_docx_path):
+            if os.path.exists(merged_docx_path): # Cleanup intermediate merged docx
                 try: os.remove(merged_docx_path); logger.debug(f"Cleaned up partially merged DOCX due to error: {merged_docx_path}")
                 except OSError: pass
-            # Cleanup individual temp files as well
-            for doc_info in temp_files_for_script_processing:
+            for doc_info in temp_files_for_final_processing: # Cleanup individual temp files
                 if os.path.exists(doc_info['path']): 
-                    try: os.remove(doc_info['path']); logger.debug(f"Cleaned up temp script output due to merge error: {doc_info['path']}")
+                    try: os.remove(doc_info['path']); logger.debug(f"Cleaned up temp file due to merge error: {doc_info['path']}")
                     except OSError: pass
-            processed_results.append({'original_name': "Merged Document", 'status': 'conversion_error', 'message': f'合并或转换时出错: {str(e)}'})
+            processed_results = [{'original_name': "Merged Document", 'status': 'conversion_error', 'message': f'合并或转换时出错: {str(e)}'}]
     
-    elif not merge_output and temp_files_for_script_processing: # Process individual files
-        for file_info in temp_files_for_script_processing:
+    elif not merge_output and temp_files_for_final_processing: # Process individual files
+        for file_info in temp_files_for_final_processing:
+            # file_info['path'] is the path to the .docx file (from OCR or copied Word file)
+            # file_info['original_name'] is the original uploaded name
             temp_docx_for_individual_conversion = file_info['path']
-            original_image_name = file_info['original_name']
+            original_input_name = file_info['original_name']
             base_filename_no_ext = file_info['base_filename_no_ext']
 
-            final_output_filename = f"{base_filename_no_ext}.{output_format}"
+            final_output_filename = f"{base_filename_no_ext}.{output_format}" # output_format from frontend, should be 'pdf' for wordToPdf
             final_output_path = os.path.join(user_converted_dir, final_output_filename)
-
             conversion_successful = False
+
             if output_format == 'pdf':
                 if DOCX2PDF_AVAILABLE_IN_VIEW:
                     try:
-                        logger.info(f"Converting individual DOCX '{temp_docx_for_individual_conversion}' to PDF '{final_output_path}'")
+                        logger.info(f"Converting individual DOCX/Word '{temp_docx_for_individual_conversion}' to PDF '{final_output_path}'")
+                        # convert_docx_to_pdf can handle both .doc and .docx if libreoffice is backend
                         convert_docx_to_pdf(temp_docx_for_individual_conversion, final_output_path)
                         logger.info(f"Successfully converted '{temp_docx_for_individual_conversion}' to PDF: {final_output_path}")
-                        try: os.remove(temp_docx_for_individual_conversion); logger.debug(f"Removed temp DOCX for PDF: {temp_docx_for_individual_conversion}")
-                        except OSError as e: logger.warning(f"Could not remove temp DOCX {temp_docx_for_individual_conversion}: {e}")
+                        try: os.remove(temp_docx_for_individual_conversion); logger.debug(f"Removed temp source after PDF: {temp_docx_for_individual_conversion}")
+                        except OSError as e: logger.warning(f"Could not remove temp source {temp_docx_for_individual_conversion}: {e}")
                         conversion_successful = True
                     except Exception as e:
-                        logger.error(f"Error converting individual DOCX '{temp_docx_for_individual_conversion}' to PDF: {e}", exc_info=True)
-                        # Fallback: keep the docx and serve that if PDF fails
-                        final_output_filename = f"{base_filename_no_ext}.docx"
-                        final_output_path = temp_docx_for_individual_conversion # The original docx path
-                        # messages.warning(request, f"文件 {original_image_name} 的PDF转换失败，已生成DOCX。") # Message already in process_images_view
-                        # conversion_successful = True # Already set in process_images_view
-
-                        # For individual files, save original name to a .meta file
-                        meta_file_path = f"{final_output_path}.meta"
-                        try:
-                            with open(meta_file_path, 'w', encoding='utf-8') as mf:
-                                mf.write(original_image_name)
-                            logger.info(f"Saved meta file for individual conversion: {meta_file_path}")
-                        except Exception as e:
-                            logger.error(f"Error saving .meta file {meta_file_path}: {e}")
-                else:
-                    logger.error("PDF conversion for individual file requested, but docx2pdf not available. Serving DOCX.")
-                    final_output_filename = f"{base_filename_no_ext}.docx"
-                    final_output_path = temp_docx_for_individual_conversion
-                    messages.warning(request, f"文件 {original_image_name} 的PDF转换库不可用，已生成DOCX。")
-                    conversion_successful = True # Still successful as docx
-            elif output_format == 'docx':
-                # The file is already in docx (temp_docx_for_individual_conversion), rename/move it to final_output_path
+                        logger.error(f"Error converting individual DOCX/Word '{temp_docx_for_individual_conversion}' to PDF: {e}", exc_info=True)
+                        # Fallback: keep the source .docx (or .doc renamed as .docx) if PDF fails
+                        final_output_filename = os.path.basename(temp_docx_for_individual_conversion) # use its name
+                        final_output_path = temp_docx_for_individual_conversion # use its path
+                        messages.warning(request, f"文件 {original_input_name} 的PDF转换失败，已保留原始Word格式文件。")
+                        conversion_successful = True 
+                else: # docx2pdf not available
+                    logger.error(f"PDF conversion for {original_input_name} requested, but docx2pdf not available. Serving original Word format.")
+                    final_output_filename = os.path.basename(temp_docx_for_individual_conversion) # use its name
+                    final_output_path = temp_docx_for_individual_conversion # use its path
+                    messages.warning(request, f"文件 {original_input_name} 的PDF转换库不可用，已保留原始Word格式文件。")
+                    conversion_successful = True 
+            elif output_format == 'docx': # This case is mostly for imgToFile where output_format can be docx
+                # The file is already in docx (temp_docx_for_individual_conversion), rename/move it if necessary
                 if temp_docx_for_individual_conversion != final_output_path:
                     try:
                         os.rename(temp_docx_for_individual_conversion, final_output_path)
@@ -381,61 +424,58 @@ def process_images_view(request): # 重命名视图函数
                         conversion_successful = True
                     except OSError as e:
                         logger.error(f"Error moving/renaming {temp_docx_for_individual_conversion} to {final_output_path}: {e}")
-                        # If rename fails, the original temp docx is still there, try to use it
                         final_output_path = temp_docx_for_individual_conversion 
                         final_output_filename = os.path.basename(temp_docx_for_individual_conversion)
-                        conversion_successful = True # count as success if original temp file exists
-                else: # Source and dest are the same, already correct
+                        conversion_successful = True 
+                else: 
                     conversion_successful = True
             
             if conversion_successful and os.path.exists(final_output_path):
-                # Save original name to a .meta file for the individual output
                 meta_file_path_individual = f"{final_output_path}.meta"
                 try:
                     with open(meta_file_path_individual, 'w', encoding='utf-8') as mf:
-                        mf.write(original_image_name)
-                    logger.info(f"Saved meta file for individual conversion: {meta_file_path_individual}")
-                except Exception as e:
-                    logger.error(f"Error saving .meta file {meta_file_path_individual}: {e}")
+                        mf.write(original_input_name)
+                    logger.info(f"Saved meta file for individual output: {meta_file_path_individual}")
+                except Exception as e: logger.error(f"Error saving .meta file {meta_file_path_individual}: {e}")
 
                 relative_media_path = os.path.join(request.user.username, today_date_str, 'converted_files', final_output_filename).replace("\\", "/")
                 download_url = f"{settings.MEDIA_URL}{relative_media_path}"
                 processed_results.append({
-                    'original_name': original_image_name,
+                    'original_name': original_input_name,
                     'converted_name': final_output_filename,
                     'download_url': download_url,
                     'status': 'success'
                 })
-            elif os.path.exists(temp_docx_for_individual_conversion): # Fallback if final path doesn't exist but temp docx does
-                 logger.warning(f"Final path {final_output_path} not found, but temp docx {temp_docx_for_individual_conversion} exists. Serving temp docx.")
+            elif os.path.exists(temp_docx_for_individual_conversion): # Fallback if final path doesn't exist but temp source does
+                 # ... (fallback logic as before)
+                 logger.warning(f"Final path {final_output_path} not found, but temp source {temp_docx_for_individual_conversion} exists. Serving temp source.")
                  final_output_filename = os.path.basename(temp_docx_for_individual_conversion)
                  relative_media_path = os.path.join(request.user.username, today_date_str, 'converted_files', final_output_filename).replace("\\", "/")
                  download_url = f"{settings.MEDIA_URL}{relative_media_path}"
                  processed_results.append({
-                    'original_name': original_image_name,
+                    'original_name': original_input_name,
                     'converted_name': final_output_filename,
                     'download_url': download_url,
-                    'status': 'success'
+                    'status': 'success' # Or appropriate status
                 })
             else:
-                # This case should ideally be caught by script execution check earlier
-                logger.error(f"Neither final output '{final_output_path}' nor temp DOCX '{temp_docx_for_individual_conversion}' found for {original_image_name}.")
-                if not any(pr['original_name'] == original_image_name for pr in processed_results): # Avoid duplicate error
+                # ... (error handling as before) ...
+                logger.error(f"Neither final output '{final_output_path}' nor temp source '{temp_docx_for_individual_conversion}' found for {original_input_name}.")
+                if not any(pr['original_name'] == original_input_name for pr in processed_results):
                     processed_results.append({
-                        'original_name': original_image_name,
+                        'original_name': original_input_name,
                         'status': 'conversion_error',
                         'message': '处理后的文件丢失。'
                     })
 
-    elif not temp_files_for_script_processing and any(r['status'] == 'uploaded' for r in uploaded_files_raw_info):
-        logger.warning("No files were successfully processed by the script to either merge or convert individually.")
-        # Check if there are already specific errors from script run for these files
-        has_script_errors = any(pr.get('status') == 'conversion_error' and pr.get('original_name') in [uf['name'] for uf in uploaded_files_raw_info if uf['status']=='uploaded'] for pr in processed_results)
-        if not has_script_errors:
-             processed_results.append({
+    elif not temp_files_for_final_processing and any(r['status'] == 'uploaded' for r in uploaded_files_info_from_frontend):
+        logger.warning("No files were successfully prepared for final processing (merge or individual conversion).")
+        # If processed_results already contains specific errors from upload or prep, don't add a generic one.
+        if not processed_results or all(p.get('status') == 'uploaded' for p in processed_results):
+            processed_results.append({
                 'original_name': "Conversion Attempt",
                 'status': 'conversion_error',
-                'message': '没有文件成功通过初始脚本处理。'
+                'message': '没有文件成功准备好进行最终处理。'
             })
 
     logger.debug(f"Final processed_results before JsonResponse: {processed_results}")
