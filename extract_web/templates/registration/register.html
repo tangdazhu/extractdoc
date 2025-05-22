@@ -1,0 +1,40 @@
+{% extends "converter/base.html" %}
+
+{% block title %}用户注册{% endblock %}
+
+{% block content %}
+<div style="max-width: 450px; margin: 50px auto; padding: 20px; border: 1px solid #ccc; border-radius: 8px; background-color: #f9f9f9;">
+    <h2 style="text-align: center; margin-bottom: 20px;">创建账户</h2>
+    <form method="post">
+        {% csrf_token %}
+        
+        {% if form.non_field_errors %}
+            <div style="color: red; margin-bottom: 15px; text-align: center;">
+                {% for error in form.non_field_errors %}
+                    <p>{{ error }}</p>
+                {% endfor %}
+            </div>
+        {% endif %}
+
+        {% for field in form %}
+            <div style="margin-bottom: 15px;">
+                {{ field.label_tag }}
+                {{ field }}
+                {% if field.help_text %}
+                    <small style="color: grey; display: block; margin-top: 3px;">{{ field.help_text }}</small>
+                {% endif %}
+                {% for error in field.errors %}
+                    <div style="color: red; font-size: 0.9em; margin-top: 3px;">{{ error }}</div>
+                {% endfor %}
+            </div>
+        {% endfor %}
+        
+        <div style="text-align: center; margin-top: 20px;">
+            <button type="submit" style="padding: 10px 25px; background-color: #28a745; color: white; border: none; border-radius: 4px; cursor: pointer;">注册</button>
+        </div>
+    </form>
+    <p style="text-align: center; margin-top: 20px;">
+        已经有账户了? <a href="{% url 'login' %}" style="color: #007bff;">登录</a>
+    </p>
+</div>
+{% endblock %} 

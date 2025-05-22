@@ -15,7 +15,8 @@
             align-items: center;
         }
         .header h1 a { color: #333; text-decoration: none; font-size: 24px; }
-        .header .user-actions a {
+        .header .user-actions a,
+        .header .user-actions form a {
             margin-left: 15px;
             color: #007bff;
             text-decoration: none;
@@ -48,12 +49,15 @@
         <div class="user-actions">
             {% if user.is_authenticated %}
                 {% if user.is_superuser %}
-                    <a href="{% url 'admin:index' %}">管理控制台</a>
+                    <a href="{% url 'converter:admin_console_index' %}">管理控制台</a>
                 {% endif %}
                 <a href="#">历史转换记录</a> {# Placeholder #}
-                <a href="{% url 'logout' %}">登出 ({{ user.username }})</a>
+                <form id="logout-form" method="post" action="{% url 'logout' %}" style="display: inline;">
+                    {% csrf_token %}
+                    <a href="#" onclick="document.getElementById('logout-form').submit(); return false;">登出 ({{ user.username }})</a>
+                </form>
             {% else %}
-                <a href="#">注册</a> {# Placeholder, will be a URL to registration page #}
+                <a href="{% url 'converter:register' %}">注册</a>
                 <a href="{% url 'login' %}">登录</a>
             {% endif %}
         </div>

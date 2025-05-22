@@ -1,0 +1,11 @@
+{% extends "converter/base.html" %}
+
+{% block title %}已登出{% endblock %}
+
+{% block content %}
+<div style="max-width: 500px; margin: 50px auto; padding: 20px; text-align: center;">
+    <h2>您已成功登出。</h2>
+    <p><a href="{% url 'converter:index' %}" style="color: #007bff; text-decoration: none;">返回首页</a></p>
+    <p><a href="{% url 'login' %}" style="color: #007bff; text-decoration: none;">重新登录</a></p>
+</div>
+{% endblock %} 

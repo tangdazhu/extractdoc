@@ -1,0 +1,52 @@
+{% extends "converter/base.html" %}
+
+{% block title %}管理控制台{% endblock %}
+
+{% block content %}
+<style>
+    .admin-console-layout {
+        display: flex;
+    }
+    .admin-sidebar {
+        width: 200px;
+        padding: 15px;
+        border-right: 1px solid #ddd;
+        min-height: calc(100vh - 120px); /* Adjust based on header/footer height */
+        background-color: #f9f9f9;
+    }
+    .admin-sidebar ul {
+        list-style-type: none;
+        padding: 0;
+        margin: 0;
+    }
+    .admin-sidebar ul li a {
+        display: block;
+        padding: 10px;
+        text-decoration: none;
+        color: #333;
+        border-radius: 4px;
+    }
+    .admin-sidebar ul li a:hover, .admin-sidebar ul li a.active {
+        background-color: #007bff;
+        color: white;
+    }
+    .admin-main-content {
+        flex-grow: 1;
+        padding: 20px;
+    }
+</style>
+
+<div class="admin-console-layout">
+    <nav class="admin-sidebar">
+        <ul>
+            <li><a href="{% url 'converter:admin_user_management' %}" class="{% if request.resolver_match.url_name == 'admin_user_management' %}active{% endif %}">用户管理</a></li>
+            <li><a href="{% url 'converter:admin_file_management' %}" class="{% if request.resolver_match.url_name == 'admin_file_management' %}active{% endif %}">文件管理</a></li>
+        </ul>
+    </nav>
+    <div class="admin-main-content">
+        <h2>欢迎来到管理控制台</h2>
+        <p>请从左侧菜单选择一项功能。</p>
+        {% block admin_content %}{% endblock %}
+    </div>
+</div>
+{% endblock %} 

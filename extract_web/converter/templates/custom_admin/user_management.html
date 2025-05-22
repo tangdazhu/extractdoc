@@ -1,0 +1,54 @@
+{% extends "custom_admin/admin_index.html" %}
+
+{% block title %}用户管理 - 管理控制台{% endblock %}
+
+{% block admin_content %}
+<h3>用户管理</h3>
+<p>这里将展示用户列表，并提供增删改查功能。</p>
+
+{% if messages %}
+    <ul class="messages" style="list-style-type: none; padding: 0;">
+        {% for message in messages %}
+            <li{% if message.tags %} class="{{ message.tags }}"{% endif %} style="padding: 10px; margin-bottom: 10px; border-radius: 4px; color: white; {% if message.tags == 'error' %}background-color: #dc3545;{% elif message.tags == 'success' %}background-color: #28a745;{% else %}background-color: #ffc107; color: black;{% endif %}">{{ message }}</li>
+        {% endfor %}
+    </ul>
+{% endif %}
+
+<p style="margin-top:15px; margin-bottom:15px;">
+    <a href="{% url 'converter:register' %}" style="padding: 8px 12px; background-color: #28a745; color: white; text-decoration: none; border-radius: 4px;">添加新用户</a>
+</p>
+<table border="1" style="width: 100%; border-collapse: collapse;">
+    <thead>
+        <tr>
+            <th style="padding: 8px; text-align: left;">用户名</th>
+            <th style="padding: 8px; text-align: left;">Email</th>
+            <th style="padding: 8px; text-align: left;">Superuser</th>
+            <th style="padding: 8px; text-align: left;">操作</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for u in users %}
+        <tr>
+            <td style="padding: 8px;">{{ u.username }}</td>
+            <td style="padding: 8px;">{{ u.email|default:"N/A" }}</td>
+            <td style="padding: 8px;">{% if u.is_superuser %}是{% else %}否{% endif %}</td>
+            <td style="padding: 8px;">
+                <a href="{% url 'converter:admin_edit_user' u.id %}">编辑</a> | 
+                {% if not u.is_superuser and u.id != request.user.id %} {# 防止删除自己或超级管理员的按钮直接显示 #}
+                <form method="POST" action="{% url 'converter:admin_delete_user' u.id %}" style="display: inline;" onsubmit="return confirm('您确定要删除用户 {{ u.username }} 吗？此操作不可恢复。');">
+                    {% csrf_token %}
+                    <button type="submit" style="color: red; background: none; border: none; padding: 0; font: inherit; cursor: pointer; text-decoration: underline;">删除</button>
+                </form>
+                {% else %}
+                <span style="color: grey;">删除</span> {# 不可删除时显示灰色文字 #}
+                {% endif %}
+            </td>
+        </tr>
+        {% empty %}
+        <tr>
+            <td colspan="4" style="padding: 8px; text-align: center;">没有用户。</td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% endblock %} 
