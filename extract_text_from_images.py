@@ -4,11 +4,14 @@
 - 支持指定图片（如6.jpg）自动还原为带边框的Word表格，表头和数据结构与原图一致
 - 其余图片全部按普通段落输出
 - 自动分割表格与正文内容，正文不会被误放入表格
+- 新增：支持输出为PDF格式
 """
 import os
 import glob
 import re
-import sys # Added to access command line arguments
+import sys 
+import argparse # 新增 argparse 用于更灵活的命令行参数处理
+from pathlib import Path # 新增 pathlib
 
 # import yaml # No longer needed here
 # import logging # No longer needed here, managed by utils
@@ -24,6 +27,15 @@ from utils import load_config, setup_logging  # Added
 
 # Global logger instance, will be initialized in main
 logger = None  # Added
+
+# 尝试导入 docx2pdf，如果失败则记录错误，但脚本仍可生成docx
+try:
+    from docx2pdf import convert as convert_docx_to_pdf
+    DOCX2PDF_AVAILABLE = True
+except ImportError:
+    DOCX2PDF_AVAILABLE = False
+    # logger is not yet initialized here, so we can't use it.
+    # We'll log this when the script main function runs.
 
 # def load_config(config_path='config.yaml'): # Removed
 #     """Load configuration from a YAML file."""
@@ -357,7 +369,7 @@ special_table_handlers = {
 # 6.jpg 的特殊还原逻辑已封装为 handle_table_6jpg，未来只需新增类似函数并注册即可。
 # 主循环自动分发，无需写一堆 if-else，结构清晰，易于维护和扩展。
 # #非特殊图片自动走通用表格还原逻辑。
-def main(input_image_path_arg=None, output_docx_path_arg=None):
+def main(input_path_arg=None, output_path_arg=None, output_format_arg='docx'): # Modified parameters
     global logger  # Declare logger as global to assign the initialized logger
 
     # Load configuration using the utility function
@@ -371,8 +383,13 @@ def main(input_image_path_arg=None, output_docx_path_arg=None):
         config.get("log_file", "app.log"), logger_name
     )  # Uses new function
 
+    if not DOCX2PDF_AVAILABLE and output_format_arg == 'pdf':
+        logger.warning("docx2pdf library is not installed. PDF output will not be available. Falling back to DOCX.")
+        output_format_arg = 'docx' # Fallback to docx if library not present and PDF requested
+
     logger.info("Script started.")
     logger.info(f"Loaded configuration: {config}")
+    logger.info(f"Requested output format: {output_format_arg}")
 
     try:
         logger.info(
@@ -396,22 +413,38 @@ def main(input_image_path_arg=None, output_docx_path_arg=None):
     logger.info("Using PaddleOCR for Chinese text recognition...")
 
     image_files_to_process = []
-    output_file_path = output_docx_path_arg # Use argument if provided
+    
+    # Determine the base output path (without extension yet for docx intermediate step)
+    # If output_path_arg is given, it's the final desired path (could be .pdf or .docx)
+    # If not, it's from config (usually .docx)
+    
+    if output_path_arg:
+        final_output_path_obj = Path(output_path_arg)
+        # If PDF is requested, the intermediate docx will have the same stem
+        intermediate_docx_path = str(final_output_path_obj.with_suffix('.docx'))
+        final_pdf_path = str(final_output_path_obj.with_suffix('.pdf')) if output_format_arg == 'pdf' else None
+    else: # Fallback to config, assuming it's for docx by default
+        intermediate_docx_path = config.get("output_filename", "extracted_text.docx")
+        final_pdf_path = None # PDF conversion only if output_path_arg is explicitly for PDF
+        if output_format_arg == 'pdf':
+            # If output_path_arg was not given, but PDF format is requested,
+            # we derive the PDF name from the intermediate_docx_path
+            final_pdf_path = str(Path(intermediate_docx_path).with_suffix('.pdf'))
 
-    if input_image_path_arg and output_docx_path_arg:
-        logger.info(f"Processing single image from argument: {input_image_path_arg}")
-        if os.path.exists(input_image_path_arg):
-            image_files_to_process.append(input_image_path_arg)
+
+    if input_path_arg:
+        logger.info(f"Processing single image from argument: {input_path_arg}")
+        if os.path.exists(input_path_arg):
+            image_files_to_process.append(input_path_arg)
         else:
-            logger.error(f"Input image from argument not found: {input_image_path_arg}")
-            return # Exit if the specified image doesn't exist
+            logger.error(f"Input image from argument not found: {input_path_arg}")
+            return
     else:
         logger.info("No single image path provided via argument, falling back to config directory scan.")
         input_dir = config.get("input_directory", "his_pic")
         logger.info(f"Looking for JPG images in directory: '{input_dir}'")
         image_files_to_process = glob.glob(os.path.join(input_dir, "*.jpg"))
         image_files_to_process.sort(key=natural_sort_key)
-        output_file_path = config.get("output_filename", "extracted_text.docx") # Use config output for multi-file
 
     if not image_files_to_process:
         logger.warning(f"No JPG files found to process.")
@@ -424,7 +457,7 @@ def main(input_image_path_arg=None, output_docx_path_arg=None):
     for image_idx, image_path in enumerate(image_files_to_process):
         filename = os.path.basename(image_path)
         # If processing multiple files (not from args), add heading and page break
-        if not (input_image_path_arg and output_docx_path_arg):
+        if not (input_path_arg and output_path_arg):
             doc.add_heading(f"Content from {filename}", level=1)
         
         logger.info(f"Processing {filename}...")
@@ -495,26 +528,53 @@ def main(input_image_path_arg=None, output_docx_path_arg=None):
                                         doc.add_paragraph(paragraph_text)
 
         # If processing multiple files (not from args) and not the last image, add page break
-        if not (input_image_path_arg and output_docx_path_arg) and image_idx < len(image_files_to_process) - 1:
+        if not (input_path_arg and output_path_arg) and image_idx < len(image_files_to_process) - 1:
             doc.add_page_break()
 
     try:
-        doc.save(output_file_path) # Use determined output_file_path
-        logger.info(f"Content extraction complete. Document saved as '{output_file_path}'")
+        # Always save as docx first
+        doc.save(intermediate_docx_path)
+        logger.info(f"Intermediate DOCX document saved as '{intermediate_docx_path}'")
+
+        if output_format_arg == 'pdf':
+            if DOCX2PDF_AVAILABLE and final_pdf_path:
+                logger.info(f"Converting '{intermediate_docx_path}' to PDF at '{final_pdf_path}'...")
+                try:
+                    convert_docx_to_pdf(intermediate_docx_path, final_pdf_path)
+                    logger.info(f"Successfully converted to PDF: '{final_pdf_path}'")
+                    # Optionally, remove the intermediate docx file
+                    try:
+                        os.remove(intermediate_docx_path)
+                        logger.info(f"Removed intermediate DOCX file: '{intermediate_docx_path}'")
+                    except OSError as e:
+                        logger.warning(f"Could not remove intermediate DOCX file '{intermediate_docx_path}': {e}")
+                except Exception as e:
+                    logger.error(f"Error converting DOCX to PDF: {e}", exc_info=True)
+                    # If PDF conversion fails, the DOCX is still there.
+                    # The calling process (Django view) will need to know which file to serve.
+                    # For now, we log the error. The script doesn't explicitly return failure here.
+            elif not DOCX2PDF_AVAILABLE:
+                logger.error("PDF conversion requested, but docx2pdf library is not available. DOCX file was saved.")
+            elif not final_pdf_path:
+                 logger.error("PDF conversion requested, but final PDF path could not be determined. DOCX file was saved.")
+
+
+        elif output_format_arg == 'docx':
+             logger.info(f"Content extraction complete. Document saved as '{intermediate_docx_path}'")
+
+
     except Exception as e:
-        logger.error(f"Error saving document '{output_file_path}': {e}", exc_info=True)
+        logger.error(f"Error saving document '{intermediate_docx_path}': {e}", exc_info=True)
 
     logger.info("Script finished.")
 
 
 if __name__ == "__main__":
-    # Check for command-line arguments
-    if len(sys.argv) == 3:
-        input_path = sys.argv[1]
-        output_path = sys.argv[2]
-        main(input_image_path_arg=input_path, output_docx_path_arg=output_path)
-    elif len(sys.argv) == 1:
-        main() # Run with default behavior (scan directory from config)
-    else:
-        print("Usage: python extract_text_from_images.py [<input_image_path> <output_docx_path>]")
-        sys.exit(1)
+    parser = argparse.ArgumentParser(description="Extract text and tables from images to DOCX or PDF.")
+    parser.add_argument("input_path", nargs='?', default=None, help="Path to a single input image file.")
+    parser.add_argument("output_path", nargs='?', default=None, help="Path for the output file (e.g., document.docx or document.pdf).")
+    parser.add_argument("--format", choices=['docx', 'pdf'], default='docx', help="Output format (docx or pdf). Default is docx.")
+    
+    args = parser.parse_args()
+
+    main(input_path_arg=args.input_path, output_path_arg=args.output_path, output_format_arg=args.format)

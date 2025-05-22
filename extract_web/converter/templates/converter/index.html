@@ -41,8 +41,19 @@
     #convertedFileList { list-style-type: none; padding-left: 0; }
     #convertedFileList li { background-color: #f9f9f9; border: 1px solid #eee; padding: 10px; margin-bottom: 5px; border-radius: 4px; display: flex; justify-content: space-between; align-items: center; }
     #convertedFileList li .file-name { color: #333; }
-    #convertedFileList li .download-link { color: #007bff; text-decoration: none; font-weight: bold; }
-    #convertedFileList li .download-link:hover { text-decoration: underline; }
+    #convertedFileList li .download-link {
+        /* Style for the download button/link */
+        display: inline-block;
+        padding: 5px 10px;
+        background-color: #28a745; /* Green color */
+        color: white;
+        text-align: center;
+        text-decoration: none;
+        border-radius: 4px;
+        font-size: 0.9em;
+        cursor: pointer;
+    }
+    #convertedFileList li .download-link:hover { background-color: #218838; }
 </style>
 {% endblock %}
 
@@ -122,9 +133,10 @@
 </div>
 
 <script>
-    // Script remains largely the same, specific to index.html functionality
-    let currentSelectedSubTab = null; 
-    let isConverting = false; // Flag to prevent multiple simultaneous conversions
+    let currentSelectedMainTab = 'imgToFile'; // Default to the first main tab
+    let currentSelectedSubTab = 'imgToWord'; // Default to the first sub-tab of the first main tab
+    let isConverting = false;
+    const uploadedFiles = []; // Array to store File objects
 
     function showTab(tabId) {
         document.querySelectorAll('.tab-content').forEach(tab => tab.classList.add('hidden'));
@@ -133,83 +145,34 @@
         document.querySelectorAll('.tab-button').forEach(button => button.classList.remove('active'));
         document.getElementById('btn' + tabId.charAt(0).toUpperCase() + tabId.slice(1)).classList.add('active');
         
+        currentSelectedMainTab = tabId;
+        // Automatically select the first sub-tab of the newly shown main tab
         const firstSubTabButton = document.getElementById(tabId + 'Content').querySelector('.sub-tab-button');
         if (firstSubTabButton) {
-            selectSubTab(firstSubTabButton, firstSubTabButton.getAttribute('onclick').match(/'(.*?)'/)[1].split(',')[1].replace(/['\)]/g, '').trim());
+            // Extract subTabType carefully from onclick attribute
+            const onclickAttr = firstSubTabButton.getAttribute('onclick');
+            const match = onclickAttr.match(/selectSubTab\(this, \'([^\']+)\'\)/);
+            if (match && match[1]) {
+                 selectSubTab(firstSubTabButton, match[1]);
+            } else {
+                console.warn("Could not determine subTabType for default selection in main tab: ", tabId);
+                currentSelectedSubTab = null; // Or a sensible default
+            }
+        } else {
+            currentSelectedSubTab = null; // No sub-tabs for this main tab
         }
+        console.log("Current main tab: ", currentSelectedMainTab, "Current sub tab: ", currentSelectedSubTab);
     }
 
     function selectSubTab(buttonElement, subTabType) {
-        buttonElement.parentElement.querySelectorAll('.sub-tab-button').forEach(btn => btn.classList.remove('active'));
-        buttonElement.classList.add('active');
+        // Deactivate other sub-tabs within the same parent sub-tabs container
+        if (buttonElement && buttonElement.parentElement) {
+            buttonElement.parentElement.querySelectorAll('.sub-tab-button').forEach(btn => btn.classList.remove('active'));
+            buttonElement.classList.add('active');
+        }
         currentSelectedSubTab = subTabType;
-        console.log("当前选择的转换类型: ", currentSelectedSubTab);
-        updateFileUploadTips(currentSelectedSubTab);
-    }
-
-    function updateFileUploadTips(subTabType) {
-        const tipsEl = document.getElementById('fileUploadTips');
-        // Example: Customize tips for specific conversion types if necessary
-        // if (subTabType === 'imgToWord') {
-        //     tipsEl.textContent = "提示：图片转Word。最多10个文件，单个不超过10MB。";
-        // } else {
-        //     tipsEl.textContent = "提示：最多选择10个文件，单个文件不超过10MB。";
-        // }
-        // For now, the generic tip is fine.
-    }
-
-    function handleFiles(incomingFiles) {
-        const fileList = document.getElementById('fileList');
-        const existingFileCount = fileList.getElementsByTagName('li').length;
-        const maxFiles = 10;
-        const maxFileSize = 10 * 1024 * 1024; // 10MB
-
-        let addedCount = 0;
-        for (const file of incomingFiles) {
-            if (existingFileCount + addedCount >= maxFiles) {
-                alert(`最多只能添加 ${maxFiles} 个文件。`);
-                break;
-            }
-            if (file.size > maxFileSize) {
-                alert(`单个文件 "${file.name}" 大小不能超过10MB。`);
-                continue; // Skip this file
-            }
-
-            const listItem = document.createElement('li');
-            listItem.textContent = file.name + ' (' + (file.size / 1024 / 1024).toFixed(2) + ' MB)'; // Show size in MB
-            listItem.setAttribute('data-filename', file.name); // Store filename for potential removal later
-            fileList.appendChild(listItem);
-            addedCount++;
-        }
-        
-        // Update the actual file input's files property to only include successfully validated files.
-        // This is tricky because FileList is immutable. A common workaround is to re-assign 'value' to null 
-        // if any files are rejected, forcing the user to re-select valid files, 
-        // or to manage the files to be uploaded in a separate array.
-        // For simplicity here, if any file is rejected, we clear the input. The user should be notified.
-        if (incomingFiles.length > 0 && addedCount < incomingFiles.length) {
-            // Some files were rejected
-            document.getElementById('fileUpload').value = null; // Clear the input
-             // Re-filter the fileList UI to show only the valid ones that would have been processed
-            const currentFiles = Array.from(document.getElementById('fileUpload').files); // This will be empty now
-            const newUiFiles = [];
-            const listItems = fileList.getElementsByTagName('li');
-            // This logic gets complex if we want to perfectly sync a separate array with the UI
-            // and the file input.
-            // The simplest at this stage is to manage files in an array if we need to filter the input.
-            // For now, we will just alert and the user might have to re-select.
-            // A better UX would be to maintain a global array `filesToUpload`
-        }
-        
-        // If we are managing a separate array for files to upload:
-        // globalFilesToUpload.push(...validFiles);
-        // Then use globalFilesToUpload in startConversion
-    }
-
-    function clearFileList() {
-        document.getElementById('fileList').innerHTML = '';
-        document.getElementById('fileUpload').value = null; 
-        document.getElementById('convertedFilesTableContainer').innerHTML = ''; // Also clear converted files table
+        console.log("当前选择的转换类型 (sub-tab): ", currentSelectedSubTab);
+        // updateFileUploadTips(currentSelectedSubTab); // This can be re-enabled if specific tips are needed
     }
 
     function getCookie(name) {
@@ -226,209 +189,174 @@
         }
         return cookieValue;
     }
-    const csrftoken = getCookie('csrftoken');
 
-    function startConversion() {
-        if (isConverting) {
-            alert("已有转换任务正在进行中，请稍候。");
-            return;
-        }
-
-        const fileInput = document.getElementById('fileUpload');
-        const files = fileInput.files; // These are the files currently selected in the input
-        
-        // It's better to use a list of files accumulated from handleFiles if complex validation/filtering happens.
-        // For now, assuming handleFiles has done basic checks and the files in fileInput are what we attempt.
-        const fileListUI = document.getElementById('fileList').getElementsByTagName('li');
-
-        if (fileListUI.length === 0) { // Check our visual list instead of fileInput.files directly
-            alert("请先添加文件！");
-            return;
-        }
-        
-        // Re-validate before sending, in case the input was manipulated or to be absolutely sure.
+    function handleFiles(incomingFiles) {
+        const fileListUI = document.getElementById('fileList');
         const maxFiles = 10;
         const maxFileSize = 10 * 1024 * 1024; // 10MB
 
-        if (fileListUI.length > maxFiles) {
-            alert(`最多只能转换 ${maxFiles} 个文件。请先清空列表并重新选择。`);
+        for (const file of incomingFiles) {
+            if (uploadedFiles.length >= maxFiles) {
+                alert(`最多只能添加 ${maxFiles} 个文件。`);
+                break;
+            }
+            if (file.size > maxFileSize) {
+                alert(`单个文件 "${file.name}" 大小不能超过10MB。`);
+                continue;
+            }
+            // Check for duplicate filenames
+            if (uploadedFiles.some(f => f.name === file.name)) {
+                alert(`文件 "${file.name}" 已存在于列表中。`);
+                continue;
+            }
+
+            uploadedFiles.push(file);
+            const listItem = document.createElement('li');
+            listItem.textContent = file.name + ' (' + (file.size / 1024 / 1024).toFixed(2) + ' MB)';
+            listItem.setAttribute('data-filename', file.name); 
+            fileListUI.appendChild(listItem);
+        }
+        document.getElementById('fileUpload').value = null; // Clear the input after processing to allow re-adding same named file if removed then re-added.
+    }
+
+    function clearFileList() {
+        document.getElementById('fileList').innerHTML = '';
+        uploadedFiles.length = 0; // Clear the array
+        document.getElementById('convertedFilesTableContainer').innerHTML = ''; // Clear previous results
+    }
+
+    function startConversion() {
+        if (isConverting) {
+            alert("正在转换中，请稍候...");
+            return;
+        }
+        if (uploadedFiles.length === 0) {
+            alert("请先添加要转换的文件。");
             return;
         }
 
-        const filesToUpload = [];
-        // We need to get the actual File objects. The fileListUI only has text.
-        // This means we MUST rely on the fileInput.files, or manage File objects in a global array.
-        // Let's assume fileInput.files is the source of truth after selection.
-        // The handleFiles function should ensure fileInput.files reflects valid choices,
-        // or we build a separate array.
-
-        // Given the previous handleFiles logic might clear fileInput.value,
-        // it's more robust to build an array of File objects.
-        // Let's modify handleFiles to populate such an array.
-
-        // For now, proceeding with fileInput.files, assuming it's not cleared by handleFiles
-        // unless ALL files are bad. If handleFiles clears it on ANY bad file, then this files array will be empty.
-
-        if (files.length === 0 && fileListUI.length > 0) {
-             alert("文件选择似乎有问题，请重新选择文件。");
-             // This state can happen if handleFiles clears the input after some invalid files were chosen
-             // but leaves the UI list populated.
-             return;
-        }
-        if (files.length === 0 && fileListUI.length === 0){
-            alert("请先添加文件！");
+        // Determine output format based on currentSelectedSubTab
+        let outputFormat = 'docx'; // Default
+        if (currentSelectedMainTab === 'imgToFile') {
+            if (currentSelectedSubTab === 'imgToPdf') {
+                outputFormat = 'pdf';
+            } else if (currentSelectedSubTab === 'imgToWord') {
+                outputFormat = 'docx';
+            } else {
+                alert("请选择一个有效的图片转换类型 (Word 或 PDF)。");
+                return;
+            }
+        } else {
+            // Placeholder for other main tab conversion logic if they were to be implemented
+            alert("当前仅支持 图片转文件 功能。");
             return;
         }
 
+        const conversionBtn = document.getElementById('startConversionBtn');
+        conversionBtn.textContent = '等待转换中...';
+        conversionBtn.style.backgroundColor = '#ffc107'; // Yellow
+        conversionBtn.disabled = true;
         isConverting = true;
-        const startBtn = document.getElementById('startConversionBtn');
-        startBtn.textContent = "等待转换中...";
-        startBtn.style.backgroundColor = "yellow";
-        startBtn.style.color = "black";
-        startBtn.disabled = true;
+
+        document.getElementById('convertedFilesTableContainer').innerHTML = '<p>正在处理，请稍候...</p>';
 
         const formData = new FormData();
-        for (let i = 0; i < files.length; i++) {
-            if (files[i].size > maxFileSize) {
-                alert(`文件 "${files[i].name}" 超过10MB，将不会被处理。`);
-                continue; // Skip this file
-            }
-            if (i >= maxFiles) { // Should be filesToUpload.length if using a separate array
-                 alert(`超过最大文件数 ${maxFiles}，部分文件将不会被处理。`);
-                 break;
-            }
-            formData.append('images', files[i]);
-        }
+        uploadedFiles.forEach(file => {
+            formData.append('images', file);
+        });
+        formData.append('merge_output', document.getElementById('mergeOutputCheckbox').checked);
+        formData.append('output_format', outputFormat); // Pass the determined output format
 
-        if (!formData.has('images')) {
-            alert("没有有效的文件可供转换。请检查文件大小和数量限制。");
-            isConverting = false;
-            startBtn.textContent = "开始转换";
-            startBtn.style.backgroundColor = "#007bff";
-            startBtn.style.color = "white";
-            startBtn.disabled = false;
-            return;
-        }
+        const csrfToken = getCookie('csrftoken');
 
-        const mergeOutput = document.getElementById('mergeOutputCheckbox').checked;
-        formData.append('merge_output', mergeOutput);
-        // formData.append('conversion_type', currentSelectedSubTab); // If needed later
-
-        fetch("{% url 'converter:process_image_to_word' %}", { // Ensure this URL is correct
+        fetch('{% url "converter:process_images" %}', { // Updated URL
             method: 'POST',
             headers: {
-                'X-CSRFToken': csrftoken
+                'X-CSRFToken': csrfToken
             },
             body: formData
         })
         .then(response => {
             if (!response.ok) {
-                throw new Error(`HTTP error! status: ${response.status}`);
+                return response.text().then(text => { 
+                    throw new Error('服务器响应错误: ' + response.status + ' - ' + text);
+                });
             }
             return response.json();
         })
         .then(data => {
-            console.log("Conversion response:", data);
+            console.log("Conversion response data:", data);
+            conversionBtn.textContent = '开始转换';
+            conversionBtn.style.backgroundColor = '#007bff'; // Blue
+            conversionBtn.disabled = false;
             isConverting = false;
-            startBtn.textContent = "开始转换";
-            startBtn.style.backgroundColor = "#007bff";
-            startBtn.style.color = "white";
-            startBtn.disabled = false;
 
-            if (data.results) {
-                displayConvertedFilesTable(data.results);
-                console.log("转换处理完成，结果已显示。");
+            const tableContainer = document.getElementById('convertedFilesTableContainer');
+            tableContainer.innerHTML = ''; // Clear loading message
+
+            if (data.results && data.results.length > 0) {
+                const table = document.createElement('table');
+                table.style.width = '100%';
+                table.setAttribute('border', '1');
+                table.style.borderCollapse = 'collapse';
+
+                const thead = table.createTHead();
+                const headerRow = thead.insertRow();
+                const th1 = document.createElement('th');
+                th1.textContent = '原始文件名';
+                headerRow.appendChild(th1);
+                const th2 = document.createElement('th');
+                th2.textContent = '转换后文件名';
+                headerRow.appendChild(th2);
+                const th3 = document.createElement('th');
+                th3.textContent = '操作';
+                headerRow.appendChild(th3);
+                const th4 = document.createElement('th');
+                th4.textContent = '状态';
+                headerRow.appendChild(th4);
+
+                const tbody = table.createTBody();
+                data.results.forEach(file => {
+                    const row = tbody.insertRow();
+                    row.insertCell().textContent = file.original_name || 'N/A';
+                    row.insertCell().textContent = file.converted_name || 'N/A';
+                    const actionCell = row.insertCell();
+                    if (file.status === 'success' && file.download_url) {
+                        const downloadLink = document.createElement('a');
+                        downloadLink.href = file.download_url;
+                        downloadLink.textContent = '下载';
+                        downloadLink.className = 'download-link'; 
+                        downloadLink.setAttribute('download', file.converted_name || 'download');
+                        actionCell.appendChild(downloadLink);
+                    } else {
+                        actionCell.textContent = '-';
+                    }
+                    const statusCell = row.insertCell();
+                    statusCell.textContent = file.message || file.status;
+                    if (file.status !== 'success') {
+                        statusCell.style.color = 'red';
+                    }
+                });
+                tableContainer.appendChild(table);
             } else {
-                alert("转换失败或未返回结果。");
-                displayConvertedFilesTable([]); // Clear or show empty table
+                tableContainer.innerHTML = '<p>没有文件被处理，或处理过程中发生未知错误。</p>';
             }
         })
         .catch(error => {
-            console.error("Conversion error:", error);
+            console.error('Conversion error:', error);
+            conversionBtn.textContent = '开始转换';
+            conversionBtn.style.backgroundColor = '#dc3545'; // Red for error
+            conversionBtn.disabled = false;
             isConverting = false;
-            startBtn.textContent = "开始转换";
-            startBtn.style.backgroundColor = "#007bff";
-            startBtn.style.color = "white";
-            startBtn.disabled = false;
-            alert("转换过程中发生错误: " + error.message);
-            displayConvertedFilesTable([]); // Clear or show empty table
+            const tableContainer = document.getElementById('convertedFilesTableContainer');
+            tableContainer.innerHTML = `<p style="color: red;">转换失败: ${error.message}</p>`;
         });
     }
-
-    function displayConvertedFilesTable(results) { // results is now an array from backend
-        const tableContainer = document.getElementById('convertedFilesTableContainer');
-        tableContainer.innerHTML = ''; // Clear previous table/content
-
-        if (!results || results.length === 0) {
-            // Optionally display a message if no files were converted or an error occurred
-            const p = document.createElement('p');
-            p.textContent = '没有转换结果可显示。';
-            tableContainer.appendChild(p);
-            return;
-        }
-
-        const table = document.createElement('table');
-        table.style.width = '100%';
-        table.style.borderCollapse = 'collapse';
-        table.style.marginTop = '10px';
-
-        // Table Header
-        const thead = table.createTHead();
-        const headerRow = thead.insertRow();
-        const th1 = document.createElement('th');
-        th1.textContent = '文件名';
-        th1.style.border = '1px solid #ddd';
-        th1.style.padding = '8px';
-        th1.style.textAlign = 'left';
-        th1.style.backgroundColor = '#f2f2f2';
-        headerRow.appendChild(th1);
-
-        const th2 = document.createElement('th');
-        th2.textContent = '操作';
-        th2.style.border = '1px solid #ddd';
-        th2.style.padding = '8px';
-        th2.style.textAlign = 'center'; // Center download button
-        th2.style.width = '120px'; // Fixed width for action column
-        th2.style.backgroundColor = '#f2f2f2';
-        headerRow.appendChild(th2);
-
-        // Table Body
-        const tbody = table.createTBody();
-        results.forEach(result => {
-            const row = tbody.insertRow();
-            
-            const cell1 = row.insertCell();
-            cell1.textContent = result.converted_name || result.original_name; // Show converted name or original if error
-            cell1.style.border = '1px solid #ddd';
-            cell1.style.padding = '8px';
-
-            const cell2 = row.insertCell();
-            if (result.status === 'success' && result.download_url) {
-                const downloadLink = document.createElement('a');
-                downloadLink.href = result.download_url;
-                downloadLink.textContent = '下载';
-                downloadLink.setAttribute('download', result.converted_name || 'converted_file.docx'); // Suggest a filename to the browser
-                downloadLink.style.padding = '5px 10px';
-                downloadLink.style.backgroundColor = '#28a745';
-                downloadLink.style.color = 'white';
-                downloadLink.style.textDecoration = 'none';
-                downloadLink.style.border = 'none';
-                downloadLink.style.borderRadius = '4px';
-                downloadLink.style.cursor = 'pointer';
-                cell2.appendChild(downloadLink);
-            } else {
-                cell2.textContent = result.message || '转换失败';
-                cell2.style.color = 'red';
-            }
-            cell2.style.border = '1px solid #ddd';
-            cell2.style.padding = '8px';
-            cell2.style.textAlign = 'center';
-        });
-        tableContainer.appendChild(table);
-    }
-
+    // Initialize with the default tab active
     document.addEventListener('DOMContentLoaded', function() {
-        showTab('imgToFile');
+        showTab(currentSelectedMainTab);
+         // The call to selectSubTab for the default sub-tab is now inside showTab
     });
+
 </script>
 {% endblock %} 
