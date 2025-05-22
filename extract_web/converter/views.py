@@ -17,6 +17,7 @@ from docx import Document
 from docx.oxml import OxmlElement # For adding content from sub-documents
 from docx.oxml.ns import qn
 from pathlib import Path # 新增
+from datetime import datetime # 新增 datetime
 
 # 尝试导入 docx2pdf，如果失败则记录错误，但脚本仍可生成docx
 try:
@@ -42,15 +43,13 @@ def register(request):
             login(request, user) 
             
             try:
-                # 修改：用户文件夹也应该在 MEDIA_ROOT 下，即 BASE_DIR / 'his_pic' / username
-                user_dir = os.path.join(settings.BASE_DIR, 'his_pic', user.username)
-                os.makedirs(user_dir, exist_ok=True)
-                # 创建 uploads 和 converted_files 子目录
-                os.makedirs(os.path.join(user_dir, 'uploads'), exist_ok=True)
-                os.makedirs(os.path.join(user_dir, 'converted_files'), exist_ok=True)
-                logger.info(f"Created directory structure for user {user.username} at {user_dir}")
+                # 注册时只创建用户主目录 his_pic/<username>
+                # 日期目录将在 process_images_view 中按需创建
+                user_main_dir = os.path.join(settings.BASE_DIR, 'his_pic', user.username)
+                os.makedirs(user_main_dir, exist_ok=True)
+                logger.info(f"Created main directory for user {user.username} at {user_main_dir}")
             except OSError as e:
-                logger.error(f"Error creating directory for user {user.username}: {e}")
+                logger.error(f"Error creating main directory for user {user.username}: {e}")
             
             return redirect('converter:index')  
     else:
@@ -90,18 +89,17 @@ def admin_delete_user(request, user_id):
             messages.error(request, "您不能删除您自己的账户。")
         else:
             username = user_to_delete.username
-            # 修改：用户文件夹路径与 register 和 process_images_view 统一
+            # 删除整个 his_pic/<username> 目录，包括所有日期子目录
             user_folder_path = os.path.join(settings.BASE_DIR, 'his_pic', username)
             if os.path.exists(user_folder_path):
                 try:
                     import shutil
                     shutil.rmtree(user_folder_path)
-                    messages.success(request, f"用户 '{username}' 的文件夹已成功删除。")
-                    logger.info(f"Deleted user folder for {username} at {user_folder_path}")
+                    messages.success(request, f"用户 '{username}' 的所有数据文件夹已成功删除。")
+                    logger.info(f"Deleted entire user data folder for {username} at {user_folder_path}")
                 except OSError as e:
-                    messages.error(request, f"删除用户 '{username}' 的文件夹时出错: {e}")
-                    logger.error(f"Error deleting user folder for {username}: {e}")
-            
+                    messages.error(request, f"删除用户 '{username}' 的数据文件夹时出错: {e}")
+                    logger.error(f"Error deleting user data folder for {username}: {e}")
             user_to_delete.delete()
             messages.success(request, f"用户 '{username}' 已成功删除。")
     else:
@@ -154,27 +152,32 @@ def append_document(source_doc, target_doc):
 @login_required
 @require_POST
 def process_images_view(request): # 重命名视图函数
-    uploaded_files_raw_info = []
-    user_upload_dir = os.path.join(settings.BASE_DIR, 'his_pic', request.user.username, 'uploads')
-    user_converted_dir = os.path.join(settings.BASE_DIR, 'his_pic', request.user.username, 'converted_files')
+    today_date_str = datetime.now().strftime("%Y%m%d")
+    user_base_dir = os.path.join(settings.BASE_DIR, 'his_pic', request.user.username, today_date_str)
+
+    user_upload_dir = os.path.join(user_base_dir, 'uploads')
+    user_converted_dir = os.path.join(user_base_dir, 'converted_files')
     
     os.makedirs(user_upload_dir, exist_ok=True)
     os.makedirs(user_converted_dir, exist_ok=True)
+    logger.info(f"Ensured daily directories exist: Uploads='{user_upload_dir}', Converted='{user_converted_dir}'")
 
     script_path = os.path.join(settings.BASE_DIR.parent, 'extract_text_from_images.py')
     
     merge_output = request.POST.get('merge_output', 'false').lower() == 'true'
     output_format = request.POST.get('output_format', 'docx').lower() # 新增：获取输出格式
 
-    logger.debug(f"Process Images Request: User={request.user.username}, Merge={merge_output}, Format={output_format}")
+    logger.debug(f"Process Images Request: User={request.user.username}, Date={today_date_str}, Merge={merge_output}, Format={output_format}")
 
     if output_format == 'pdf' and not DOCX2PDF_AVAILABLE_IN_VIEW:
         logger.error("PDF output requested by view, but docx2pdf is not available in the Django view environment.")
         # 可以考虑返回一个特定的错误信息给前端，告知用户PDF转换不可用
         # For now, let it proceed, script will also check and might fallback or error.
 
+    uploaded_files_raw_info = []
     for uploaded_file in request.FILES.getlist('images'):
         original_filename = uploaded_file.name
+        # 保存上传文件到当天的日期目录下
         uploaded_file_path = os.path.join(user_upload_dir, original_filename)
         try:
             with open(uploaded_file_path, 'wb+') as destination:
@@ -182,7 +185,7 @@ def process_images_view(request): # 重命名视图函数
                     destination.write(chunk)
             uploaded_files_raw_info.append({'name': original_filename, 'status': 'uploaded', 'path': uploaded_file_path})
         except Exception as e:
-            logger.error(f"Error uploading file {original_filename}: {e}")
+            logger.error(f"Error uploading file {original_filename} to {user_upload_dir}: {e}")
             uploaded_files_raw_info.append({'name': original_filename, 'status': 'upload_error', 'message': str(e)})
     
     processed_results = []
@@ -241,11 +244,11 @@ def process_images_view(request): # 重命名视图函数
 
     # 第二阶段：处理和合并 (如果需要)
     if merge_output and temp_files_for_script_processing:
-        logger.debug(f"Attempting to merge {len(temp_files_for_script_processing)} DOCX files.")
+        logger.debug(f"Attempting to merge {len(temp_files_for_script_processing)} DOCX files for date {today_date_str}.")
         random_chars = ''.join(random.choices(string.ascii_lowercase + string.digits, k=8))
         
         # 合并后的文件名基础部分 (无扩展名)
-        merged_base_filename = f"{request.user.username}_{random_chars}"
+        merged_base_filename = f"{request.user.username}_{today_date_str}_{random_chars}"
         # 合并后的 .docx 路径 (总是先合并为 .docx)
         merged_docx_path = os.path.join(user_converted_dir, f"{merged_base_filename}.docx")
         logger.debug(f"Merged DOCX filename will be: {merged_docx_path}")
@@ -294,7 +297,7 @@ def process_images_view(request): # 重命名视图函数
                     messages.warning(request, "PDF转换库不可用，已生成DOCX文件。")
             
             if os.path.exists(final_merged_path):
-                relative_media_path = os.path.join(request.user.username, 'converted_files', final_merged_filename).replace("\\\\", "/")
+                relative_media_path = os.path.join(request.user.username, today_date_str, 'converted_files', final_merged_filename).replace("\\\\", "/")
                 download_url = f"{settings.MEDIA_URL}{relative_media_path}"
                 merged_original_names = ", ".join([info['original_name'] for info in temp_files_for_script_processing])
                 processed_results = [{
@@ -369,7 +372,7 @@ def process_images_view(request): # 重命名视图函数
                     conversion_successful = True
             
             if conversion_successful and os.path.exists(final_output_path):
-                relative_media_path = os.path.join(request.user.username, 'converted_files', final_output_filename).replace("\\\\", "/")
+                relative_media_path = os.path.join(request.user.username, today_date_str, 'converted_files', final_output_filename).replace("\\\\", "/")
                 download_url = f"{settings.MEDIA_URL}{relative_media_path}"
                 processed_results.append({
                     'original_name': original_image_name,
@@ -380,7 +383,7 @@ def process_images_view(request): # 重命名视图函数
             elif os.path.exists(temp_docx_for_individual_conversion): # Fallback if final path doesn't exist but temp docx does
                  logger.warning(f"Final path {final_output_path} not found, but temp docx {temp_docx_for_individual_conversion} exists. Serving temp docx.")
                  final_output_filename = os.path.basename(temp_docx_for_individual_conversion)
-                 relative_media_path = os.path.join(request.user.username, 'converted_files', final_output_filename).replace("\\\\", "/")
+                 relative_media_path = os.path.join(request.user.username, today_date_str, 'converted_files', final_output_filename).replace("\\\\", "/")
                  download_url = f"{settings.MEDIA_URL}{relative_media_path}"
                  processed_results.append({
                     'original_name': original_image_name,
