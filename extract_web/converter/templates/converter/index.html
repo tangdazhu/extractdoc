@@ -180,6 +180,8 @@
         // Clear file list and conversion results when switching main tabs
         if (currentSelectedMainTab !== tabId) { // Only clear if actually switching to a different main tab
             clearFileList();
+            clearConvertedFilesList();
+            currentSelectedMainTab = tabId; // Set this early to prevent double-clearing in selectSubTab
         }
 
         document.querySelectorAll('.tab-content').forEach(tab => tab.classList.add('hidden'));
@@ -197,16 +199,22 @@
                  selectSubTab(firstSubTabButton, match[1], false); // Pass false to avoid double update initially
             } else {
                 console.warn("Could not determine subTabType for default selection in main tab: ", tabId);
-                currentSelectedSubTab = null; 
+                currentSelectedSubTab = null;
             }
         } else {
-            currentSelectedSubTab = null; 
+            currentSelectedSubTab = null;
         }
         updateFileUploadAcceptType(); // Update for the new main tab and its default sub-tab
         console.log("Current main tab: ", currentSelectedMainTab, "Current sub tab: ", currentSelectedSubTab);
     }
 
     function selectSubTab(buttonElement, subTabType, shouldUpdateAccept = true) {
+        // Clear file list and conversion results when switching sub tabs
+        if (currentSelectedSubTab !== subTabType) { // Only clear if actually switching to a different sub-tab
+            clearFileList();
+            clearConvertedFilesList();
+        }
+
         if (buttonElement && buttonElement.parentElement) {
             buttonElement.parentElement.querySelectorAll('.sub-tab-button').forEach(btn => btn.classList.remove('active'));
             buttonElement.classList.add('active');
@@ -265,6 +273,10 @@
     function clearFileList() {
         document.getElementById('fileList').innerHTML = '';
         uploadedFiles.length = 0; // Clear the array
+        clearConvertedFilesList(); // Also clear converted files when clearing upload list
+    }
+
+    function clearConvertedFilesList() {
         document.getElementById('convertedFilesTableContainer').innerHTML = ''; // Clear previous results
     }
 
