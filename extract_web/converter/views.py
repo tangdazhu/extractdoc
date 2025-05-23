@@ -21,6 +21,7 @@ from datetime import datetime # 新增 datetime
 from django.urls import reverse
 import shutil # Import shutil earlier as it's used in multiple places
 from .ppt_pdf_converter import convert_pptx_to_pdf # 导入PPT转换模块
+from .pic_file_converter import process_images_to_files # 导入图片转文件模块
 
 logger = logging.getLogger('converter') # 获取 logger 实例
 
@@ -201,47 +202,10 @@ def process_images_view(request): # 重命名视图函数
     temp_files_for_final_processing = [] # Will store paths of files ready for final conversion/merge (docx or original non-image files)
 
     if main_tab == 'imgToFile':
-        logger.info("Processing via imgToFile (script-based OCR to DOCX first)")
-        # 第一阶段 (imgToFile): 调用脚本为每个图片生成单独的 .docx 文件
-        script_path = os.path.join(settings.BASE_DIR.parent, 'extract_text_from_images.py')
-        for up_file_info in uploaded_files_info_from_frontend:
-            if up_file_info['status'] == 'uploaded':
-                original_name = up_file_info['name']
-                input_image_path = up_file_info['path']
-                temp_script_output_docx_filename = f"{os.path.splitext(original_name)[0]}_tempScriptOutput.docx"
-                temp_script_output_docx_path = os.path.join(user_converted_dir, temp_script_output_docx_filename)
-                try:
-                    python_executable = 'python' 
-                    command = [python_executable, script_path, input_image_path, temp_script_output_docx_path, '--format', 'docx']
-                    logger.debug(f"Executing script command: {' '.join(command)}")
-                    result = subprocess.run(command, capture_output=True, text=True, check=False, encoding='utf-8', errors='replace')
-                    if result.returncode == 0 and os.path.exists(temp_script_output_docx_path):
-                        logger.info(f"Script successfully created DOCX: {temp_script_output_docx_path} for {original_name}")
-                        temp_files_for_final_processing.append({
-                            'path': temp_script_output_docx_path, 
-                            'original_name': original_name,
-                            'base_filename_no_ext': os.path.splitext(original_name)[0]
-                        })
-                    else: 
-                        error_message = result.stderr or result.stdout or "Script execution failed."
-                        if not os.path.exists(temp_script_output_docx_path):
-                             error_message += " Script output DOCX file not found."
-                        logger.error(f"Error converting {original_name} by script: {error_message}")
-                        processed_results.append({ 
-                            'original_name': original_name,
-                            'converted_name': '',
-                            'download_url': '',
-                            'status': 'conversion_error',
-                            'message': error_message
-                        })
-                except Exception as e:
-                    logger.exception(f"Exception during script execution for {original_name}")
-                    processed_results.append({
-                        'original_name': original_name, 'status': 'conversion_error',
-                        'message': f'服务器内部错误: {str(e)}'
-                    })
-            else: 
-                processed_results.append(up_file_info)
+        # 使用新的图片转文件处理模块
+        img_processed_results, img_temp_files = process_images_to_files(uploaded_files_info_from_frontend, user_converted_dir)
+        processed_results.extend(img_processed_results)
+        temp_files_for_final_processing.extend(img_temp_files)
     
     elif main_tab == 'fileToPdf' and sub_tab == 'wordToPdf':
         logger.info(f"Processing via fileToPdf/wordToPdf (direct DOCX to PDF)")
