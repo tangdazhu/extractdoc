@@ -20,7 +20,7 @@ from pathlib import Path # 新增
 from datetime import datetime # 新增 datetime
 from django.urls import reverse
 import shutil # Import shutil earlier as it's used in multiple places
-from .ppt_converter import convert_pptx_to_pdf # 导入PPT转换模块
+from .ppt_pdf_converter import convert_pptx_to_pdf # 导入PPT转换模块
 
 logger = logging.getLogger('converter') # 获取 logger 实例
 
