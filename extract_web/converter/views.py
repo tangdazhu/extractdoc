@@ -22,6 +22,7 @@ from django.urls import reverse
 import shutil # Import shutil earlier as it's used in multiple places
 from .ppt_pdf_converter import convert_pptx_to_pdf # 导入PPT转换模块
 from .pic_file_converter import process_images_to_files # 导入图片转文件模块
+from .excel_pdf_converter import convert_excel_to_pdf # 导入Excel转换模块
 
 logger = logging.getLogger('converter') # 获取 logger 实例
 
@@ -298,6 +299,57 @@ def process_images_view(request): # 重命名视图函数
                     })
             else:
                 processed_results.append(up_file_info)
+    elif main_tab == 'fileToPdf' and sub_tab == 'excelToPdf':
+        logger.info(f"Processing via fileToPdf/excelToPdf (direct Excel to PDF)")
+        for up_file_info in uploaded_files_info_from_frontend:
+            if up_file_info['status'] == 'uploaded':
+                original_name = up_file_info['name']
+                if not (original_name.lower().endswith('.xls') or original_name.lower().endswith('.xlsx')):
+                    logger.warning(f"Skipping non-Excel file {original_name} in excelToPdf mode.")
+                    processed_results.append({
+                        'original_name': original_name, 'status': 'error',
+                        'message': '文件类型不是 Excel (.xls/.xlsx)。'
+                    })
+                    continue
+
+                source_excel_path = up_file_info['path']
+                temp_excel_in_converted_dir_filename = f"{os.path.splitext(original_name)[0]}_prePdf{os.path.splitext(original_name)[1]}"
+                temp_excel_in_converted_dir_path = os.path.join(user_converted_dir, temp_excel_in_converted_dir_filename)
+                
+                try:
+                    # 新增：在复制前尝试删除已存在的目标文件
+                    if os.path.exists(temp_excel_in_converted_dir_path):
+                        logger.info(f"Target file {temp_excel_in_converted_dir_path} exists. Attempting to remove it before copy.")
+                        try:
+                            os.remove(temp_excel_in_converted_dir_path)
+                            logger.info(f"Successfully removed existing target file: {temp_excel_in_converted_dir_path}")
+                        except OSError as e_remove:
+                            logger.error(f"Failed to remove existing target file {temp_excel_in_converted_dir_path}: {e_remove}. Will proceed with copy attempt.", exc_info=True)
+                            # 即使删除失败，也继续尝试copy，让copy操作自己抛出更具体的权限错误（如果问题依旧）
+                    
+                    import shutil # Ensure shutil is imported here if not globally in views.py
+                    shutil.copy(source_excel_path, temp_excel_in_converted_dir_path)
+                    logger.info(f"Copied Excel file {original_name} to {temp_excel_in_converted_dir_path} for PDF conversion process.")
+                    
+                    temp_files_for_final_processing.append({
+                        'path': temp_excel_in_converted_dir_path, 
+                        'original_name': original_name,
+                        'base_filename_no_ext': os.path.splitext(original_name)[0]
+                    })
+                except PermissionError as pe: # 更明确地捕获权限错误
+                    logger.error(f"Permission denied during preparation (shutil.copy or pre-remove) of Excel file {original_name} to {temp_excel_in_converted_dir_path}: {pe}", exc_info=True)
+                    processed_results.append({
+                        'original_name': original_name, 'status': 'error',
+                        'message': f'准备Excel文件时权限不足 ({os.path.basename(temp_excel_in_converted_dir_path)}): {str(pe)}' # 使用 basename 简化路径显示
+                    })
+                except Exception as e: # 其他 shutil.copy 或 os.remove 可能抛出的错误
+                    logger.exception(f"Error preparing Excel file {original_name} (copying to {temp_excel_in_converted_dir_path}): {e}")
+                    processed_results.append({
+                        'original_name': original_name, 'status': 'error',
+                        'message': f'准备Excel文件时出错 ({os.path.basename(temp_excel_in_converted_dir_path)}): {str(e)}' # 使用 basename 简化路径显示
+                    })
+            else:
+                processed_results.append(up_file_info)
     else:
         logger.warning(f"Unhandled main_tab '{main_tab}' or sub_tab '{sub_tab}'. Cannot process files.")
         return JsonResponse({'results': [{'original_name': '-', 'status': 'error', 'message': '未实现的处理类型。'}], 'merge_output': merge_output})
@@ -312,8 +364,8 @@ def process_images_view(request): # 重命名视图函数
         merged_base_filename = f"{request.user.username}_{today_date_str}_{random_chars}"
         
         # Default final output to be PDF if the sub_tab implies it, or if original output_format was PDF
-        # For pptToPdf, the final merged output should be PDF.
-        if main_tab == 'fileToPdf' and sub_tab == 'pptToPdf':
+        # For pptToPdf and excelToPdf, the final merged output should be PDF.
+        if main_tab == 'fileToPdf' and sub_tab in ['pptToPdf', 'excelToPdf']:
             final_target_format_for_merge = 'pdf'
         else: # For imgToFile or wordToPdf, the existing output_format (which could be docx or pdf) is the target.
             final_target_format_for_merge = output_format
@@ -404,6 +456,91 @@ def process_images_view(request): # 重命名视图函数
                     except OSError: pass
                 for ppt_info in temp_files_for_final_processing: # These are the copied PPTs
                     try: os.remove(ppt_info['path']); logger.debug(f"Cleaned up temp PPT source: {ppt_info['path']}")
+                    except OSError: pass
+        
+        elif main_tab == 'fileToPdf' and sub_tab == 'excelToPdf':
+            if not PYPDF2_AVAILABLE:
+                logger.error("Cannot merge Excels to PDF: PyPDF2 library is not available.")
+                processed_results = [{'original_name': "Merged Document", 'status': 'error', 'message': '无法合并Excel到PDF：缺少必需的PDF处理库(PyPDF2)。请先将各Excel单独转换为PDF。'}]
+            else:
+                logger.info("Merging Excels to a single PDF using PyPDF2.")
+                temp_individual_pdfs = []
+                conversion_all_individual_excel_to_pdf_successful = True
+                
+                for excel_info in temp_files_for_final_processing:
+                    individual_excel_path = excel_info['path']
+                    individual_pdf_temp_name = f"{os.path.splitext(os.path.basename(individual_excel_path))[0]}_temp.pdf"
+                    individual_pdf_temp_path = os.path.join(user_converted_dir, individual_pdf_temp_name)
+                    
+                    try:
+                        logger.info(f"Converting individual Excel '{individual_excel_path}' to temporary PDF '{individual_pdf_temp_path}'")
+                        # 使用新的Excel转换函数
+                        success, actual_pdf_path, error_msg = convert_excel_to_pdf(individual_excel_path, individual_pdf_temp_path)
+                        if success and actual_pdf_path:
+                            temp_individual_pdfs.append(actual_pdf_path)
+                            logger.info(f"Successfully converted '{individual_excel_path}' to '{actual_pdf_path}'")
+                        else:
+                            # This is the case where convert_excel_to_pdf returned success=False OR actual_pdf_path was None
+                            logger.error(f"convert_excel_to_pdf for original file '{excel_info['original_name']}' (source: '{individual_excel_path}') failed. Error: {error_msg}")
+                            processed_results.append({
+                                'original_name': excel_info['original_name'], 
+                                'status': 'error', 
+                                'message': f"转换Excel '{excel_info['original_name']}' 到PDF失败: {error_msg or '转换器返回失败且无具体错误信息'}"
+                            })
+                            conversion_all_individual_excel_to_pdf_successful = False
+                            break # Stop trying to process more files for this merge operation
+                    except Exception as e_ind_pdf:
+                        # This except block now catches other unexpected errors during the try block,
+                        # not the explicit failure from convert_excel_to_pdf.
+                        logger.error(f"Error converting individual Excel '{individual_excel_path}' to PDF: {e_ind_pdf}", exc_info=True)
+                        original_filename_str = excel_info["original_name"]
+                        exception_str = str(e_ind_pdf)
+                        message = f"转换Excel '{original_filename_str}' 到PDF失败: {exception_str}"
+                        processed_results.append({'original_name': excel_info['original_name'], 
+                                                  'status': 'error', 
+                                                  'message': message})
+                        conversion_all_individual_excel_to_pdf_successful = False
+                        break # Stop if one fails
+                
+                if conversion_all_individual_excel_to_pdf_successful and temp_individual_pdfs:
+                    pdf_merger = PdfMerger()
+                    try:
+                        for pdf_path in temp_individual_pdfs:
+                            pdf_merger.append(pdf_path)
+                        pdf_merger.write(final_merged_path)
+                        pdf_merger.close()
+                        logger.info(f"Successfully merged temporary PDFs into: {final_merged_path}")
+
+                        # Meta file for merged PDF
+                        meta_file_path_merged = f"{final_merged_path}.meta"
+                        merged_original_names_list = [info['original_name'] for info in temp_files_for_final_processing]
+                        try:
+                            with open(meta_file_path_merged, 'w', encoding='utf-8') as mf:
+                                mf.write(",".join(merged_original_names_list))
+                        except Exception as e_meta: logger.error(f"Error saving .meta file {meta_file_path_merged}: {e_meta}")
+
+                        relative_media_path = os.path.join(request.user.username, today_date_str, 'converted_files', final_merged_filename).replace("\\", "/")
+                        download_url = f"{settings.MEDIA_URL}{relative_media_path}"
+                        processed_results = [{'original_name': ",".join(merged_original_names_list), 'converted_name': final_merged_filename, 'download_url': download_url, 'status': 'success'}]
+                    except Exception as e_merge_pdf:
+                        logger.error(f"Error merging PDFs: {e_merge_pdf}", exc_info=True)
+                        original_names_str = ",".join([info['original_name'] for info in temp_files_for_final_processing]) # Fallback original name
+                        exception_str = str(e_merge_pdf)
+                        message = f"合并PDF时出错 ({original_names_str}): {exception_str}"
+                        processed_results.append({'original_name': "Merged Document", 
+                                              'status': 'error', 
+                                              'message': message})
+                elif not temp_individual_pdfs and conversion_all_individual_excel_to_pdf_successful : # Should not happen if list was populated
+                     processed_results.append({'original_name': "Merged Document", 
+                                           'status': 'error', 
+                                           'message': '没有PDF文件可供合并。'})
+
+                # Cleanup temporary individual PDFs and original Excels from converted_files
+                for temp_pdf in temp_individual_pdfs:
+                    try: os.remove(temp_pdf); logger.debug(f"Cleaned up temp PDF: {temp_pdf}")
+                    except OSError: pass
+                for excel_info in temp_files_for_final_processing: # These are the copied Excels
+                    try: os.remove(excel_info['path']); logger.debug(f"Cleaned up temp Excel source: {excel_info['path']}")
                     except OSError: pass
         
         else: # Existing merge logic for DOCX based sources (imgToFile, wordToPdf)
@@ -505,6 +642,14 @@ def process_images_view(request): # 重命名视图函数
                             if actual_pdf_path != final_output_path:
                                 final_output_path = actual_pdf_path
                                 final_output_filename = os.path.basename(actual_pdf_path)
+                        elif original_input_name.lower().endswith(('.xls', '.xlsx')):
+                            # Excel文件使用专门的转换函数
+                            success, actual_pdf_path, error_msg = convert_excel_to_pdf(temp_docx_for_individual_conversion, final_output_path)
+                            if not success:
+                                raise Exception(error_msg or "Excel转换失败，未知原因")
+                            if actual_pdf_path != final_output_path:
+                                final_output_path = actual_pdf_path
+                                final_output_filename = os.path.basename(actual_pdf_path)
                         else:
                             # Word文件使用docx2pdf
                             convert_docx_to_pdf(temp_docx_for_individual_conversion, final_output_path)
@@ -520,7 +665,12 @@ def process_images_view(request): # 重命名视图函数
                         final_output_path = temp_docx_for_individual_conversion # use its path
                         
                         exception_str = str(e)
-                        file_type = "PPT" if original_input_name.lower().endswith(('.ppt', '.pptx')) else "Word"
+                        if original_input_name.lower().endswith(('.ppt', '.pptx')):
+                            file_type = "PPT"
+                        elif original_input_name.lower().endswith(('.xls', '.xlsx')):
+                            file_type = "Excel"
+                        else:
+                            file_type = "Word"
                         message = f"文件 {original_input_name} 的PDF转换失败，保留原始{file_type}文件。错误: {exception_str}"
                         messages.warning(request, message) # Inform user via Django messages as well
 
@@ -540,7 +690,12 @@ def process_images_view(request): # 重命名视图函数
                     logger.error(f"PDF conversion for {original_input_name} requested, but docx2pdf not available. Serving original format.")
                     final_output_filename = os.path.basename(temp_docx_for_individual_conversion) # use its name
                     final_output_path = temp_docx_for_individual_conversion # use its path
-                    file_type = "PPT" if original_input_name.lower().endswith(('.ppt', '.pptx')) else "Word"
+                    if original_input_name.lower().endswith(('.ppt', '.pptx')):
+                        file_type = "PPT"
+                    elif original_input_name.lower().endswith(('.xls', '.xlsx')):
+                        file_type = "Excel"
+                    else:
+                        file_type = "Word"
                     messages.warning(request, f"文件 {original_input_name} 的PDF转换库不可用，已保留原始{file_type}格式文件。")
                     conversion_successful = True 
             elif output_format == 'docx': # This case is mostly for imgToFile where output_format can be docx
