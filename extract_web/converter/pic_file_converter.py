@@ -5,13 +5,14 @@ from django.conf import settings
 
 logger = logging.getLogger('converter')
 
-def process_images_to_files(uploaded_files_info, user_converted_dir):
+def process_images_to_files(uploaded_files_info, user_converted_dir, request_id):
     """
     处理图片转文件功能
     
     Args:
         uploaded_files_info: 上传文件信息列表，每个元素包含 {'name': str, 'status': str, 'path': str}
         user_converted_dir: 用户转换文件目录路径
+        request_id: 本次请求的唯一标识符
     
     Returns:
         tuple: (processed_results, temp_files_for_final_processing)
@@ -30,7 +31,7 @@ def process_images_to_files(uploaded_files_info, user_converted_dir):
         if up_file_info['status'] == 'uploaded':
             original_name = up_file_info['name']
             input_image_path = up_file_info['path']
-            temp_script_output_docx_filename = f"{os.path.splitext(original_name)[0]}_tempScriptOutput.docx"
+            temp_script_output_docx_filename = f"{os.path.splitext(original_name)[0]}_tempScriptOutput_{request_id}.docx"
             temp_script_output_docx_path = os.path.join(user_converted_dir, temp_script_output_docx_filename)
             
             try:
@@ -48,7 +49,7 @@ def process_images_to_files(uploaded_files_info, user_converted_dir):
                 )
                 
                 if result.returncode == 0 and os.path.exists(temp_script_output_docx_path):
-                    logger.info(f"Script successfully created DOCX: {temp_script_output_docx_path} for {original_name}")
+                    logger.info(f"Script successfully created DOCX (RequestID: {request_id}): {temp_script_output_docx_path} for {original_name}")
                     temp_files_for_final_processing.append({
                         'path': temp_script_output_docx_path, 
                         'original_name': original_name,
@@ -58,7 +59,7 @@ def process_images_to_files(uploaded_files_info, user_converted_dir):
                     error_message = result.stderr or result.stdout or "Script execution failed."
                     if not os.path.exists(temp_script_output_docx_path):
                          error_message += " Script output DOCX file not found."
-                    logger.error(f"Error converting {original_name} by script: {error_message}")
+                    logger.error(f"Error converting {original_name} by script (RequestID: {request_id}): {error_message}")
                     processed_results.append({ 
                         'original_name': original_name,
                         'converted_name': '',
@@ -67,7 +68,7 @@ def process_images_to_files(uploaded_files_info, user_converted_dir):
                         'message': error_message
                     })
             except Exception as e:
-                logger.exception(f"Exception during script execution for {original_name}")
+                logger.exception(f"Exception during script execution for {original_name} (RequestID: {request_id})")
                 processed_results.append({
                     'original_name': original_name, 
                     'status': 'conversion_error',

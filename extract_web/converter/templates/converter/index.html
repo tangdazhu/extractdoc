@@ -4,77 +4,285 @@
 
 {% block extra_head %}
 <style>
-    /* Styles specific to index.html - main converter layout */
-    .container { background-color: #fff; padding: 20px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); margin: 20px; }
-    /* Remove h1 styling from here as it's in base or not needed */
-    /* .header-nav-container no longer needed as header is in base.html */
-    /* .tabs and .tabs button styling might need to be adjusted if they are inside .content now */
-    .main-tabs-container { display: flex; align-items: center; margin-bottom: 20px; border-bottom: 2px solid #ddd; padding-bottom: 10px; }
-    .main-tabs-container h1.page-title { color: #333; margin: 0; font-size: 24px; }
-    .tabs { display: flex; margin-left: 30px; }
-    .tabs button { background-color: #eee; border: 1px solid #eee; padding: 10px 20px; cursor: pointer; font-size: 16px; margin-left: 5px; border-radius: 5px 5px 0 0; transition: background-color 0.3s, color 0.3s, border-color 0.3s; }
-    .tabs button.active { 
-        background-color: #e7f3ff; 
-        color: #007bff; 
-        border: 1px solid #007bff; 
-        border-bottom: 1px solid #e7f3ff; 
-        font-weight: bold; 
+    /* General Body & Container - Assuming base.html might have some */
+    body {
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+        background-color: #f0f2f5; /* Light grayish-blue background */
+        color: #333;
+        line-height: 1.6;
     }
-    .tabs button:hover { background-color: #ccc; }
-    /* User actions styling is in base.html */
 
-    .sub-tabs { display: flex; justify-content: flex-start; margin-bottom: 20px; padding-left: 10px;}
-    .sub-tabs button { background-color: #f9f9f9; border: 1px solid #ddd; padding: 8px 15px; cursor: pointer; font-size: 14px; margin-right: 5px; border-radius: 4px; transition: background-color 0.3s, border-color 0.3s; }
-    .sub-tabs button.active { background-color: #007bff; color: white; border-color: #007bff; }
-    .sub-tabs button:hover { background-color: #e9e9e9; }
-    .content-area { border: 2px dashed #ccc; padding: 40px; text-align: center; border-radius: 8px; background-color: #fafafa; margin-bottom: 20px; }
-    .content-area p { margin: 0; font-size: 18px; color: #666; }
-    .action-buttons { display: flex; justify-content: space-between; align-items: center; margin-top: 20px;}
-    .action-buttons .left-buttons button { background-color: #6c757d; color: white; padding: 10px 15px; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; margin-right: 10px;}
-    .action-buttons .left-buttons button:hover { background-color: #5a6268; }
-    .action-buttons .right-buttons button { background-color: #007bff; color: white; padding: 12px 25px; border: none; border-radius: 4px; cursor: pointer; font-size: 16px; font-weight: bold; }
-    .action-buttons .right-buttons button:hover { background-color: #0056b3; }
-    .hidden { display: none; }
+    .container.converter-container { /* Added a specific class to avoid conflict if other pages use .container */
+        background-color: #fff; 
+        padding: 25px 30px;
+        border-radius: 12px; 
+        box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+        margin: 30px auto; /* Increased top/bottom margin */
+        max-width: 1000px; /* Constrain width for better readability */
+    }
 
-    .converted-files-container { margin-top: 30px; }
-    .converted-files-container h3 { margin-bottom: 10px; color: #333; font-size: 18px; }
-    #convertedFileList { list-style-type: none; padding-left: 0; }
-    #convertedFileList li { background-color: #f9f9f9; border: 1px solid #eee; padding: 10px; margin-bottom: 5px; border-radius: 4px; display: flex; justify-content: space-between; align-items: center; }
-    #convertedFileList li .file-name { color: #333; }
-    #convertedFileList li .download-link {
-        /* Style for the download button/link */
-        display: inline-block;
-        padding: 5px 10px;
-        background-color: #28a745; /* Green color */
+    /* Main Tabs Container */
+    .main-tabs-container {
+        display: flex;
+        align-items: center;
+        margin-bottom: 25px;
+        border-bottom: 1px solid #dee2e6; /* Softer border */
+        padding-bottom: 15px;
+    }
+    .main-tabs-container h1.page-title {
+        color: #2c3e50; /* Darker, more professional blue/gray */
+        margin: 0;
+        font-size: 26px; /* Slightly larger */
+        font-weight: 600;
+    }
+    .tabs { 
+        display: flex; 
+        margin-left: auto; /* Push tabs to the right, or adjust as needed */
+    }
+    .tabs button {
+        background-color: transparent;
+        border: none;
+        border-bottom: 3px solid transparent; /* Underline effect for active tab */
+        padding: 10px 20px;
+        cursor: pointer;
+        font-size: 16px;
+        color: #495057; /* Standard tab text color */
+        margin-left: 10px; 
+        border-radius: 0; /* No rounding for underline effect */
+        transition: color 0.3s, border-color 0.3s;
+    }
+    .tabs button.active {
+        color: #007bff; /* Primary color for active tab text */
+        border-bottom-color: #007bff; /* Primary color for underline */
+        font-weight: 600;
+    }
+    .tabs button:hover {
+        color: #0056b3; /* Darker shade on hover */
+    }
+
+    /* Sub Tabs */
+    .sub-tabs {
+        display: flex;
+        justify-content: flex-start;
+        margin-bottom: 25px;
+        padding-left: 0; /* Remove default padding if not needed */
+        gap: 10px; /* Space between sub-tab buttons */
+    }
+    .sub-tabs button {
+        background-color: #f8f9fa; /* Light gray background */
+        border: 1px solid #dee2e6; /* Softer border */
+        padding: 8px 18px;
+        cursor: pointer;
+        font-size: 14px;
+        border-radius: 20px; /* Pill-shaped buttons */
+        transition: background-color 0.2s, color 0.2s, border-color 0.2s;
+        color: #495057;
+    }
+    .sub-tabs button.active {
+        background-color: #007bff;
         color: white;
+        border-color: #007bff;
+        font-weight: 500;
+    }
+    .sub-tabs button:hover:not(.active) {
+        background-color: #e9ecef;
+        border-color: #adb5bd;
+    }
+
+    /* Content Area (File Drop Zone) */
+    .content-area {
+        border: 2px dashed #007bff; /* Primary color dashed border */
+        padding: 50px; /* More padding */
         text-align: center;
-        text-decoration: none;
-        border-radius: 4px;
+        border-radius: 8px;
+        background-color: #f8f9faff; /* Very light blue, almost white */
+        margin-bottom: 25px;
+        cursor: pointer;
+        transition: background-color 0.2s ease-in-out;
+    }
+    .content-area:hover {
+        background-color: #e7f3ff; /* Light blue on hover */
+    }
+    .content-area p {
+        margin: 0;
+        font-size: 1.1em;
+        color: #007bff; /* Primary color for text */
+        font-weight: 500;
+    }
+    .content-area p::before { /* Optional: Add an icon */
+        content: '\1F4C2'; /* Folder icon, may need better icon font or SVG */
+        margin-right: 10px;
+        font-size: 1.5em;
+    }
+
+    /* Uploaded File List */
+    #fileList {
+        list-style-type: none;
+        padding: 0;
+        margin-bottom: 20px;
+    }
+    #fileList li {
+        background-color: #f8f9fa;
+        border: 1px solid #e9ecef;
+        padding: 10px 15px;
+        margin-bottom: 8px;
+        border-radius: 6px;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        font-size: 0.95em;
+    }
+    #fileList li .file-name {
+        color: #343a40;
+    }
+    #fileList li .remove-file-btn {
+        background-color: transparent;
+        border: none;
+        color: #dc3545;
+        cursor: pointer;
+        font-size: 1.1em;
+        padding: 0 5px;
+    }
+    #fileList li .remove-file-btn:hover {
+        color: #c82333;
+    }
+
+
+    /* Action Buttons Area */
+    .action-buttons {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start; /* Align items to the start for multi-line left buttons */
+        margin-top: 25px;
+        padding-top: 20px;
+        border-top: 1px solid #e9ecef; /* Separator line */
+    }
+    .action-buttons .left-buttons button {
+        background-color: #6c757d; /* Secondary/gray color */
+        color: white;
+        padding: 10px 20px;
+        border: none;
+        border-radius: 6px;
+        cursor: pointer;
+        font-size: 15px;
+        margin-right: 10px;
+        transition: background-color 0.2s;
+    }
+    .action-buttons .left-buttons button:hover {
+        background-color: #5a6268;
+    }
+    .action-buttons .left-buttons label {
+        font-size: 0.95em;
+        color: #495057;
+    }
+    .action-buttons .left-buttons input[type="checkbox"] {
+        margin-right: 8px;
+        vertical-align: middle;
+        transform: scale(1.1); /* Slightly larger checkbox */
+    }
+    #fileUploadTips {
+        font-size: 0.85em; 
+        color: #6c757d; 
+        margin-top: 10px;
+    }
+
+    .action-buttons .right-buttons button {
+        background-color: #007bff; /* Primary blue */
+        color: white;
+        padding: 12px 30px;
+        border: none;
+        border-radius: 6px;
+        cursor: pointer;
+        font-size: 17px;
+        font-weight: 600;
+        transition: background-color 0.2s;
+    }
+    .action-buttons .right-buttons button:hover {
+        background-color: #0056b3;
+    }
+    .action-buttons .right-buttons button:disabled {
+        background-color: #adb5bd;
+        cursor: not-allowed;
+    }
+
+    /* Converted Files List */
+    .converted-files-container { 
+        margin-top: 40px; 
+    }
+    .converted-files-container h3 {
+        margin-bottom: 15px;
+        color: #2c3e50;
+        font-size: 20px;
+        border-bottom: 1px solid #e9ecef;
+        padding-bottom: 10px;
+    }
+    /* Using table for converted files now, see general table styles */
+    #convertedFilesTableContainer table th,
+    #convertedFilesTableContainer table td {
+        font-size: 0.9em; /* Match other table font sizes */
+        vertical-align: middle; /* Vertically align content in cells */
+    }
+    #convertedFilesTableContainer table {
+        table-layout: auto; /* Allow table to adjust column widths based on content */
+        width: 100%; /* Ensure table uses full container width */
+    }
+    #convertedFilesTableContainer .download-link {
+        display: inline-block;
+        padding: 6px 12px;
+        background-color: #28a745; 
+        color: white !important; /* Ensure text is white */
+        text-align: center;
+        text-decoration: none !important; /* Ensure no underline */
+        border-radius: 5px;
         font-size: 0.9em;
         cursor: pointer;
+        transition: background-color 0.2s;
     }
-    #convertedFileList li .download-link:hover { background-color: #218838; }
+    #convertedFilesTableContainer .download-link:hover {
+        background-color: #218838;
+    }
+    .status-badge {
+        padding: 5px 10px;
+        border-radius: 15px;
+        font-size: 0.8em;
+        font-weight: 500;
+        text-transform: capitalize;
+    }
+    .status-success {
+        background-color: #d4edda; /* Light green */
+        color: #155724; /* Dark green */
+    }
+    .status-error {
+        background-color: #f8d7da; /* Light red */
+        color: #721c24; /* Dark red */
+    }
+    .status-processing {
+        background-color: #fff3cd; /* Light yellow */
+        color: #856404; /* Dark yellow */
+    }
+
+    .hidden { display: none !important; } /* Ensure hidden is always effective */
+
 </style>
 {% endblock %}
 
 {% block content %}
-<div class="container">
-    {# The header with title and main user actions is now in base.html #}
-    {# This container is for the main content of the converter page #}
+{# Add converter-container class for specific styling #}
+<div class="container converter-container">
     <div class="main-tabs-container">
-        <h1 class="page-title">文本转换器</h1> {# Kept H1 here as it's specific to this page's main function #}
+        <h1 class="page-title">文本转换器</h1>
         <div class="tabs">
             <button id="btnImgToFile" class="tab-button active" onclick="showTab('imgToFile')">图片转文件</button>
             <button id="btnFileToPdf" class="tab-button" onclick="showTab('fileToPdf')">文件转PDF</button>
             <button id="btnPdfToFile" class="tab-button" onclick="showTab('pdfToFile')">PDF转文件</button>
         </div>
-        {# user-actions div removed from here, it is in base.html #}
     </div>
 
     <div id="imgToFileContent" class="tab-content">
         <div class="sub-tabs">
             <button class="sub-tab-button active" onclick="selectSubTab(this, 'imgToWord')">图片转Word</button>
             <button class="sub-tab-button" onclick="selectSubTab(this, 'imgToPdf')">图片转PDF</button>
+            {# Add other imgToFile sub-options if any #}
         </div>
     </div>
 
@@ -96,10 +304,10 @@
         </div>
     </div>
 
-    <div class="content-area">
+    <div class="content-area" onclick="document.getElementById('fileUpload').click();" id="dropZone">
         <p>点击添加文件 或 拖拽至此区域</p>
         <input type="file" id="fileUpload" multiple style="display: none;" onchange="handleFiles(this.files)">
-        {% csrf_token %} {# Add CSRF token for AJAX POST requests if not already in a form that includes it #}
+        {% csrf_token %}
     </div>
     
     <ul id="fileList"></ul>
@@ -107,36 +315,55 @@
     <div class="action-buttons">
         <div class="left-buttons" style="display: flex; flex-direction: column; align-items: flex-start;">
             <div style="display: flex; align-items: center;">
-                <button onclick="document.getElementById('fileUpload').click();">+ 添加文件</button>
-                <button onclick="clearFileList()" style="margin-left: 10px;">清空列表</button>
-                <label style="margin-left: 15px; display: flex; align-items: center; font-size: 0.9em; font-weight: normal; cursor:pointer;">
-                    <input type="checkbox" id="mergeOutputCheckbox" checked style="margin-right: 5px; cursor:pointer;">
+                <button type="button" onclick="document.getElementById('fileUpload').click();"><i class="fas fa-plus" style="margin-right: 5px;"></i> 添加文件</button> {# Example with icon, requires FontAwesome #}
+                <button type="button" onclick="clearFileList()" style="margin-left: 10px;"><i class="fas fa-trash-alt" style="margin-right: 5px;"></i> 清空列表</button>
+                <label style="margin-left: 20px; display: flex; align-items: center; font-size: 0.95em; font-weight: normal; cursor:pointer;">
+                    <input type="checkbox" id="mergeOutputCheckbox" checked style="margin-right: 8px; cursor:pointer; transform: scale(1.1);">
                     合并为一个文件
                 </label>
             </div>
-            <div id="fileUploadTips" style="font-size: 0.8em; color: #666; margin-top: 8px;">
+            <div id="fileUploadTips" style="font-size: 0.85em; color: #6c757d; margin-top: 10px;">
                 提示：最多选择10个文件，单个文件不超过10MB。
             </div>
         </div>
         
         <div class="right-buttons">
-            <button id="startConversionBtn" onclick="startConversion()">开始转换</button>
+            <button type="button" id="startConversionBtn" onclick="startConversion()">开始转换 <i class="fas fa-arrow-right" style="margin-left: 5px;"></i></button>
         </div>
     </div>
 
     <div class="converted-files-container">
-        <h3>转换文件列表</h3>
+        <h3>转换结果</h3>
         <div id="convertedFilesTableContainer">
             <!-- Table will be inserted here by JavaScript -->
         </div>
     </div>
 </div>
 
+{# Assuming your base.html includes FontAwesome, otherwise the icons won't show #}
+{# If not, you can add this in base.html or here (but base is better): #}
+{# <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css"> #}
+
 <script>
-    let currentSelectedMainTab = 'imgToFile'; // Default to the first main tab
-    let currentSelectedSubTab = 'imgToWord'; // Default to the first sub-tab of the first main tab
+    let currentSelectedMainTab = 'imgToFile'; 
+    let currentSelectedSubTab = 'imgToWord'; 
     let isConverting = false;
-    const uploadedFiles = []; // Array to store File objects
+    const uploadedFiles = []; 
+
+    function getCookie(name) {
+        let cookieValue = null;
+        if (document.cookie && document.cookie !== '') {
+            const cookies = document.cookie.split(';');
+            for (let i = 0; i < cookies.length; i++) {
+                const cookie = cookies[i].trim();
+                if (cookie.substring(0, name.length + 1) === (name + '=')) {
+                    cookieValue = decodeURIComponent(cookie.substring(name.length + 1));
+                    break;
+                }
+            }
+        }
+        return cookieValue;
+    }
 
     function updateFileUploadAcceptType() {
         const fileUploadInput = document.getElementById('fileUpload');
@@ -161,7 +388,7 @@
                         acceptTypes = '.txt';
                         break;
                     default:
-                        acceptTypes = ''; // Or a generic one if fileToPdf itself allows any before sub-tab selection
+                        acceptTypes = ''; 
                         break;
                 }
                 break;
@@ -169,7 +396,7 @@
                 acceptTypes = '.pdf';
                 break;
             default:
-                acceptTypes = ''; // Allow all files if no specific tab is known
+                acceptTypes = ''; 
                 break;
         }
         fileUploadInput.accept = acceptTypes;
@@ -177,11 +404,9 @@
     }
 
     function showTab(tabId) {
-        // Clear file list and conversion results when switching main tabs
-        if (currentSelectedMainTab !== tabId) { // Only clear if actually switching to a different main tab
+        if (currentSelectedMainTab !== tabId) { 
             clearFileList();
             clearConvertedFilesList();
-            currentSelectedMainTab = tabId; // Set this early to prevent double-clearing in selectSubTab
         }
 
         document.querySelectorAll('.tab-content').forEach(tab => tab.classList.add('hidden'));
@@ -194,53 +419,96 @@
         const firstSubTabButton = document.getElementById(tabId + 'Content').querySelector('.sub-tab-button');
         if (firstSubTabButton) {
             const onclickAttr = firstSubTabButton.getAttribute('onclick');
-            const match = onclickAttr.match(/selectSubTab\(this, \'([^\']+)\'\)/);
+            const match = onclickAttr.match(/selectSubTab\(this, '([^']*)'\)/);
             if (match && match[1]) {
-                 selectSubTab(firstSubTabButton, match[1], false); // Pass false to avoid double update initially
+                 console.log("[showTab] Auto-selecting first sub-tab: ", match[1]);
+                 selectSubTab(firstSubTabButton, match[1], false); 
             } else {
-                console.warn("Could not determine subTabType for default selection in main tab: ", tabId);
+                console.warn("[showTab] Could not determine subTabType for default selection in main tab: ", tabId, " from onclick: ", onclickAttr);
                 currentSelectedSubTab = null;
             }
         } else {
+            console.warn("[showTab] No sub-tab buttons found for main tab: ", tabId);
             currentSelectedSubTab = null;
         }
-        updateFileUploadAcceptType(); // Update for the new main tab and its default sub-tab
-        console.log("Current main tab: ", currentSelectedMainTab, "Current sub tab: ", currentSelectedSubTab);
+        updateFileUploadAcceptType(); 
+        console.log("[showTab] Current main tab: ", currentSelectedMainTab, "Current sub tab: ", currentSelectedSubTab);
     }
 
     function selectSubTab(buttonElement, subTabType, shouldUpdateAccept = true) {
-        // Clear file list and conversion results when switching sub tabs
-        if (currentSelectedSubTab !== subTabType) { // Only clear if actually switching to a different sub-tab
-            clearFileList();
-            clearConvertedFilesList();
+        console.log("[selectSubTab] Called with subTabType: ", subTabType, "Current is: ", currentSelectedSubTab);
+        console.log("[selectSubTab] Button element: ", buttonElement);
+
+        if (!buttonElement) {
+            console.error("[selectSubTab] Error: buttonElement is null or undefined.");
+            return;
         }
 
-        if (buttonElement && buttonElement.parentElement) {
-            buttonElement.parentElement.querySelectorAll('.sub-tab-button').forEach(btn => btn.classList.remove('active'));
-            buttonElement.classList.add('active');
+        // Clear file list and conversion results when switching sub tabs
+        if (currentSelectedSubTab !== subTabType) { 
+            console.log("[selectSubTab] Different sub-tab selected. Clearing lists.");
+            clearFileList();
+            clearConvertedFilesList();
+            console.log("[selectSubTab] Lists cleared.");
+        } else {
+            console.log("[selectSubTab] Same sub-tab clicked or re-selected. Lists not cleared.");
         }
+
+        if (buttonElement.parentElement) {
+            console.log("[selectSubTab] Parent element of button: ", buttonElement.parentElement);
+            const subTabButtons = buttonElement.parentElement.querySelectorAll('.sub-tab-button');
+            console.log("[selectSubTab] Found sub-tab buttons: ", subTabButtons);
+            
+            subTabButtons.forEach(btn => {
+                // console.log("[selectSubTab] Removing 'active' from button: ", btn);
+                btn.classList.remove('active');
+            });
+            console.log("[selectSubTab] 'active' class removed from all siblings.");
+            
+            buttonElement.classList.add('active');
+            console.log("[selectSubTab] 'active' class added to clicked button: ", buttonElement);
+        } else {
+            console.error("[selectSubTab] Error: buttonElement.parentElement is null. Cannot update active classes.");
+        }
+        
         currentSelectedSubTab = subTabType;
+        console.log("[selectSubTab] currentSelectedSubTab updated to: ", currentSelectedSubTab);
+
         if (shouldUpdateAccept) {
+            console.log("[selectSubTab] Updating file upload accept type.");
             updateFileUploadAcceptType();
+        } else {
+            console.log("[selectSubTab] Skipping file upload accept type update (shouldUpdateAccept=false).");
         }
         console.log("当前选择的转换类型 (sub-tab): ", currentSelectedSubTab);
     }
 
-    function getCookie(name) {
-        let cookieValue = null;
-        if (document.cookie && document.cookie !== '') {
-            const cookies = document.cookie.split(';');
-            for (let i = 0; i < cookies.length; i++) {
-                const cookie = cookies[i].trim();
-                if (cookie.substring(0, name.length + 1) === (name + '=')) {
-                    cookieValue = decodeURIComponent(cookie.substring(name.length + 1));
-                    break;
-                }
-            }
-        }
-        return cookieValue;
+    // Function to add styling to the file list items dynamically
+    function renderFileList() {
+        const fileListUI = document.getElementById('fileList');
+        fileListUI.innerHTML = ''; // Clear existing list items
+        uploadedFiles.forEach((file, index) => {
+            const listItem = document.createElement('li');
+            const fileNameSpan = document.createElement('span');
+            fileNameSpan.className = 'file-name';
+            fileNameSpan.textContent = file.name + ' (' + (file.size / 1024 / 1024).toFixed(2) + ' MB)';
+            
+            const removeBtn = document.createElement('button');
+            removeBtn.className = 'remove-file-btn';
+            removeBtn.innerHTML = '&times;'; // Multiplication sign as a simple 'x'
+            removeBtn.title = '移除文件';
+            removeBtn.onclick = function() { 
+                uploadedFiles.splice(index, 1); // Remove file from array
+                renderFileList(); // Re-render the list
+            };
+            
+            listItem.appendChild(fileNameSpan);
+            listItem.appendChild(removeBtn);
+            fileListUI.appendChild(listItem);
+        });
     }
 
+    // Modify handleFiles to use renderFileList
     function handleFiles(incomingFiles) {
         const fileListUI = document.getElementById('fileList');
         const maxFiles = 10;
@@ -248,187 +516,201 @@
 
         for (const file of incomingFiles) {
             if (uploadedFiles.length >= maxFiles) {
-                alert(`最多只能添加 ${maxFiles} 个文件。`);
+                alert(`最多只能上传 ${maxFiles} 个文件。`);
                 break;
             }
             if (file.size > maxFileSize) {
-                alert(`单个文件 "${file.name}" 大小不能超过10MB。`);
+                alert(`文件 "${file.name}" (${(file.size / 1024 / 1024).toFixed(2)} MB) 超过了10MB的大小限制。`);
                 continue;
             }
-            // Check for duplicate filenames
-            if (uploadedFiles.some(f => f.name === file.name)) {
-                alert(`文件 "${file.name}" 已存在于列表中。`);
-                continue;
+            // Check for duplicate file names before adding
+            if (!uploadedFiles.some(f => f.name === file.name)) {
+                 uploadedFiles.push(file);
             }
-
-            uploadedFiles.push(file);
-            const listItem = document.createElement('li');
-            listItem.textContent = file.name + ' (' + (file.size / 1024 / 1024).toFixed(2) + ' MB)';
-            listItem.setAttribute('data-filename', file.name); 
-            fileListUI.appendChild(listItem);
         }
-        document.getElementById('fileUpload').value = null; // Clear the input after processing to allow re-adding same named file if removed then re-added.
+        renderFileList(); // Call the new render function
     }
 
+    // Modify clearFileList to use renderFileList
     function clearFileList() {
-        document.getElementById('fileList').innerHTML = '';
-        uploadedFiles.length = 0; // Clear the array
-        clearConvertedFilesList(); // Also clear converted files when clearing upload list
+        uploadedFiles.length = 0; // Empty the array
+        renderFileList(); // Re-render (which will show an empty list)
+        document.getElementById('fileUpload').value = ''; // Reset file input
     }
 
+    // Drag and Drop functionality for the content-area
+    const dropZone = document.getElementById('dropZone');
+
+    dropZone.addEventListener('dragover', (event) => {
+        event.stopPropagation();
+        event.preventDefault();
+        event.dataTransfer.dropEffect = 'copy';
+        dropZone.style.backgroundColor = '#e7f3ff'; // Highlight on drag over
+    });
+
+    dropZone.addEventListener('dragleave', (event) => {
+        event.stopPropagation();
+        event.preventDefault();
+        dropZone.style.backgroundColor = '#f8f9faff'; // Revert background
+    });
+
+    dropZone.addEventListener('drop', (event) => {
+        event.stopPropagation();
+        event.preventDefault();
+        dropZone.style.backgroundColor = '#f8f9faff'; // Revert background
+        const files = event.dataTransfer.files;
+        handleFiles(files);
+    });
+    
     function clearConvertedFilesList() {
-        document.getElementById('convertedFilesTableContainer').innerHTML = ''; // Clear previous results
+        const container = document.getElementById('convertedFilesTableContainer');
+        container.innerHTML = ''; // Clear previous results
     }
 
     function startConversion() {
-        if (isConverting) {
-            alert("正在转换中，请稍候...");
-            return;
-        }
+        console.log("[startConversion] 函数开始执行。当前的 isConverting 状态:", isConverting);
         if (uploadedFiles.length === 0) {
             alert("请先添加要转换的文件。");
             return;
         }
 
-        // Determine output format based on currentSelectedSubTab
-        let outputFormat = 'docx'; // Default
-        if (currentSelectedMainTab === 'imgToFile') {
-            if (currentSelectedSubTab === 'imgToPdf') {
-                outputFormat = 'pdf';
-            } else if (currentSelectedSubTab === 'imgToWord') {
-                outputFormat = 'docx';
-            } else {
-                alert("请选择一个有效的图片转换类型 (Word 或 PDF)。");
-                return;
-            }
-        } else {
-            // Placeholder for other main tab conversion logic if they were to be implemented
-            console.warn(`Conversion started for ${currentSelectedMainTab} which is not fully implemented.`);
-            // For example, if it's fileToPdf, and sub-tab is wordToPdf, outputFormat should be pdf.
-            // If it's pdfToFile, and sub-tab is pdfToWord, outputFormat should be docx.
-            // For now, we'll just let it use the 'docx' default or whatever was last set if it reaches here.
-            // This is NOT a complete solution for those tabs.
-            if (currentSelectedMainTab === 'fileToPdf') {
-                outputFormat = 'pdf'; // Assuming all sub-options under fileToPdf output a PDF
-            } else if (currentSelectedMainTab === 'pdfToFile') {
-                // This needs more granular logic based on the sub-tab (e.g., pdfToWord -> docx, pdfToExcel -> xlsx)
-                // For now, as a placeholder, we can set a common one or leave as default
-                // outputFormat = 'docx'; // Example placeholder
-                console.error('PDF转文件 功能的输出格式需要根据子类型确定，此处尚未完全实现!');
-                // alert('PDF转文件功能尚未完全指定输出格式，请在JS中完善此逻辑。');
-                // return; // Stop if critical logic is missing for these paths
-            } else {
-                 alert("未知的转换类型或功能尚未实现。");
-                 return;
-            }
-        }
-
-        const conversionBtn = document.getElementById('startConversionBtn');
-        conversionBtn.textContent = '等待转换中...';
-        conversionBtn.style.backgroundColor = '#ffc107'; // Yellow
-        conversionBtn.disabled = true;
         isConverting = true;
-
-        document.getElementById('convertedFilesTableContainer').innerHTML = '<p>正在处理，请稍候...</p>';
+        console.log("[startConversion] isConverting 已被设置为 true。");
+        const conversionBtn = document.getElementById('startConversionBtn');
+        conversionBtn.disabled = true;
+        conversionBtn.textContent = '等待转换中...';
+        conversionBtn.style.backgroundColor = '#ffc107';
+        conversionBtn.style.borderColor = '#ffc107';
+        console.log("[startConversion] '开始转换'按钮状态已更新为'等待转换中...' (禁用，黄色背景)。");
+        clearConvertedFilesList(); // Clear previous results table
 
         const formData = new FormData();
         uploadedFiles.forEach(file => {
-            formData.append('images', file);
+            formData.append('images', file); // 'images' is the key expected by the backend
         });
+
+        formData.append('main_tab', currentSelectedMainTab);
+        formData.append('sub_tab', currentSelectedSubTab);
         formData.append('merge_output', document.getElementById('mergeOutputCheckbox').checked);
-        formData.append('output_format', outputFormat); // Pass the determined output format
-        formData.append('main_tab', currentSelectedMainTab); // Pass current main tab
-        formData.append('sub_tab', currentSelectedSubTab);   // Pass current sub tab
+        
+        let outputFormat = '';
+        if (currentSelectedMainTab === 'imgToFile') {
+            outputFormat = currentSelectedSubTab === 'imgToPdf' ? 'pdf' : 'docx';
+        } else if (currentSelectedMainTab === 'fileToPdf') {
+            outputFormat = 'pdf'; // Always PDF for fileToPdf main tab
+        } else if (currentSelectedMainTab === 'pdfToFile') {
+            switch (currentSelectedSubTab) {
+                case 'pdfToWord': outputFormat = 'docx'; break;
+                case 'pdfToExcel': outputFormat = 'xlsx'; break;
+                case 'pdfToPpt': outputFormat = 'pptx'; break;
+                case 'pdfToTxt': outputFormat = 'txt'; break;
+            }
+        }
+        formData.append('output_format', outputFormat);
 
         const csrfToken = getCookie('csrftoken');
 
-        fetch('{% url "converter:process_images" %}', { // Updated URL
+        fetch('{% url "converter:process_images" %}', {
             method: 'POST',
             headers: {
                 'X-CSRFToken': csrfToken
             },
             body: formData
         })
-        .then(response => {
-            if (!response.ok) {
-                return response.text().then(text => { 
-                    throw new Error('服务器响应错误: ' + response.status + ' - ' + text);
-                });
-            }
-            return response.json();
-        })
+        .then(response => response.json())
         .then(data => {
-            console.log("Conversion response data:", data);
-            conversionBtn.textContent = '开始转换';
-            conversionBtn.style.backgroundColor = '#007bff'; // Blue
-            conversionBtn.disabled = false;
-            isConverting = false;
-
-            const tableContainer = document.getElementById('convertedFilesTableContainer');
-            tableContainer.innerHTML = ''; // Clear loading message
-
-            if (data.results && data.results.length > 0) {
-                const table = document.createElement('table');
-                table.style.width = '100%';
-                table.setAttribute('border', '1');
-                table.style.borderCollapse = 'collapse';
-
-                const thead = table.createTHead();
-                const headerRow = thead.insertRow();
-                const th1 = document.createElement('th');
-                th1.textContent = '原始文件名';
-                headerRow.appendChild(th1);
-                const th2 = document.createElement('th');
-                th2.textContent = '转换后文件名';
-                headerRow.appendChild(th2);
-                const th3 = document.createElement('th');
-                th3.textContent = '操作';
-                headerRow.appendChild(th3);
-                const th4 = document.createElement('th');
-                th4.textContent = '状态';
-                headerRow.appendChild(th4);
-
-                const tbody = table.createTBody();
-                data.results.forEach(file => {
-                    const row = tbody.insertRow();
-                    row.insertCell().textContent = file.original_name || 'N/A';
-                    row.insertCell().textContent = file.converted_name || 'N/A';
-                    const actionCell = row.insertCell();
-                    if (file.status === 'success' && file.download_url) {
-                        const downloadLink = document.createElement('a');
-                        downloadLink.href = file.download_url;
-                        downloadLink.textContent = '下载';
-                        downloadLink.className = 'download-link'; 
-                        downloadLink.setAttribute('download', file.converted_name || 'download');
-                        actionCell.appendChild(downloadLink);
-                    } else {
-                        actionCell.textContent = '-';
-                    }
-                    const statusCell = row.insertCell();
-                    statusCell.textContent = file.message || file.status;
-                    if (file.status !== 'success') {
-                        statusCell.style.color = 'red';
-                    }
-                });
-                tableContainer.appendChild(table);
-            } else {
-                tableContainer.innerHTML = '<p>没有文件被处理，或处理过程中发生未知错误。</p>';
-            }
+            displayConvertedFiles(data.results, data.merge_output);
         })
         .catch(error => {
-            console.error('Conversion error:', error);
-            conversionBtn.textContent = '开始转换';
-            conversionBtn.style.backgroundColor = '#dc3545'; // Red for error
-            conversionBtn.disabled = false;
+            console.error('转换出错:', error);
+            alert("转换过程中发生错误，请检查控制台获取更多信息。");
+            displayConvertedFiles([{ original_name: '错误', converted_name: '-', status: 'error', message: '客户端请求错误' }], false);
+            const btn = document.getElementById('startConversionBtn');
+            btn.disabled = false;
+            btn.textContent = '开始转换';
+            btn.style.backgroundColor = '#007bff';
+            btn.style.borderColor = '#007bff';
+        })
+        .finally(() => {
+            console.log("[finally] finally 代码块开始执行。重置前的 isConverting 状态:", isConverting);
             isConverting = false;
-            const tableContainer = document.getElementById('convertedFilesTableContainer');
-            tableContainer.innerHTML = `<p style="color: red;">转换失败: ${error.message}</p>`;
+            console.log("[finally] isConverting 已被重置为 false。");
+            const btn = document.getElementById('startConversionBtn');
+            btn.disabled = false;
+            btn.textContent = '开始转换';
+            btn.style.backgroundColor = '#007bff';
+            btn.style.borderColor = '#007bff';
+            console.log("[finally] '开始转换'按钮状态已恢复。");
         });
     }
-    // Initialize with the default tab active
+
+    function displayConvertedFiles(results, mergeOutput) {
+        const container = document.getElementById('convertedFilesTableContainer');
+        container.innerHTML = ''; // Clear previous results
+
+        if (!results || results.length === 0) {
+            container.innerHTML = '<p class="no-files">没有转换结果。</p>';
+            return;
+        }
+
+        const table = document.createElement('table');
+        table.className = 'table table-striped'; // Using Bootstrap classes for styling
+        const thead = document.createElement('thead');
+        thead.innerHTML = '<tr>' +
+                            '<th>原始文件名</th>' +
+                            '<th>转换后文件名</th>' +
+                            '<th>状态</th>' +
+                            '<th>消息/下载</th>' +
+                        '</tr>';
+        table.appendChild(thead);
+
+        const tbody = document.createElement('tbody');
+        results.forEach(result => {
+            const row = tbody.insertRow();
+            row.insertCell().textContent = result.original_name || 'N/A';
+            row.insertCell().textContent = result.converted_name || 'N/A';
+            
+            const statusCell = row.insertCell();
+            const statusBadge = document.createElement('span');
+            statusBadge.classList.add('status-badge');
+            statusBadge.textContent = result.status;
+            if (result.status === 'success' || result.status === 'success_fallback') {
+                statusBadge.classList.add('status-success');
+            } else if (result.status === 'error' || result.status.includes('_error')) {
+                statusBadge.classList.add('status-error');
+            } else {
+                statusBadge.classList.add('status-processing'); // Or a default style
+            }
+            statusCell.appendChild(statusBadge);
+
+            const actionCell = row.insertCell();
+            if (result.status === 'success' || result.status === 'success_fallback') {
+                if (result.download_url) {
+                    const downloadLink = document.createElement('a');
+                    downloadLink.href = result.download_url;
+                    downloadLink.textContent = '下载';
+                    downloadLink.className = 'download-link';
+                    downloadLink.target = '_blank';
+                    actionCell.appendChild(downloadLink);
+                } else {
+                    actionCell.textContent = result.message || '-';
+                }
+            } else {
+                actionCell.textContent = result.message || '未知错误';
+            }
+        });
+        table.appendChild(tbody);
+        container.appendChild(table);
+    }
+    
+    // Initial setup: Ensure one DOMContentLoaded listener
     document.addEventListener('DOMContentLoaded', function() {
-        showTab(currentSelectedMainTab);
-        // updateFileUploadAcceptType(); // Called within showTab now after default sub-tab is set
+        showTab(currentSelectedMainTab); // This will also set the default sub-tab via its logic
+        const convertBtn = document.getElementById('startConversionBtn');
+        if(convertBtn) {
+            convertBtn.addEventListener('click', startConversion);
+        }
+        renderFileList(); // Initialize file list rendering
     });
 
 </script>

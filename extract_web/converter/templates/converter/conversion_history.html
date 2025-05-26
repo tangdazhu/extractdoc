@@ -4,20 +4,62 @@
 
 {% block content %}
 <style>
+    /* Assuming base.html provides general body styles like font-family and background-color from index.html's new CSS */
+    /* If not, uncomment and adjust:
+    body {
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+        background-color: #f0f2f5;
+        color: #333;
+        line-height: 1.6;
+    }
+    */
+
+    .page-container { /* Renamed from .container to avoid conflict, similar to converter-container */
+        background-color: #fff; 
+        padding: 25px 30px;
+        border-radius: 12px; 
+        box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+        margin: 30px auto;
+        max-width: 1100px; /* Slightly wider for history layout */
+    }
+
+    .history-page-title {
+        color: #2c3e50;
+        font-size: 26px;
+        font-weight: 600;
+        margin-bottom: 10px;
+        border-bottom: 1px solid #e9ecef;
+        padding-bottom: 15px;
+    }
+
+    .back-to-main-link {
+        display: inline-block;
+        margin-bottom: 20px;
+        color: #007bff;
+        text-decoration: none;
+        font-size: 0.95em;
+    }
+    .back-to-main-link:hover {
+        text-decoration: underline;
+    }
+
     .history-container {
         display: flex;
-        margin-top: 20px;
+        margin-top: 10px; /* Reduced from 20px as title has margin */
     }
     .history-dates {
-        width: 200px; /* Fixed width for the date navigation */
-        margin-right: 20px;
-        border-right: 1px solid #ddd;
-        padding-right: 20px;
+        width: 220px; /* Slightly wider */
+        margin-right: 25px;
+        border-right: 1px solid #dee2e6; /* Softer border */
+        padding-right: 25px;
+        flex-shrink: 0; 
+        background-color: transparent; /* Added to ensure no unexpected background */
     }
     .history-dates h4 {
         margin-top: 0;
-        font-size: 1.1em;
-        color: #333;
+        font-size: 1.15em; /* Slightly larger */
+        color: #343a40; /* Darker gray */
+        margin-bottom: 15px;
     }
     .history-dates ul {
         list-style-type: none;
@@ -25,148 +67,285 @@
     }
     .history-dates ul li a {
         display: block;
-        padding: 8px 10px;
+        padding: 10px 12px;
         text-decoration: none;
-        color: #007bff;
-        border-radius: 4px;
-        margin-bottom: 5px;
+        color: #000000; /* Black text */
+        background-color: transparent; /* Ensure non-active links have transparent background */
+        border-radius: 6px;
+        margin-bottom: 6px;
+        font-size: 0.95em;
+        transition: background-color 0.2s, color 0.2s;
     }
     .history-dates ul li a:hover {
-        background-color: #f0f0f0;
-        text-decoration: underline;
+        background-color: #e9ecef;
+        color: #000000; /* Changed from #0056b3 to black */
     }
     .history-dates ul li a.active-date {
-        background-color: #e9ecef;
-        color: #0056b3;
-        font-weight: bold;
+        background-color: #007bff;
+        color: white;
+        font-weight: 500;
     }
-    .history-files {
-        flex-grow: 1; /* Takes up the remaining space */
+    .history-files-container {
+        flex-grow: 1; 
+        position: relative; 
     }
-    .history-files h3 {
+    .history-files-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 20px; /* Increased margin */
+        padding-bottom: 10px;
+        border-bottom: 1px solid #e9ecef;
+    }
+    .history-files-header h3 {
         margin-top: 0;
-        color: #333;
+        margin-bottom: 0;
+        color: #2c3e50; /* Match page title color */
+        font-size: 1.4em; /* Larger date title */
     }
     .files-table {
         width: 100%;
-        border-collapse: collapse;
-        margin-top: 15px;
+        border-collapse: separate; /* Use separate for border-radius on cells if needed */
+        border-spacing: 0; /* Required for border-collapse: separate */
+        margin-top: 0; /* Header has margin-bottom now */
+        border: 1px solid #dee2e6;
+        border-radius: 8px; /* Rounded corners for the table */
+        overflow: hidden; /* To make border-radius clip th/td */
     }
     .files-table th, .files-table td {
-        border: 1px solid #ddd;
-        padding: 10px;
+        padding: 12px 15px; /* Increased padding */
         text-align: left;
-        font-size: 0.9em;
+        font-size: 0.95em;
+        border-bottom: 1px solid #e9ecef; /* Lighter lines between rows */
+    }
+    .files-table td {
+        color: #495057; /* Softer text color for data */
     }
     .files-table th {
-        background-color: #f8f9fa;
+        background-color: #f8f9fa; /* Light gray for headers */
+        color: #343a40;
+        font-weight: 600;
+        border-bottom-width: 2px; /* Stronger line below headers */
+        border-top: 0;
     }
+    .files-table tr:last-child td {
+        border-bottom: 0; /* No border for the last row */
+    }
+
     .no-files {
-        color: #777;
-        margin-top: 20px;
+        color: red !important; /* Changed to red and made important for debugging */
+        margin-top: 25px;
+        font-size: 1.05em;
+        line-height: normal !important; /* Ensure line-height is not causing issues */
+        height: auto !important; /* Ensure height is not a constraint */
+        text-align: left; /* Align with inline style */
+        padding: 10px 15px !important; /* Ensure padding, added horizontal padding too */
+        background-color: #f8f9fa !important; /* Light gray background, ensure it applies */
+        border-radius: 6px;
+        position: relative; /* For z-index to work */
+        z-index: 1; /* Try to bring it to front */
+        display: block !important; /* Ensure it's displayed as a block */
+        visibility: visible !important; /* Ensure it's visible */
     }
-    .delete-btn {
-        color: #dc3545;
+
+    /* Action Buttons in Table */
+    .action-btn {
+        display: inline-flex; /* For aligning icon and text */
+        align-items: center;
+        padding: 6px 12px;
+        border-radius: 5px;
         text-decoration: none;
-        padding: 3px 7px;
-        border: 1px solid #dc3545;
-        border-radius: 4px;
         font-size: 0.9em;
+        font-weight: 500;
+        cursor: pointer;
+        border: 1px solid transparent;
+        transition: background-color 0.2s, color 0.2s, border-color 0.2s;
+        margin-right: 8px;
+    }
+    .action-btn i { /* For FontAwesome icons */
+        margin-right: 5px;
+    }
+
+    .download-btn {
+        background-color: #28a745;
+        color: white !important;
+        border-color: #28a745;
+    }
+    .download-btn:hover {
+        background-color: #218838;
+        color: white !important;
+        border-color: #1e7e34;
+    }
+
+    .delete-btn {
+        background-color: #dc3545;
+        color: white !important;
+        border-color: #dc3545;
     }
     .delete-btn:hover {
-        background-color: #dc3545;
-        color: white;
+        background-color: #c82333;
+        color: white !important;
+        border-color: #bd2130;
     }
-    .download-link {
-        margin-right: 10px;
+    .delete-btn-link-style { /* For the form-based delete */
+        color: #dc3545;
+        text-decoration: none;
+        font-weight: 500;
     }
+    .delete-btn-link-style:hover {
+        color: #c82333;
+        text-decoration: underline;
+    }
+
+    /* Clear All Button */
+    .btn-clear-all-date {
+        background-color: #ffc107; /* A warning yellow */
+        color: #212529; /* Dark text for yellow bg */
+        border-color: #ffc107;
+        padding: 8px 15px;
+        font-size: 0.9em;
+        font-weight: 500;
+    }
+    .btn-clear-all-date:hover {
+        background-color: #e0a800;
+        border-color: #d39e00;
+        color: #212529;
+    }
+
+    /* Alert messages (assuming Bootstrap is linked in base.html or globally) */
+    .alert {
+        margin-top: 20px;
+        font-size: 0.95em;
+    }
+
 </style>
 
-<h2>历史转换记录</h2>
-<p><a href="{% url 'converter:index' %}" style="text-decoration: none;">&laquo; 返回主页</a></p>
+<div class="page-container">
+    <h2 class="history-page-title">历史转换记录</h2>
+    <p><a href="{% url 'converter:index' %}" class="back-to-main-link"><i class="fas fa-arrow-left" style="margin-right: 5px;"></i> 返回主页</a></p>
 
-{% if messages %}
-    <div style="margin-top: 15px;">
-        {% for message in messages %}
-            <div class="alert alert-{{ message.tags }} alert-dismissible fade show" role="alert">
-                {{ message }}
-                <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
-            </div>
-        {% endfor %}
-    </div>
-{% endif %}
+    {% if messages %}
+        <div style="margin-top: 15px;">
+            {% for message in messages %}
+                <div class="alert alert-{{ message.tags }} alert-dismissible fade show" role="alert">
+                    {{ message }}
+                    <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+                </div>
+            {% endfor %}
+        </div>
+    {% endif %}
 
-<div class="history-container">
-    <div class="history-dates">
-        {% if available_dates %}
-            <ul>
-                <li>
-                    <a href="{% url 'converter:conversion_history' %}" 
-                       class="{% if not selected_date %}active-date{% endif %}">
-                       选择日期查看记录
-                    </a>
-                </li>
-                {% for date_item in available_dates %}
+    <div class="history-container">
+        <div class="history-dates">
+            {% if available_dates %}
+                <h4>选择日期</h4>
+                <ul>
                     <li>
-                        <a href="?date={{ date_item }}" 
-                           class="{% if date_item == selected_date %}active-date{% endif %}">
-                            {{ date_item }}
+                        <a href="{% url 'converter:conversion_history' %}" 
+                           class="{% if not selected_date %}active-date{% endif %}">
+                           <i class="far fa-calendar-alt" style="margin-right: 7px;"></i> 查看所有日期
                         </a>
                     </li>
-                {% endfor %}
-            </ul>
-        {% else %}
-            <p>暂无历史转换记录。</p>
-        {% endif %}
-    </div>
-
-    <div class="history-files">
-        {% if selected_date %}
-            <h3>转换文件</h3>
-        {% else %}
-            <h3>转换文件列表</h3>
-            <p>请从左侧选择一个日期以查看转换文件。</p>
-        {% endif %}
-
-        {% if selected_date and converted_files %}
-            <table class="files-table">
-                <thead>
-                    <tr>
-                        <th>原始文件名</th>
-                        <th>转换后文件名</th>
-                        <th>状态</th>
-                        <th>操作</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {% for file_info in converted_files %}
-                    <tr>
-                        <td>{{ file_info.original_name }}</td>
-                        <td>{{ file_info.converted_name }}</td>
-                        <td><span class="badge bg-success">{{ file_info.status }}</span></td>
-                        <td>
-                            <a href="{{ file_info.download_url }}" class="download-link" target="_blank" style="margin-right: 10px; text-decoration: none; color: #007bff;">下载</a>
-                            <form id="delete-form-{{ forloop.counter }}" action="{{ file_info.delete_url }}" method="post" style="display: inline;">
-                                {% csrf_token %}
-                                <a href="#" onclick="if(confirm('确定要删除这个文件吗？此操作无法撤销。')) { document.getElementById('delete-form-{{ forloop.counter }}').submit(); } return false;" style="text-decoration: none; color: #dc3545; margin-left: 5px;">删除</a>
-                            </form>
-                        </td>
-                    </tr>
+                    {% for date_item in available_dates %}
+                        <li>
+                            <a href="?date={{ date_item }}" 
+                               class="{% if date_item == selected_date %}active-date{% endif %}">
+                                <i class="far fa-calendar-check" style="margin-right: 7px;"></i> {{ date_item }} <!-- TEMPORARILY REMOVED |date:"Y-m-d" filter for debugging -->
+                            </a>
+                        </li>
                     {% endfor %}
-                </tbody>
-            </table>
-        {% elif selected_date %}
-            <p class="no-files">选定日期内没有转换文件。</p>
-        {% endif %}
+                </ul>
+            {% else %}
+                <p class="no-files" style="text-align:left; padding: 10px 0;">暂无历史转换记录。</p>
+            {% endif %}
+        </div>
+
+        <div class="history-files-container">
+            <div class="history-files-header">
+                <h3>
+                    {% if selected_date %}
+                        {{ selected_date|date:"Y-m-d" }} <!-- Format date for display -->
+                    {% else %}
+                        所有转换文件
+                    {% endif %}
+                </h3>
+                {% if selected_date and converted_files %}
+                    <div class="clear-all-btn-container">
+                        <form method="POST" action="{% url 'converter:delete_all_for_date' date_str=selected_date %}" id="delete-all-form-{{ selected_date }}" style="margin-bottom: 0;">
+                            {% csrf_token %}
+                            <button type="button" class="btn btn-clear-all-date" onclick="confirmDeleteAll('{{ selected_date|date:"Y-m-d" }}')">
+                                <i class="fas fa-trash-alt" style="margin-right: 5px;"></i> 一键清除此日期记录
+                            </button>
+                        </form>
+                    </div>
+                {% endif %}
+            </div>
+
+            {% if selected_date %}
+                {% if converted_files %}
+                    <table class="files-table">
+                        <thead>
+                            <tr>
+                                <th>原始文件名</th>
+                                <th>转换后文件名</th>
+                                <th>状态</th>
+                                <th style="width: 200px;">操作</th> {# Give more space for buttons #}
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for file_info in converted_files %}
+                            <tr>
+                                <td>{{ file_info.original_name }}</td>
+                                <td>{{ file_info.converted_name }}</td>
+                                <td>
+                                    {% if file_info.status == "已完成" or file_info.status == "success" %}
+                                        <span class="badge bg-success">已完成</span>
+                                    {% else %}
+                                        <span class="badge bg-warning text-dark">{{ file_info.status }}</span>
+                                    {% endif %}
+                                </td>
+                                <td>
+                                    <a href="{{ file_info.download_url }}" class="action-btn download-btn" target="_blank">
+                                        <i class="fas fa-download"></i> 下载
+                                    </a>
+                                    <form id="delete-form-{{ forloop.counter0 }}" action="{{ file_info.delete_url }}" method="post" style="display: inline;">
+                                        {% csrf_token %}
+                                        <button type="button" class="action-btn delete-btn" onclick="confirmSingleDelete('delete-form-{{ forloop.counter0 }}', '{{ file_info.converted_name }}')">
+                                            <i class="fas fa-trash"></i> 删除
+                                        </button>
+                                    </form>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                {% else %}
+                    <p class="no-files">此日期内没有转换文件。</p>
+                {% endif %}
+            {% elif not available_dates %}
+                 <!-- This case is covered by the message in history-dates block -->
+            {% else %}
+                <p class="no-files">请从左侧选择一个日期以查看转换记录。</p>
+            {% endif %}
+        </div>
     </div>
 </div>
 
 <script>
-// Optional: Add any specific JavaScript for this page if needed later
-document.addEventListener('DOMContentLoaded', function() {
-    // Example: If you want to make the selected date link more prominent or add other JS interactions
-    // This is mostly handled by template logic for active class, but JS can enhance it.
-});
+function confirmDeleteAll(dateStrToDisplay) {
+    if (confirm("您确定要删除 " + dateStrToDisplay + " 日期的所有转换记录吗？此操作不可恢复！")) {
+        // The actual form ID uses the YYYYMMDD date_str from the server
+        document.getElementById('delete-all-form-{{ selected_date }}').submit(); 
+    }
+}
+
+function confirmSingleDelete(formId, fileName) {
+    if (confirm("确定要删除文件：" + fileName + " 吗？此操作无法撤销。")) {
+        document.getElementById(formId).submit();
+    }
+}
+
+// If using Bootstrap JS for dismissible alerts, ensure it's loaded (likely in base.html)
 </script>
 
 {% endblock %} 
