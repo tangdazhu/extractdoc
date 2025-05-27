@@ -221,10 +221,19 @@
     #convertedFilesTableContainer table td {
         font-size: 0.9em; /* Match other table font sizes */
         vertical-align: middle; /* Vertically align content in cells */
+        border: 1px solid #ddd; /* Gray border for cells */
+        padding: 8px; /* Add some padding inside cells */
+        text-align: left; /* Align text to left for better readability, can be adjusted */
     }
     #convertedFilesTableContainer table {
         table-layout: auto; /* Allow table to adjust column widths based on content */
         width: 100%; /* Ensure table uses full container width */
+        border-collapse: collapse; /* Important for single borders */
+        border: 1px solid #ddd; /* Optional: Outer border for the table itself */
+    }
+    #convertedFilesTableContainer table th {
+        background-color: #f8f9fa; /* Light background for headers */
+        font-weight: 600; /* Make header text bold */
     }
     #convertedFilesTableContainer .download-link {
         display: inline-block;
@@ -350,6 +359,41 @@
     let isConverting = false;
     const uploadedFiles = []; 
 
+    // --- NEW --- Helper function to disable/enable main tab buttons
+    function updateMainTabButtonsState(disableNonActive) {
+        const mainTabButtons = document.querySelectorAll('.tabs .tab-button');
+        const subTabButtons = document.querySelectorAll('.sub-tabs .sub-tab-button'); // Get all sub-tab buttons
+
+        mainTabButtons.forEach(button => {
+            if (disableNonActive) {
+                if (!button.classList.contains('active')) {
+                    button.disabled = true;
+                    button.style.opacity = '0.5'; 
+                    button.style.cursor = 'not-allowed';
+                } else {
+                    button.style.cursor = 'not-allowed'; 
+                }
+            } else {
+                button.disabled = false;
+                button.style.opacity = '1';
+                button.style.cursor = 'pointer';
+            }
+        });
+
+        subTabButtons.forEach(button => {
+            if (disableNonActive) {
+                button.disabled = true;
+                button.style.opacity = '0.5';
+                button.style.cursor = 'not-allowed';
+            } else {
+                button.disabled = false;
+                button.style.opacity = '1';
+                button.style.cursor = 'pointer';
+            }
+        });
+    }
+    // --- END NEW ---
+
     function getCookie(name) {
         let cookieValue = null;
         if (document.cookie && document.cookie !== '') {
@@ -404,6 +448,13 @@
     }
 
     function showTab(tabId) {
+        if (isConverting) {
+            console.log("[showTab] Conversion in progress. Tab switch prevented.");
+            // Optionally, provide a non-alert feedback to the user here if desired,
+            // e.g., by briefly changing a status message or an icon.
+            return; // Exit the function, preventing tab switch
+        }
+
         if (currentSelectedMainTab !== tabId) { 
             clearFileList();
             clearConvertedFilesList();
@@ -575,6 +626,7 @@
         }
 
         isConverting = true;
+        updateMainTabButtonsState(true); // --- NEW --- Disable other tabs
         console.log("[startConversion] isConverting 已被设置为 true。");
         const conversionBtn = document.getElementById('startConversionBtn');
         conversionBtn.disabled = true;
@@ -634,6 +686,7 @@
         .finally(() => {
             console.log("[finally] finally 代码块开始执行。重置前的 isConverting 状态:", isConverting);
             isConverting = false;
+            updateMainTabButtonsState(false); // --- NEW --- Enable all tabs
             console.log("[finally] isConverting 已被重置为 false。");
             const btn = document.getElementById('startConversionBtn');
             btn.disabled = false;

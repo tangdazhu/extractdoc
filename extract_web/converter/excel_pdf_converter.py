@@ -4,111 +4,10 @@ import logging
 from pathlib import Path
 import tempfile
 import shutil
+# Import the generic LibreOffice converter
+from .libreoffice_converter import convert_to_pdf as lo_convert_to_pdf
 
 logger = logging.getLogger('converter')
-
-def convert_excel_to_pdf_libreoffice(input_path, output_path):
-    """
-    使用LibreOffice命令行工具转换Excel到PDF，优化大表显示
-    
-    Args:
-        input_path: 输入的Excel文件路径(.xls/.xlsx)
-        output_path: 期望的输出PDF文件路径
-    
-    Returns:
-        tuple: (success: bool, actual_output_path: str or None, error_message: str or None)
-    """
-    temp_profile_dir = tempfile.mkdtemp(prefix='libreoffice_profile_')
-    user_install_path = f"file:///{temp_profile_dir.replace(os.sep, '/')}"
-    
-    soffice_input_copy = ""
-
-    try:
-        output_dir = os.path.dirname(output_path)
-        os.makedirs(output_dir, exist_ok=True)
-
-        base_name_orig, ext_orig = os.path.splitext(os.path.basename(input_path))
-        input_dir_orig = os.path.dirname(input_path)
-        with tempfile.NamedTemporaryFile(dir=input_dir_orig, prefix=f"{base_name_orig}_soffice_in_", suffix=ext_orig, delete=False) as tmp_file_obj:
-            soffice_input_copy = tmp_file_obj.name
-        
-        shutil.copy2(input_path, soffice_input_copy)
-        logger.info(f"Created temporary copy for soffice input: {soffice_input_copy} from {input_path}")
-
-        cmd = [
-            'soffice',
-            '--headless',
-            '--convert-to', 'pdf',
-            '--outdir', output_dir,
-            f'-env:UserInstallation={user_install_path}',
-            soffice_input_copy
-        ]
-        
-        logger.info(f"Running LibreOffice command: {' '.join(cmd)}")
-        
-        result = subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-            timeout=180,
-            check=True
-        )
-        
-        actual_soffice_output_pdf = os.path.join(output_dir, os.path.splitext(os.path.basename(soffice_input_copy))[0] + ".pdf")
-        
-        if os.path.exists(actual_soffice_output_pdf):
-            if actual_soffice_output_pdf != output_path:
-                if os.path.exists(output_path):
-                    try:
-                        os.remove(output_path)
-                        logger.info(f"Removed existing file at final output path: {output_path}")
-                    except OSError as e_rm_target:
-                        logger.warning(f"Could not remove existing file at final output path {output_path}: {e_rm_target}. Rename might fail.")
-                try:
-                    os.rename(actual_soffice_output_pdf, output_path)
-                    logger.info(f"Renamed soffice output {actual_soffice_output_pdf} to {output_path}")
-                except OSError as e_rename:
-                    error_msg = f"LibreOffice produced PDF {actual_soffice_output_pdf}, but failed to rename it to {output_path}: {e_rename}"
-                    logger.error(error_msg)
-                    return False, None, error_msg
-            
-            return True, output_path, None
-        else:
-            error_msg = f"LibreOffice转换完成，但未找到期望的输出文件: {actual_soffice_output_pdf} (based on soffice input {soffice_input_copy})"
-            logger.error(error_msg)
-            return False, None, error_msg
-            
-    except subprocess.TimeoutExpired:
-        error_msg = "LibreOffice转换超时（180秒）"
-        logger.error(error_msg)
-        return False, None, error_msg
-    except subprocess.CalledProcessError as e:
-        error_output = e.stderr if e.stderr else (e.stdout if e.stdout else "No output from soffice")
-        error_msg = f"LibreOffice转换失败 (exit code {e.returncode}): {error_output.strip()}"
-        logger.error(error_msg)
-        return False, None, error_msg
-    except FileNotFoundError:
-        error_msg = "LibreOffice (soffice) 未安装或未在系统PATH中"
-        logger.error(error_msg)
-        return False, None, error_msg
-    except Exception as e:
-        error_msg = f"LibreOffice转换时发生未知错误: {str(e)}"
-        logger.error(error_msg, exc_info=True)
-        return False, None, error_msg
-    finally:
-        if soffice_input_copy and os.path.exists(soffice_input_copy):
-            try:
-                os.remove(soffice_input_copy)
-                logger.info(f"Successfully removed temporary soffice input copy: {soffice_input_copy}")
-            except Exception as e_rm_copy:
-                logger.warning(f"Failed to remove temporary soffice input copy {soffice_input_copy}: {e_rm_copy}")
-        
-        if os.path.exists(temp_profile_dir):
-            try:
-                shutil.rmtree(temp_profile_dir)
-                logger.info(f"Successfully removed temporary LibreOffice profile directory: {temp_profile_dir}")
-            except Exception as e_rm_profile:
-                logger.warning(f"Failed to remove temporary LibreOffice profile directory {temp_profile_dir}: {e_rm_profile}")
 
 def register_chinese_fonts():
     """注册中文字体以支持中文显示"""
@@ -269,35 +168,78 @@ def convert_excel_to_pdf_openpyxl(input_path, output_path):
         logger.error(error_msg, exc_info=True) # Added exc_info=True for better debugging
         return False, None, error_msg
 
-def convert_excel_to_pdf(input_path, output_path):
+def convert_excel_to_pdf(input_path, output_pdf_path):
     """
     转换Excel到PDF的主函数，按优先级尝试不同方案
     
     Args:
         input_path: 输入的Excel文件路径(.xls/.xlsx)
-        output_path: 输出的PDF文件路径
+        output_pdf_path: 输出的PDF文件路径
     
     Returns:
         tuple: (success: bool, actual_output_path: str or None, error_message: str or None)
     """
-    logger.info(f"开始转换Excel到PDF: {input_path} -> {output_path}")
+    logger.info(f"开始转换Excel到PDF: {input_path} -> {output_pdf_path}")
     
-    # 方案1: LibreOffice - 跨平台，中文支持良好
-    # LibreOffice 应该作为首选，因为它对复杂格式和功能的兼容性通常优于纯Python方案
-    success, result_path, error = convert_excel_to_pdf_libreoffice(input_path, output_path)
-    if success:
-        return success, result_path, error
+    # --- 方案1: LibreOffice (using the generic converter) ---
+    output_dir_for_lo = os.path.dirname(output_pdf_path)
     
-    logger.warning(f"LibreOffice转换失败: {error}. Falling back to OpenPyXL+ReportLab.")
+    # Ensure output directory exists for LO converter (lo_convert_to_pdf also does this, but good practice here too)
+    if not os.path.isdir(output_dir_for_lo):
+        try:
+            os.makedirs(output_dir_for_lo, exist_ok=True)
+        except OSError as e_mkdir:
+            logger.error(f"创建LibreOffice输出目录失败 '{output_dir_for_lo}': {e_mkdir}")
+            # This is a critical failure before calling LO, so we might return early.
+            # However, lo_convert_to_pdf will also report an error if output_dir is not found.
+            # Let's allow it to proceed and let lo_convert_to_pdf handle its pre-checks.
+            pass
+
+    # Call the generic LibreOffice converter.
+    # lo_convert_to_pdf expects an output_dir, not a full output_path.
+    # It returns the actual path of the created PDF (e.g., input_filename.pdf in output_dir)
+    # and the original filename as created by LO.
+    lo_success, lo_actual_pdf_path_or_error, lo_original_filename = lo_convert_to_pdf(input_path, output_dir_for_lo)
     
-    # 方案2: OpenPyXL + ReportLab - 自定义方案，现在支持中文字体
-    success, result_path, error = convert_excel_to_pdf_openpyxl(input_path, output_path)
-    if success:
-        return success, result_path, error
+    if lo_success:
+        # If the path LibreOffice used (lo_actual_pdf_path_or_error) is not the final desired output_pdf_path,
+        # we need to move/rename it.
+        if lo_actual_pdf_path_or_error != output_pdf_path:
+            try:
+                if os.path.exists(output_pdf_path):
+                    logger.warning(f"目标PDF路径 {output_pdf_path} 已存在。将进行覆盖。")
+                    os.remove(output_pdf_path)
+                os.rename(lo_actual_pdf_path_or_error, output_pdf_path)
+                logger.info(f"Excel到PDF（LibreOffice）：成功将 '{lo_actual_pdf_path_or_error}' 重命名/移动到 '{output_pdf_path}'")
+                # The third element from lo_convert_to_pdf was lo_original_filename;
+                # now we return the new basename if rename occurred.
+                return True, output_pdf_path, os.path.basename(output_pdf_path) 
+            except Exception as e_move:
+                error_msg_move = f"Excel到PDF（LibreOffice）转换成功，但重命名/移动文件失败 从 '{lo_actual_pdf_path_or_error}' 到 '{output_pdf_path}': {e_move}"
+                logger.error(error_msg_move)
+                # Return success as True because PDF was created, but provide the path where it is, and the error message.
+                return True, lo_actual_pdf_path_or_error, error_msg_move # Error message as the third element
+        else:
+            # File is already at the desired output_pdf_path
+            logger.info(f"Excel到PDF（LibreOffice）成功，文件已在: {output_pdf_path}")
+            return True, output_pdf_path, lo_original_filename # Original name from LO
+    else:
+        # lo_actual_pdf_path_or_error contains the error message from lo_convert_to_pdf
+        logger.warning(f"LibreOffice (通用转换器) 转换Excel到PDF失败: {lo_actual_pdf_path_or_error}")
     
-    logger.warning(f"OpenPyXL+ReportLab转换也失败: {error}")
+    # --- 方案2: OpenPyXL + ReportLab - 自定义方案，现在支持中文字体 ---
+    logger.info("LibreOffice转换失败，尝试使用OpenPyXL+ReportLab方案。")
+    openpyxl_success, openpyxl_result_path, openpyxl_error = convert_excel_to_pdf_openpyxl(input_path, output_pdf_path)
+    if openpyxl_success:
+        # convert_excel_to_pdf_openpyxl already saves to output_pdf_path, so no move needed here.
+        # The third element it returns is None on success or an error message.
+        return True, openpyxl_result_path, None 
+    
+    logger.warning(f"OpenPyXL+ReportLab转换也失败: {openpyxl_error}")
     
     # 所有方案都失败
-    final_error = "所有Excel转PDF转换方案(LibreOffice, OpenPyXL+ReportLab)都失败。请检查LibreOffice是否正确安装和配置，或检查文件内容。"
-    logger.error(final_error)
-    return False, None, final_error 
+    # Use the error from the last attempted primary method (LibreOffice) or the fallback (OpenPyXL)
+    final_error_detail = openpyxl_error if openpyxl_error else lo_actual_pdf_path_or_error # lo_actual_pdf_path_or_error has LO error msg
+    final_error_msg = f"所有Excel转PDF转换方案(LibreOffice, OpenPyXL+ReportLab)都失败。最后错误: {final_error_detail}"
+    logger.error(final_error_msg)
+    return False, None, final_error_msg 
