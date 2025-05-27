@@ -84,3 +84,6 @@ images
 
 # project history generated files
 his_pic/
+
+# test files
+test_data/
