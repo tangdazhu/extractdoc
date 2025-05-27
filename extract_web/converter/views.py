@@ -413,39 +413,191 @@ def process_images_view(request):
         temp_files_to_delete.extend(img_temp_files_list_of_dicts)
 
     elif main_tab == 'pdfToFile':
+        # uploaded_files_info_from_frontend contains dicts with:
+        # {'original_name': ..., 'temp_path': ..., 'safe_original_filename': ...}
+        # The error occurs because we check for 'status', 'name', 'path' which don't exist here.
+        # We should use the available keys. If it's in this list, it's effectively 'uploaded'.
+
         for up_file_info in uploaded_files_info_from_frontend:
-            if up_file_info['status'] == 'uploaded':
-                original_name = up_file_info['name']
-                source_file_path = up_file_info['path']
-                base_name_no_ext = os.path.splitext(original_name)[0]
-                
-                # For pdfToFile, the temp files are just copies of the original PDFs, 
-                # as the conversion happens during the final merge or individual processing step.
-                temp_file_in_converted_dir_filename = f"{base_name_no_ext}_preFinal_{request_id}{os.path.splitext(original_name)[1]}"
-                temp_file_in_converted_dir_path = os.path.join(user_converted_dir, temp_file_in_converted_dir_filename)
-                try:
-                    if not original_name.lower().endswith('.pdf'):
-                        error_message = f"文件类型不匹配 ({sub_tab}): {original_name} (应为PDF)"
-                        logger.warning(f"{error_message} (RequestID: {request_id})")
-                        processed_files.append({'original_name': original_name, 'status': 'error', 'message': error_message})
-                        continue # Skip this file for temp_files_to_delete
-                    
-                    shutil.copy(source_file_path, temp_file_in_converted_dir_path)
-                    logger.info(f"Copied {original_name} to {temp_file_in_converted_dir_path} for {main_tab}/{sub_tab} (RequestID: {request_id}).")
+            # All files in uploaded_files_info_from_frontend are considered successfully uploaded at this stage.
+            # The original error was due to checking up_file_info['status'] which wasn't set
+            # when uploaded_files_info_from_frontend was initially populated.
+            # We will use 'original_name' and 'temp_path' from up_file_info.
+            
+            original_name = up_file_info['original_name']
+            source_file_path = up_file_info['temp_path'] # This is the path to the uploaded file in user_upload_dir
+            safe_original_filename = up_file_info['safe_original_filename']
+            base_name_no_ext = os.path.splitext(safe_original_filename)[0]
+
+            output_file_path = None # Will be set by the specific converter
+            converted_filename = None
+            success = False
+            conversion_message = "未进行转换或不支持的子类型。"
+            
+            try:
+                if not original_name.lower().endswith('.pdf'):
+                    error_message = f"文件类型不匹配 ({sub_tab}): {original_name} (应为PDF)"
+                    logger.warning(f"{error_message} (RequestID: {request_id})")
+                    processed_files.append({'original_name': original_name, 'status': 'error', 'message': error_message})
                     temp_files_to_delete.append({
-                        'path': temp_file_in_converted_dir_path,
+                        'path': source_file_path,
                         'original_name': original_name,
                         'base_filename_no_ext': base_name_no_ext,
-                        'status': 'success' # Mark as success for this stage
+                        'status': 'success' # Indicates the file is ready for further processing by Block D
                     })
-                except PermissionError as pe:
-                    logger.error(f"Permission denied for {original_name} to {temp_file_in_converted_dir_path} (RequestID: {request_id}): {pe}", exc_info=True)
-                    processed_files.append({'original_name': original_name, 'status': 'error','message': f'准备文件时权限不足: {str(pe)}'})
-                except Exception as e:
-                    logger.exception(f"Error preparing {original_name} for pdfToFile (RequestID: {request_id}): {e}")
-                    processed_files.append({'original_name': original_name, 'status': 'error', 'message': f'准备文件时出错: {str(e)}'})
-            else: 
-                processed_files.append(up_file_info) # Carry over upload errors
+                    continue
+
+                logger.info(f"pdfToFile: Processing {original_name} with sub_tab: {sub_tab}. Input: {source_file_path}. RequestID: {request_id}")
+
+                if sub_tab == 'pdfToWord':
+                    output_filename_docx = f"{base_name_no_ext}_{request_id}.docx"
+                    output_file_path = os.path.join(user_converted_dir, output_filename_docx)
+                    success, actual_output_path, conversion_message = convert_pdf_to_word(
+                        source_file_path, 
+                        output_file_path, 
+                        mode=pdf_to_word_mode # This should be passed from frontend or have a default
+                    )
+                    if success and actual_output_path:
+                        converted_filename = os.path.basename(actual_output_path)
+                
+                elif sub_tab == 'pdfToExcel':
+                    output_filename_excel = f"{base_name_no_ext}_{request_id}.xlsx"
+                    output_file_path = os.path.join(user_converted_dir, output_filename_excel)
+                    success, actual_output_path, conversion_message = convert_pdf_to_excel(
+                        source_file_path, 
+                        output_file_path,
+                        mode=pdf_to_excel_mode # Pass the mode to the converter
+                    )
+                    if success and actual_output_path:
+                        converted_filename = os.path.basename(actual_output_path)
+
+                elif sub_tab == 'pdfToPpt':
+                    output_filename_pptx = f"{base_name_no_ext}_{request_id}.pptx"
+                    output_file_path = os.path.join(user_converted_dir, output_filename_pptx)
+                    success, actual_output_path, conversion_message = convert_pdf_to_ppt(
+                        source_file_path, 
+                        output_file_path,
+                        mode=pdf_to_ppt_mode # Pass the mode
+                    )
+                    if success and actual_output_path:
+                        converted_filename = os.path.basename(actual_output_path)
+                
+                elif sub_tab == 'pdfToTxt':
+                    output_filename_txt = f"{base_name_no_ext}_{request_id}.txt"
+                    output_file_path = os.path.join(user_converted_dir, output_filename_txt)
+                    success, actual_output_path, conversion_message = convert_pdf_to_txt(
+                        source_file_path, 
+                        output_file_path,
+                        mode=pdf_to_txt_mode # Pass the mode
+                    )
+                    if success and actual_output_path:
+                        converted_filename = os.path.basename(actual_output_path)
+                
+                else:
+                    logger.warning(f"pdfToFile: Unsupported sub_tab '{sub_tab}' for {original_name}. RequestID: {request_id}")
+                    conversion_message = f"不支持的转换类型: {sub_tab}"
+
+                if success and converted_filename and os.path.exists(os.path.join(user_converted_dir, converted_filename)):
+                    final_output_path_in_converted_dir = os.path.join(user_converted_dir, converted_filename)
+                    # Ensure actual_output_path (if different) is moved to final_output_path_in_converted_dir
+                    if actual_output_path and actual_output_path != final_output_path_in_converted_dir:
+                        if os.path.exists(final_output_path_in_converted_dir):
+                            os.remove(final_output_path_in_converted_dir) # Remove if exists to avoid error on move
+                        shutil.move(actual_output_path, final_output_path_in_converted_dir)
+                        logger.info(f"Moved converted file from {actual_output_path} to {final_output_path_in_converted_dir}. RequestID: {request_id}")
+
+                    processed_files.append({
+                        'original_name': original_name,
+                        'converted_name': converted_filename,
+                        'download_url': reverse('converter:download_converted_file', args=[request.user.username, today_date_str, converted_filename]),
+                        'status': 'success',
+                        'message': conversion_message or '转换成功'
+                    })
+                    logger.info(f"pdfToFile/{sub_tab}: Successfully converted '{original_name}' to '{converted_filename}'. RequestID: {request_id}")
+                else:
+                    processed_files.append({
+                        'original_name': original_name,
+                        'status': 'error',
+                        'message': conversion_message or "转换失败，未生成文件。"
+                    })
+                    logger.error(f"pdfToFile/{sub_tab}: Failed to convert '{original_name}'. Message: {conversion_message}. RequestID: {request_id}")
+
+            except Exception as e_conv:
+                logger.error(f"Exception during {sub_tab} conversion for {original_name}: {e_conv}. RequestID: {request_id}", exc_info=True)
+                processed_files.append({
+                    'original_name': original_name,
+                    'status': 'error',
+                    'message': f"转换时发生严重错误: {str(e_conv)}"
+                })
+            finally:
+                # The source_file_path is the temporary input file in user_upload_dir.
+                # It should be cleaned up by the later general processing block (Block D).
+                # Add it as a dictionary to be compatible with Block D.
+                temp_files_to_delete.append({
+                    'path': source_file_path,
+                    'original_name': original_name,
+                    'base_filename_no_ext': base_name_no_ext,
+                    'status': 'success' # Indicates the file is ready for further processing by Block D
+                })
+        
+        # Merging logic for pdfToFile (if merge_output is true)
+        # This tab converts multiple PDFs to a target format. If merge_output is selected,
+        # the individual converted files (e.g., multiple DOCX files) should be merged.
+        if merge_output and any(f['status'] == 'success' for f in processed_files):
+            successful_conversions = [f for f in processed_files if f['status'] == 'success']
+            if len(successful_conversions) > 1:
+                files_to_merge_paths = [os.path.join(user_converted_dir, f['converted_name']) for f in successful_conversions]
+                first_file_ext = os.path.splitext(files_to_merge_paths[0])[1].lower()
+                merged_filename = f"merged_files_{request_id}{first_file_ext}"
+                merged_output_path = os.path.join(user_converted_dir, merged_filename)
+                merge_success = False
+                merge_message = ""
+
+                try:
+                    if sub_tab == 'pdfToWord' and first_file_ext == '.docx':
+                        merge_success, merge_message = merge_docx_files(files_to_merge_paths, merged_output_path)
+                    elif sub_tab == 'pdfToPpt' and first_file_ext == '.pptx':
+                        merge_success, merge_message = merge_pptx_files(files_to_merge_paths, merged_output_path)
+                    elif sub_tab == 'pdfToTxt' and first_file_ext == '.txt':
+                        merge_success, merge_message = merge_text_files(files_to_merge_paths, merged_output_path)
+                    # Note: Merging Excel files is complex and often not practical this way. 
+                    # For now, we won't implement merging for pdfToExcel.
+                    # If other mergeable types are added to pdfToFile, add their logic here.
+                    else:
+                        logger.info(f"Merge requested for {sub_tab}, but merging for {first_file_ext} is not supported or only one file. Skipping merge. RequestID: {request_id}")
+                        # Not an error, just don't merge. The individual files are still available.
+
+                    if merge_success:
+                        logger.info(f"pdfToFile/{sub_tab}: Successfully merged {len(files_to_merge_paths)} files into '{merged_filename}'. RequestID: {request_id}")
+                        final_merged_result_message = f"{len(files_to_merge_paths)} 个文件成功转换为 {sub_tab.replace('pdfTo','')} 并合并。"
+                        
+                        # Update processed_files to show only the merged file
+                        processed_files = [{
+                            'original_name': f'合并的 {sub_tab.replace("pdfTo","")} 文件',
+                            'converted_name': merged_filename,
+                            'download_url': reverse('converter:download_converted_file', args=[request.user.username, today_date_str, merged_filename]),
+                            'status': 'success',
+                            'message': merge_message or final_merged_result_message
+                        }]
+                        # Clean up individual files that were merged
+                        for old_file_path in files_to_merge_paths:
+                            if os.path.exists(old_file_path):
+                                try:
+                                    os.remove(old_file_path)
+                                except Exception as e_del_merged_src:
+                                    logger.warning(f"Failed to delete merged source file {old_file_path}: {e_del_merged_src}. RequestID: {request_id}")
+                    elif merge_message: # Merge attempted but failed
+                        # Keep individual files, add a warning about merge failure
+                        processed_files.append({'original_name': '合并操作', 'status': 'error', 'message': f'{sub_tab.replace("pdfTo","")} 文件合并失败: {merge_message}'})
+                        logger.error(f"Failed to merge files for {sub_tab}: {merge_message}. RequestID: {request_id}")
+
+                except Exception as e_merge_sub_tab:
+                    logger.error(f"Error during merging for {sub_tab}: {e_merge_sub_tab}. RequestID: {request_id}", exc_info=True)
+                    processed_files.append({'original_name': '合并操作', 'status': 'error', 'message': f'{sub_tab.replace("pdfTo","")} 文件合并时发生严重错误: {str(e_merge_sub_tab)}'})
+            
+            elif len(successful_conversions) == 1 and merge_output:
+                logger.info(f"pdfToFile/{sub_tab}: Merge output selected, but only one successful conversion. No merge needed. File: {successful_conversions[0]['converted_name']}. RequestID: {request_id}")
+                # No action needed, individual file is already in processed_files.
 
     else: 
         if main_tab not in ['imgToFile', 'fileToPdf', 'pdfToFile'] and not any(r['status'] == 'error' for r in processed_files): 
@@ -663,9 +815,25 @@ def process_images_view(request):
 
         else: # Not merge_output: Process individual files
             for file_info in valid_temp_files_for_processing:
-                temp_source_for_individual_conversion = file_info['path'] # This is the _prePdf_ or _preFinal_ or _tempScriptOutput_ file
+                temp_source_for_individual_conversion = file_info['path']
                 original_input_name = file_info['original_name']
                 base_filename_no_ext_for_indiv = file_info['base_filename_no_ext']
+
+                # If main_tab is 'fileToPdf' or 'pdfToFile' and not merging,
+                # Loop A already created the final file and added it to processed_files.
+                # The temp_source_for_individual_conversion here is the original uploaded file
+                # which just needs to be cleaned up.
+                if main_tab in ['fileToPdf', 'pdfToFile']:
+                    logger.info(f"Block E: '{original_input_name}' (main_tab: {main_tab}, no-merge) already processed by Loop A. Skipping re-conversion in Block E. RequestID: {request_id}")
+                    # Ensure the original uploaded file is cleaned up
+                    if os.path.exists(temp_source_for_individual_conversion) and \
+                       Path(temp_source_for_individual_conversion).parent.samefile(Path(user_upload_dir)): # Safety check for upload dir
+                        try:
+                            os.remove(temp_source_for_individual_conversion)
+                            logger.info(f"Block E: Cleaned up original upload {temp_source_for_individual_conversion} for skipped item. RequestID: {request_id}")
+                        except OSError as e_clean_skipped_in_E:
+                            logger.warning(f"Block E: Failed to clean up original upload {temp_source_for_individual_conversion} for skipped item: {e_clean_skipped_in_E}. RequestID: {request_id}")
+                    continue # Skip to the next file in valid_temp_files_for_processing
 
                 random_chars_final_indv = ''.join(random.choices(string.ascii_lowercase + string.digits, k=8))
                 final_output_base_indiv = f"{base_filename_no_ext_for_indiv}_{random_chars_final_indv}" 
