@@ -8,27 +8,27 @@
 
 位于"文本转换器"标题的右侧，包含以下第一级标签页切换按钮：
 
--   图片转文件
--   文件转PDF (规划中，未实现)
--   PDF转文件 (规划中，未实现)
+-   图片转文件 (已实现)
+-   文件转PDF (已实现)
+-   PDF转文件 (已实现)
 
 ### 1.2 子导航区与内容区
 
 根据所选的第一级标签页，动态显示对应的第二级功能按钮。选中某个第一级标签页时，其文字应变为蓝色，卡片背景（或边框）也应突出显示（例如，加上蓝色边框和浅蓝色背景）。
 
 -   **当选中"图片转文件"时，下方显示的子功能按钮为：**
-    -   图片转Word
-    -   图片转PDF
--   **当选中"文件转PDF"时 (规划中)：**
-    -   Word转PDF
-    -   Excel转PDF
-    -   PPT转PDF
-    -   TXT转PDF
--   **当选中"PDF转文件"时 (规划中)：**
-    -   PDF转Word
-    -   PDF转Excel
-    -   PDF转PPT
-    -   PDF转TXT
+    -   图片转Word (已实现)
+    -   图片转PDF (已实现)
+-   **当选中"文件转PDF"时：**
+    -   Word转PDF (已实现)
+    -   Excel转PDF (已实现)
+    -   PPT转PDF (已实现)
+    -   TXT转PDF (已实现)
+-   **当选中"PDF转文件"时：**
+    -   PDF转Word (已实现)
+    -   PDF转Excel (已实现)
+    -   PDF转PPT (已实现)
+    -   PDF转TXT (已实现)
 
 ### 1.3 文件操作区
 
@@ -45,12 +45,12 @@
 
 位于"开始转换"按钮下方，用于展示当前批次转换完成后生成的文件列表。
 
--   标题："转换文件列表"
+-   标题："转换结果" (根据实际UI调整)
 -   列表项（表格形式）：
     -   原始文件名：显示用户上传时的原始文件名。如果是多个文件合并，则显示逗号分隔的原始文件名列表 (例如：`1.jpg,2.jpg`)。
     -   转换后文件名：显示服务器生成的最终文件名。
     -   操作：提供"下载"链接。
-    -   状态：显示转换状态 (例如：`success`, `conversion_error`)。
+    -   状态：显示转换状态 (例如：`success`, `error`, `success_with_issue`)。
 
 ### 1.5 用户状态区 (导航栏)
 
@@ -120,6 +120,7 @@
         -   以 `YYYYMMDD` 格式的日期（例如 `20230522`）组织用户的历史转换记录。日期按倒序排列（最新的在前）。
         -   列表顶部有一个"选择日期查看记录"的链接，点击后右侧不显示特定日期的文件，提示用户选择日期。
         -   点击某个日期链接后，该日期在列表中高亮显示，右侧加载对应日期的转换文件。
+        -   在每个日期标题行的右侧，提供一个"一键清除此日期记录"的按钮，点击后JS确认，然后删除该日期下的所有`converted_files`和`uploads`内的文件及空目录。
     -   **右侧主内容区（转换文件列表区）**：
         -   若未选择日期或选择的日期下无文件，则显示相应提示信息 (例如 "请从左侧选择一个日期以查看转换文件。" 或 "选定日期内没有转换文件。")。
         -   若选定日期下有文件，则以表格形式显示该日期的转换文件列表。
@@ -135,49 +136,86 @@
                 -   **下载**：蓝色文本链接，点击后在新标签页下载对应的转换后文件。
                 -   **删除**：红色文本链接，点击后弹出确认对话框。确认后，物理删除服务器上的转换后文件及其对应的 `.meta` 元数据文件。如果删除文件后 `converted_files` 目录变空，则尝试删除该目录；如果 `converted_files` 目录删除后，其父级日期目录 (例如 `YYYYMMDD`) 也变空（即其下的 `uploads` 目录也不存在或为空），则尝试删除该日期目录。
 
-## 四、核心转换流程：图片转文件 (Word/PDF)
+## 四、核心转换流程
 
-### 4.1 用户界面交互
+### 4.1 图片转文件 (Word/PDF) - ImgToFile
+
+#### 4.1.1 用户界面交互
 
 1.  用户在"图片转文件"主标签页下，选择"图片转Word"或"图片转PDF"子标签页，以确定最终输出格式。
 2.  用户通过文件上传区域添加一个或多个图片文件。
     -   前端限制：最多选择10个文件，单个文件大小不超过10MB。相关提示显示在"+ 添加文件"按钮下方。
-    -   已选文件列表会显示在上传区域下方。
+    -   已选文件列表会显示在上传区域下方，可移除单个文件。
 3.  用户可勾选或取消"合并为一个文件"复选框（默认选中）。
 4.  点击"开始转换"按钮：
-    -   按钮文字变为"等待转换中..."，背景色变为黄色（或有其他视觉反馈）。
+    -   按钮文字变为"等待转换中..."，背景色变为黄色，主、子标签页不可切换。
     -   向后端发起处理请求，包含图片文件、合并选项 (`merge_output`) 和输出格式 (`output_format`：`docx` 或 `pdf`)。
 5.  转换完成后：
-    -   "等待转换中..."按钮恢复为"开始转换"。
-    -   下方的"转换文件列表"表格更新，显示本次转换的结果（原始文件名、转换后文件名、下载链接、状态）。
+    -   "等待转换中..."按钮恢复为"开始转换"，主、子标签页恢复可切换。
+    -   下方的"转换结果"表格更新，显示本次转换的结果。
 
-### 4.2 后端处理逻辑 (`process_images_view`)
+#### 4.1.2 后端处理逻辑 (`process_images_view` for `main_tab == 'imgToFile'`)
 
-1.  接收前端传来的图片文件、`merge_output` 和 `output_format` 参数。
-2.  为当前用户和当前日期（`YYYYMMDD`）创建或确认目标存储路径：
-    -   上传路径: `extract_doc/extract_web/his_pic/<username>/<YYYYMMDD>/uploads/`
-    -   转换后文件路径: `extract_doc/extract_web/his_pic/<username>/<YYYYMMDD>/converted_files/`
+1.  接收前端传来的图片文件、`merge_output` 和 `output_format` 参数，生成`request_id`。
+2.  为当前用户和当前日期（`YYYYMMDD`）创建或确认目标存储路径（`uploads` 和 `converted_files`）。
 3.  保存上传的图片到 `uploads` 目录。
 4.  **核心处理（两阶段）**：
-    -   **阶段一 (脚本调用)**：对于每个上传的图片，总是调用外部Python脚本 (`extract_text_from_images.py`)，指示其输出一个临时的 `.docx` 文件到用户的当日 `converted_files` 目录中。这些临时文件命名可能包含 `_tempScriptOutput` 后缀。
+    -   **阶段一 (OCR到DOCX)**：对于每个上传的图片，调用 `pic_file_converter.process_images_to_files`，该函数内部调用外部Python脚本 (`extract_text_from_images.py`)，指示其输出一个临时的 `.docx` 文件（文件名包含 `_tempScriptOutput_<request_id>.docx`）到用户的当日 `converted_files` 目录中。
     -   **阶段二 (视图内合并/转换)**：
         -   **若 `merge_output` 为真**：
-            -   使用 `python-docx` 库将阶段一生成的所有临时 `.docx` 文件合并为一个主 `.docx` 文件。合并后的文件名格式为 `<username>_<YYYYMMDD>_<8位随机字符>.docx`。
-            -   **如果目标 `output_format` 是 `pdf`**：尝试使用 `docx2pdf` 库将合并后的主 `.docx` 文件转换为 `.pdf` 文件。成功则删除主 `.docx`；失败则保留主 `.docx`，并向用户发送提示。
-            -   删除阶段一生成的各个临时 `.docx` 文件。
+            -   使用 `python-docx` 库将阶段一生成的所有临时 `.docx` 文件合并为一个主 `.docx` 文件（文件名包含 `_intermediate_<request_id>.docx`）。
+            -   **如果目标 `output_format` 是 `pdf`**：调用 `word_to_pdf_converter.convert_word_to_pdf` (其内部使用LibreOffice) 将合并后的主 `.docx` 文件转换为 `.pdf` 文件。成功则删除主 `.docx`；失败则保留主 `.docx`，并向用户发送提示。
+            -   删除阶段一生成的各个临时 `.docx` 文件及中间合并的 `.docx` (如果已转PDF)。
             -   为最终的合并文件（`.docx` 或 `.pdf`）创建一个 `.meta` 文件，存储所有原始上传文件的名称列表（逗号分隔）。
-            -   准备JSON响应，`original_name` 字段包含逗号分隔的原始文件名。
         -   **若 `merge_output` 为假**：
             -   遍历阶段一生成的每个临时 `.docx` 文件：
-                -   **如果目标 `output_format` 是 `pdf`**：尝试将其转换为 `.pdf`。成功则删除临时 `.docx`；失败则保留临时 `.docx`。
-                -   **如果目标 `output_format` 是 `docx`**：将临时 `.docx` 文件重命名（或保持原样，如果已符合最终命名规则）。
+                -   **如果目标 `output_format` 是 `pdf`**：调用 `word_to_pdf_converter.convert_word_to_pdf` 将其转换为 `.pdf`。成功则删除临时 `.docx`；失败则保留临时 `.docx`。
+                -   **如果目标 `output_format` 是 `docx`**：将临时 `.docx` 文件移动/重命名为最终文件名。
                 -   为每个最终生成的单文件（`.docx` 或 `.pdf`）创建一个 `.meta` 文件，存储其对应的原始上传文件名。
-                -   准备JSON响应，`original_name` 字段包含该文件对应的原始上传文件名。
-5.  返回包含所有已处理文件信息（原始文件名、转换后文件名、下载URL、状态）的JSON响应给前端。
+5.  返回包含所有已处理文件信息（原始文件名、转换后文件名、下载URL、状态）的JSON响应给前端。清理所有带`request_id`的临时文件。
 
-### 4.3 外部脚本 (`extract_text_from_images.py`)
+#### 4.1.3 外部脚本 (`extract_text_from_images.py`)
 
--   接受输入图片路径、输出文件路径和 `--format` (值为 `docx` 或 `pdf`) 参数。
+-   接受输入图片路径、输出文件路径和 `--format docx` 参数。
 -   使用 PaddleOCR 等库提取图片中的文本和表格。
--   将提取内容保存到指定输出路径。
--   如果 `--format` 为 `pdf`，脚本会先生成 `.docx`，然后尝试调用 `docx2pdf` 将其转换为 `.pdf`，成功后删除中间的 `.docx` 文件。若 `docx2pdf` 转换失败或库不可用，则只保留 `.docx` 文件。
+-   将提取内容保存到指定输出路径的 `.docx` 文件。
+
+### 4.2 文件转PDF (Word/Excel/PPT/TXT to PDF) - FileToPdf
+
+#### 4.2.1 用户界面交互
+(与图片转文件类似，用户选择对应子标签页如"Word转PDF"，上传相应文件类型)
+
+#### 4.2.2 后端处理逻辑 (`process_images_view` for `main_tab == 'fileToPdf'`)
+1. 接收前端文件、`merge_output` (`true`时合并为单一PDF) 和 `sub_tab` (如 `wordToPdf`)。
+2. 文件被复制到 `converted_files` 目录，命名含 `_prePdf_<request_id>.<ext>`。
+3. **若 `merge_output` 为真**:
+    - 对每个上传文件（如 `.docx`），调用相应的转换器 (如 `word_to_pdf_converter.convert_word_to_pdf`) 生成临时的单个PDF文件（文件名含 `_merged_temp_<request_id>.pdf`）。
+    - 使用 `PyPDF2` 将所有临时PDF文件合并为一个最终PDF。
+    - 清理所有原始上传文件的副本和临时PDF。
+    - 创建 `.meta` 文件。
+4. **若 `merge_output` 为假**:
+    - 对每个上传文件，调用相应的转换器 (如 `word_to_pdf_converter.convert_word_to_pdf` for DOCX, `excel_pdf_converter.convert_excel_to_pdf` for XLSX, `ppt_pdf_converter.convert_pptx_to_pdf` for PPTX, `txt_to_pdf_converter.convert_txt_to_pdf` for TXT) 直接生成最终PDF。
+    - 清理原始上传文件的副本。
+    - 创建 `.meta` 文件。
+5. 返回JSON结果。所有转换器（Word, Excel, PPT）优先使用基于LibreOffice的通用转换逻辑。
+
+### 4.3 PDF转文件 (Word/Excel/PPT/TXT) - PdfToFile
+
+#### 4.3.1 用户界面交互
+(与图片转文件类似，用户选择对应子标签页如"PDF转Word"，上传PDF文件)
+
+#### 4.3.2 后端处理逻辑 (`process_images_view` for `main_tab == 'pdfToFile'`)
+1. 接收前端PDF文件、`merge_output` 和 `sub_tab` (如 `pdfToWord`)。
+2. PDF文件被复制到 `converted_files` 目录，命名含 `_preFinal_<request_id>.pdf`。
+3. **若 `merge_output` 为真**:
+    -   **对于 `pdfToWord` (输出DOCX) 和 `pdfToTxt` (输出TXT)**：
+        -   对每个上传的PDF，调用相应转换器 (`pdf_to_word_converter.convert_pdf_to_word` 或 `pdf_to_txt_converter.convert_pdf_to_txt`) 生成临时的单个目标文件 (如 `.docx` 或 `.txt`，文件名含 `_indv_conv_<request_id>`)。
+        -   DOCX文件使用 `python-docx` 合并；TXT文件直接拼接内容合并。
+        -   清理原始PDF副本和临时转换文件。
+        -   创建 `.meta` 文件。
+    -   **对于 `pdfToExcel` (XLSX) 和 `pdfToPpt` (PPTX)**：合并输出目前不支持。如果勾选合并，会提示用户不支持，并建议单独转换。
+4. **若 `merge_output` 为假 (或 `pdfToExcel`/`pdfToPpt` 即使勾选了合并也会按此执行)**:
+    - 对每个上传的PDF文件，调用相应转换器 (`pdf_to_word_converter.convert_pdf_to_word`, `pdf_to_excel_converter.convert_pdf_to_excel`, `pdf_to_ppt_converter.convert_pdf_to_ppt`, `pdf_to_txt_converter.convert_pdf_to_txt`) 生成最终的目标格式文件。
+    - 清理原始PDF副本。
+    - 创建 `.meta` 文件。
+5. 返回JSON结果。
