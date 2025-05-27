@@ -29,6 +29,7 @@ from .pdf_to_word_converter import convert_pdf_to_word
 # Add new imports for PDF to X converters
 from .pdf_to_ppt_converter import convert_pdf_to_ppt
 from .pdf_to_txt_converter import convert_pdf_to_txt
+from .libreoffice_converter import convert_to_pdf as convert_to_pdf_libreoffice # Import LO converter
 
 logger = logging.getLogger('converter') # 获取 logger 实例
 
@@ -340,8 +341,9 @@ def process_images_view(request):
             merged_base_filename = f"{request.user.username}_{today_date_str}_{random_chars_final_merge}" # Final merged file name base
             final_merged_filename = f"{merged_base_filename}.{output_format}"
             final_merged_path = os.path.join(user_converted_dir, final_merged_filename)
+            logger.info(f"MERGE_OUTPUT: Generated final_merged_path: {final_merged_path} for RequestID: {request_id}")
 
-            files_to_cleanup_after_merge = [info['path'] for info in temp_files_for_final_processing] # These should have request_id from earlier steps
+            files_to_cleanup_after_merge = [info['path'] for info in temp_files_for_final_processing]
             temp_individual_outputs_for_merging = []
             
             try:
@@ -372,10 +374,14 @@ def process_images_view(request):
                     
                     if all_individual_conversions_successful and temp_individual_outputs_for_merging:
                         pdf_merger = PdfMerger()
-                        for pdf_path in temp_individual_outputs_for_merging: pdf_merger.append(pdf_path)
-                        pdf_merger.write(final_merged_path) # final_merged_path target extension is .pdf (from output_format)
+                        for pdf_path in temp_individual_outputs_for_merging: 
+                            logger.debug(f"MERGE_OUTPUT (excelToPdf): Appending to PdfMerger: {pdf_path} for RequestID: {request_id}")
+                            pdf_merger.append(pdf_path)
+                        
+                        logger.info(f"MERGE_OUTPUT (excelToPdf): Writing merged PDF to {final_merged_path} for RequestID: {request_id}")
+                        pdf_merger.write(final_merged_path)
                         pdf_merger.close()
-                        logger.info(f"Successfully merged PDFs from {sub_tab} into: {final_merged_path}")
+                        logger.info(f"Successfully merged PDFs from {sub_tab} into: {final_merged_path} (RequestID: {request_id})")
                         merge_successful = True
                     elif not temp_individual_outputs_for_merging and all_individual_conversions_successful:
                         if not any(r['status'] == 'error' for r in processed_results):
@@ -468,24 +474,64 @@ def process_images_view(request):
                              files_to_cleanup_after_merge.append(merged_docx_intermediate_path)
                         
                         if output_format == 'pdf': # This case is for wordToPdf merge to PDF
-                            if DOCX2PDF_AVAILABLE_IN_VIEW:
-                                convert_docx_to_pdf(merged_docx_intermediate_path, final_merged_path)
-                                logger.info(f"Converted merged DOCX to PDF: {final_merged_path} (RequestID: {request_id})")
-                                merge_successful = True
+                            logger.info(f"Attempting to convert merged DOCX {merged_docx_intermediate_path} to PDF {final_merged_path} using LibreOffice. (RequestID: {request_id})")
+                            
+                            # output_dir for LO should be user_converted_dir
+                            # final_merged_path is the TARGET path for the PDF with our unique naming
+                            # final_merged_filename is the base filename part of final_merged_path
+
+                            lo_success, lo_output_or_error, lo_original_pdf_filename = convert_to_pdf_libreoffice(merged_docx_intermediate_path, user_converted_dir)
+                            
+                            if lo_success and lo_output_or_error and lo_original_pdf_filename:
+                                actual_lo_generated_pdf_path = lo_output_or_error # This is where LO placed the file, e.g., merged_base_intermediate.pdf
+                                
+                                # Now we need to move/rename this to our desired final_merged_path
+                                if actual_lo_generated_pdf_path != final_merged_path:
+                                    try:
+                                        shutil.move(actual_lo_generated_pdf_path, final_merged_path)
+                                        logger.info(f"LibreOffice successfully converted and file moved to: {final_merged_path} (RequestID: {request_id})")
+                                        merge_successful = True
+                                        # Ensure the original LO output path (if different and still in cleanup) is handled, 
+                                        # though it shouldn't be if move is successful. Add final_merged_path to cleanup if it was just created by move?
+                                        # No, final_merged_path is the intended final file, not for cleanup unless explicitly stated for temp final files.
+                                        # The merged_docx_intermediate_path IS ALREADY in files_to_cleanup_after_merge.
+                                        # If actual_lo_generated_pdf_path was somehow added to cleanup (it shouldn_prefix = "")t be by default), remove it.
+                                        if actual_lo_generated_pdf_path in files_to_cleanup_after_merge:
+                                            files_to_cleanup_after_merge.remove(actual_lo_generated_pdf_path)
+
+                                    except Exception as e_move_lo_pdf:
+                                        logger.error(f"LibreOffice conversion succeeded, but failed to move PDF from {actual_lo_generated_pdf_path} to {final_merged_path}: {e_move_lo_pdf} (RequestID: {request_id})")
+                                        merge_successful = False
+                                        # Fallback to serving DOCX
+                                        final_merged_path = merged_docx_intermediate_path # Revert to intermediate docx
+                                        final_merged_filename = os.path.basename(merged_docx_intermediate_path) # Update filename to match
+                                        processed_results = [r for r in processed_results if r.get('original_name') != "Merged Document"]
+                                        processed_results.append({
+                                            'original_name': "Merged Document (DOCX Fallback)", 
+                                            'status': 'error', 
+                                            'message': f'LibreOffice转PDF后移动文件失败: {e_move_lo_pdf}，已合并为DOCX。',
+                                            'converted_name': final_merged_filename,
+                                            'download_url': None
+                                        })
+                                        merge_successful = True # We are serving DOCX
+                                else: # actual_lo_generated_pdf_path is already final_merged_path (if LO named it as such)
+                                    logger.info(f"LibreOffice successfully converted. PDF is at: {final_merged_path} (RequestID: {request_id})")
+                                    merge_successful = True
                             else:
-                                # Serve the intermediate DOCX as fallback if PDF conversion fails
-                                final_merged_filename = os.path.basename(merged_docx_intermediate_path) 
-                                final_merged_path = merged_docx_intermediate_path # Update final_merged_path to the .docx
-                                logger.warning(f"DOCX to PDF failed for merged file (docx2pdf unavailable), serving DOCX: {final_merged_path}. (RequestID: {request_id})")
-                                # Add specific fallback message to processed_results, this will be updated if file exists
+                                logger.error(f"LibreOffice conversion failed for {merged_docx_intermediate_path}. Error: {lo_output_or_error} (RequestID: {request_id})")
+                                # Fallback to serving DOCX
+                                final_merged_path = merged_docx_intermediate_path # Revert to intermediate docx
+                                final_merged_filename = os.path.basename(merged_docx_intermediate_path) # Update filename to match
+                                processed_results = [r for r in processed_results if r.get('original_name') != "Merged Document"]
                                 processed_results.append({
                                     'original_name': "Merged Document (DOCX Fallback)", 
-                                    'status': 'error', # Initially error, will be updated
-                                    'message': 'DOCX转PDF库不可用，已合并为DOCX。请检查文件。', 
-                                    'converted_name': final_merged_filename, 
+                                    'status': 'error', 
+                                    'message': f'LibreOffice转PDF失败: {lo_output_or_error}，已合并为DOCX。',
+                                    'converted_name': final_merged_filename,
                                     'download_url': None
                                 })
-                                merge_successful = True # Still true as DOCX is served
+                                merge_successful = True # We are serving DOCX
+
                         elif output_format == 'docx': # This case is for imgToFile merge to DOCX
                             if merged_docx_intermediate_path != final_merged_path: 
                                 try:
