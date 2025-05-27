@@ -7,7 +7,7 @@ from django.conf import settings
 import os
 import subprocess # For running the script
 from django.contrib import messages # 新增导入
-from django.http import JsonResponse # For AJAX responses
+from django.http import JsonResponse, FileResponse, Http404
 from django.views.decorators.http import require_POST # To restrict to POST requests
 import random
 import string
@@ -31,6 +31,7 @@ from .pdf_to_ppt_converter import convert_pdf_to_ppt
 from .pdf_to_txt_converter import convert_pdf_to_txt
 from .libreoffice_converter import convert_to_pdf as convert_to_pdf_libreoffice # Import LO converter
 from .word_to_pdf_converter import convert_word_to_pdf # ADDED: Import for the new Word to PDF converter
+from django.core.exceptions import PermissionDenied # For security checks
 
 # PDF to X Merge Converters
 from .pdf_to_word_converter import convert_and_merge_pdfs_to_docx 
@@ -243,73 +244,174 @@ def process_images_view(request):
         logger.error(f"PDF output requested for Word file, but docx2pdf is not available. RequestID: {request_id}")
         return JsonResponse({'results': [{'original_name': 'Conversion', 'status': 'error', 'message': 'Word转PDF的转换库(docx2pdf)不可用。'}], 'merge_output': merge_output})
 
+    processed_files = []
+    temp_files_to_delete = [] # Keep track of temporary files for cleanup
+
+    if not request.FILES.getlist('images'):
+        logger.error(f"No files uploaded for conversion. RequestID: {request_id}")
+        return JsonResponse({'results': [{'original_name': 'File Upload', 'status': 'error', 'message': '没有上传文件或文件列表为空。'}], 'merge_output': merge_output})
+
+    # Create a list of uploaded file information (original_name, temp_path)
+    # This is done *before* the main processing loop to ensure all files are saved first.
     uploaded_files_info_from_frontend = []
     for uploaded_file in request.FILES.getlist('images'): 
         original_filename = uploaded_file.name
-        safe_original_filename = Path(original_filename).name
-        uploaded_file_path = os.path.join(user_upload_dir, safe_original_filename)
-        try:
-            with open(uploaded_file_path, 'wb+') as destination:
-                for chunk in uploaded_file.chunks():
-                    destination.write(chunk)
-            uploaded_files_info_from_frontend.append({'name': safe_original_filename, 'status': 'uploaded', 'path': uploaded_file_path})
-        except Exception as e:
-            logger.error(f"Error uploading file {safe_original_filename} to {user_upload_dir} (RequestID: {request_id}): {e}")
-            uploaded_files_info_from_frontend.append({'name': safe_original_filename, 'status': 'upload_error', 'message': str(e)})
-    
-    processed_results = []
-    temp_files_for_final_processing = [] 
+        # Sanitize filename to prevent directory traversal or other issues
+        safe_original_filename = Path(original_filename).name 
+        
+        # Create a unique name for the temporary input file to avoid collisions before conversion
+        temp_input_base, temp_input_ext = os.path.splitext(safe_original_filename)
+        temp_input_filename = f"{temp_input_base}_{request_id}_input{temp_input_ext}"
+        temp_input_path = os.path.join(user_upload_dir, temp_input_filename) # Save to uploads, then move to converted
 
-    if main_tab == 'imgToFile':
+        with open(temp_input_path, 'wb+') as destination:
+            for chunk in uploaded_file.chunks():
+                destination.write(chunk)
+        uploaded_files_info_from_frontend.append({
+            'original_name': original_filename, # Keep original for display
+            'temp_path': temp_input_path,
+            'safe_original_filename': safe_original_filename # Use for constructing output names
+        })
+        logger.info(f"Uploaded and saved temporary input file: {temp_input_path} for original: {original_filename}. RequestID: {request_id}")
+
+    # Main processing logic starts here
+    if main_tab == 'fileToPdf':
+        for uploaded_file_data in uploaded_files_info_from_frontend:
+            original_name = uploaded_file_data['original_name']
+            temp_input_path = uploaded_file_data['temp_path']
+            safe_original_filename = uploaded_file_data['safe_original_filename']
+
+            base_name_no_ext = os.path.splitext(safe_original_filename)[0]
+            unique_pdf_filename = f"{base_name_no_ext}_{request_id}.pdf" # Simpler unique name for output
+            output_pdf_path = os.path.join(user_converted_dir, unique_pdf_filename)
+
+            success = False
+            conversion_message = "不支持的文件类型或转换失败。"
+            actual_output_file_path_from_converter = None # To store the actual path returned by converter
+
+            try:
+                logger.info(f"fileToPdf: Processing {original_name} with sub_tab: {sub_tab}. Input: {temp_input_path}, Output: {output_pdf_path}. RequestID: {request_id}")
+                if sub_tab == 'wordToPdf':
+                    if original_name.lower().endswith(('.doc', '.docx')):
+                        success, actual_output_file_path_from_converter, conversion_message = convert_word_to_pdf(temp_input_path, output_pdf_path)
+                    else:
+                        conversion_message = "不是有效的Word文件 (.doc, .docx)。"
+                elif sub_tab == 'excelToPdf':
+                    if original_name.lower().endswith(('.xls', '.xlsx')):
+                        success, actual_output_file_path_from_converter, conversion_message = convert_excel_to_pdf(temp_input_path, output_pdf_path)
+                    else:
+                        conversion_message = "不是有效的Excel文件 (.xls, .xlsx)。"
+                elif sub_tab == 'pptToPdf':
+                    if original_name.lower().endswith(('.ppt', '.pptx')):
+                        success, actual_output_file_path_from_converter, conversion_message = ppt_pdf_converter.convert_pptx_to_pdf(temp_input_path, output_pdf_path)
+                    else:
+                        conversion_message = "不是有效的PPT文件 (.ppt, .pptx)。"
+                elif sub_tab == 'txtToPdf':
+                    if original_name.lower().endswith('.txt'):
+                        success, actual_output_file_path_from_converter, conversion_message = convert_txt_to_pdf(temp_input_path, output_pdf_path)
+                    else:
+                        conversion_message = "不是有效的TXT文件 (.txt)。"
+                # ADD OTHER sub_tab conditions for fileToPdf HERE (e.g., imageToPdf if that's a sub_tab)
+                else:
+                    logger.warning(f"fileToPdf: Unsupported sub_tab '{sub_tab}' for {original_name}. RequestID: {request_id}")
+                    conversion_message = f"不支持的转换类型: {sub_tab}"
+
+                if success and actual_output_file_path_from_converter and os.path.exists(actual_output_file_path_from_converter):
+                    # If converter returns a different path (e.g. due to its own naming logic), use it.
+                    # Also, ensure the final file is named as `unique_pdf_filename` in `user_converted_dir`.
+                    final_target_path = os.path.join(user_converted_dir, unique_pdf_filename)
+                    if actual_output_file_path_from_converter != final_target_path:
+                        shutil.move(actual_output_file_path_from_converter, final_target_path)
+                        logger.info(f"Moved converted file from {actual_output_file_path_from_converter} to {final_target_path}. RequestID: {request_id}")
+                    
+                    processed_files.append({
+                        'original_name': original_name,
+                        'converted_name': unique_pdf_filename,
+                        'download_url': reverse('converter:download_converted_file', args=[request.user.username, today_date_str, unique_pdf_filename]),
+                        'status': 'success',
+                        'message': conversion_message or '转换成功'
+                    })
+                    logger.info(f"fileToPdf/{sub_tab}: Successfully converted '{original_name}' to '{unique_pdf_filename}'. RequestID: {request_id}")
+                else:
+                    processed_files.append({
+                        'original_name': original_name,
+                        'status': 'error',
+                        'message': conversion_message or "转换失败，未生成文件。"
+                    })
+                    logger.error(f"fileToPdf/{sub_tab}: Failed to convert '{original_name}'. Message: {conversion_message}. RequestID: {request_id}")
+
+            except Exception as e_conv:
+                logger.error(f"Exception during {sub_tab} to PDF conversion for {original_name}: {e_conv}. RequestID: {request_id}", exc_info=True)
+                processed_files.append({
+                    'original_name': original_name,
+                    'status': 'error',
+                    'message': f"转换时发生严重错误: {str(e_conv)}"
+                })
+            finally:
+                # Clean up the unique temporary input file from user_upload_dir
+                if os.path.exists(temp_input_path):
+                    try:
+                        os.remove(temp_input_path)
+                        logger.debug(f"Cleaned up temp input file: {temp_input_path}. RequestID: {request_id}")
+                    except Exception as e_del_temp_input:
+                        logger.warning(f"Failed to delete temp input file {temp_input_path}: {e_del_temp_input}. RequestID: {request_id}")
+        
+        # Merging logic for fileToPdf (if applicable and successful PDFs exist)
+        if merge_output and any(f['status'] == 'success' for f in processed_files) and PYPDF2_AVAILABLE:
+            successful_pdfs = [os.path.join(user_converted_dir, f['converted_name']) for f in processed_files if f['status'] == 'success']
+            if len(successful_pdfs) > 1:
+                merged_pdf_name = f"merged_files_{request_id}.pdf"
+                merged_pdf_path = os.path.join(user_converted_dir, merged_pdf_name)
+                merger = PdfMerger()
+                try:
+                    for pdf_path_to_merge in successful_pdfs:
+                        if os.path.exists(pdf_path_to_merge):
+                            merger.append(pdf_path_to_merge)
+                    merger.write(merged_pdf_path)
+                    merger.close()
+                    logger.info(f"fileToPdf: Successfully merged {len(successful_pdfs)} PDFs into '{merged_pdf_name}'. RequestID: {request_id}")
+                    
+                    final_merged_result_message = f"{len(successful_pdfs)} 个文件成功合并为PDF。"
+                    # Add errors from individual conversions to the merged message if any
+                    error_messages_for_merge = [f['message'] for f in processed_files if f['status'] == 'error' and f['original_name'] != '合并操作']
+                    if error_messages_for_merge:
+                        final_merged_result_message += " 未能转换的文件: " + "; ".join(error_messages_for_merge)
+
+                    processed_files = [{
+                        'original_name': '合并的PDF文件',
+                        'converted_name': merged_pdf_name,
+                        'download_url': reverse('converter:download_converted_file', args=[request.user.username, today_date_str, merged_pdf_name]),
+                        'status': 'success',
+                        'message': final_merged_result_message
+                    }]
+                    
+                    for pdf_to_delete in successful_pdfs:
+                        if os.path.exists(pdf_to_delete):
+                            try:
+                                os.remove(pdf_to_delete)
+                            except Exception as e_del_merged_src:
+                                logger.warning(f"Failed to delete merged source PDF {pdf_to_delete}: {e_del_merged_src}. RequestID: {request_id}")
+                except Exception as e_merge:
+                    logger.error(f"Error merging PDFs in fileToPdf: {e_merge}. RequestID: {request_id}", exc_info=True)
+                    processed_files.append({'original_name': '合并操作', 'status': 'error', 'message': f'PDF合并失败: {str(e_merge)}'})
+            elif len(successful_pdfs) == 1:
+                 logger.info(f"fileToPdf: Only one successful PDF ('{processed_files[0]['converted_name']}'), no merging needed. RequestID: {request_id}")
+                 # If only one successful PDF and merge_output is true, we should still present it as the primary result.
+                 # The current structure of appending to processed_files already handles this, so just logging.
+
+        elif merge_output and not PYPDF2_AVAILABLE and any(f['status'] == 'success' for f in processed_files):
+            logger.warning(f"fileToPdf: Merge requested but PyPDF2 is not available. RequestID: {request_id}")
+            processed_files.append({'original_name': '合并操作', 'status': 'warning', 'message': 'PDF合并库不可用，文件未合并。'})
+
+    elif main_tab == 'imgToFile':
         img_processed_results, img_temp_files_list_of_dicts = process_images_to_files(
             uploaded_files_info_from_frontend, 
             user_converted_dir,
             request_id 
         )
-        processed_results.extend(img_processed_results) 
-        temp_files_for_final_processing.extend(img_temp_files_list_of_dicts)
+        processed_files.extend(img_processed_results) 
+        temp_files_to_delete.extend(img_temp_files_list_of_dicts)
 
-    elif main_tab == 'fileToPdf':
-        for up_file_info in uploaded_files_info_from_frontend:
-            if up_file_info['status'] == 'uploaded':
-                original_name = up_file_info['name']
-                source_file_path = up_file_info['path']
-                base_name_no_ext = os.path.splitext(original_name)[0]
-                temp_file_ext = os.path.splitext(original_name)[1]
-                temp_file_in_converted_dir_filename = f"{base_name_no_ext}_prePdf_{request_id}{temp_file_ext}"
-                temp_file_in_converted_dir_path = os.path.join(user_converted_dir, temp_file_in_converted_dir_filename)
-                try:
-                    valid_type = False
-                    if sub_tab == 'wordToPdf' and original_name.lower().endswith(('.doc', '.docx')): valid_type = True
-                    elif sub_tab == 'excelToPdf' and original_name.lower().endswith(('.xls', '.xlsx')):
-                        valid_type = True
-                        if os.path.exists(temp_file_in_converted_dir_path):
-                            try: os.remove(temp_file_in_converted_dir_path) # Remove if exists from a retry of same request_id
-                            except OSError as e_remove: logger.error(f"Failed to remove existing target for Excel prePdf (RequestID: {request_id}): {e_remove}", exc_info=True)
-                    elif sub_tab == 'pptToPdf' and original_name.lower().endswith(('.ppt', '.pptx')): valid_type = True
-                    elif sub_tab == 'txtToPdf' and original_name.lower().endswith('.txt'): valid_type = True
-                    
-                    if not valid_type:
-                        error_message = f"文件类型不匹配 ({sub_tab}): {original_name}"
-                        logger.warning(f"{error_message} (RequestID: {request_id})")
-                        processed_results.append({'original_name': original_name, 'status': 'error', 'message': error_message})
-                        continue
-                    shutil.copy(source_file_path, temp_file_in_converted_dir_path)
-                    logger.info(f"Copied {original_name} to {temp_file_in_converted_dir_path} for PDF conversion (RequestID: {request_id}).")
-                    temp_files_for_final_processing.append({
-                        'path': temp_file_in_converted_dir_path,
-                        'original_name': original_name,
-                        'base_filename_no_ext': base_name_no_ext
-                    })
-                except PermissionError as pe:
-                    logger.error(f"Permission denied for {original_name} to {temp_file_in_converted_dir_path} (RequestID: {request_id}): {pe}", exc_info=True)
-                    processed_results.append({'original_name': original_name, 'status': 'error','message': f'准备文件时权限不足: {str(pe)}'})
-                except Exception as e:
-                    logger.exception(f"Error preparing {original_name} for fileToPdf (RequestID: {request_id}): {e}")
-                    processed_results.append({'original_name': original_name, 'status': 'error', 'message': f'准备文件时出错: {str(e)}'})
-            else: 
-                processed_results.append(up_file_info)
-    
     elif main_tab == 'pdfToFile':
         for up_file_info in uploaded_files_info_from_frontend:
             if up_file_info['status'] == 'uploaded':
@@ -325,12 +427,12 @@ def process_images_view(request):
                     if not original_name.lower().endswith('.pdf'):
                         error_message = f"文件类型不匹配 ({sub_tab}): {original_name} (应为PDF)"
                         logger.warning(f"{error_message} (RequestID: {request_id})")
-                        processed_results.append({'original_name': original_name, 'status': 'error', 'message': error_message})
-                        continue # Skip this file for temp_files_for_final_processing
+                        processed_files.append({'original_name': original_name, 'status': 'error', 'message': error_message})
+                        continue # Skip this file for temp_files_to_delete
                     
                     shutil.copy(source_file_path, temp_file_in_converted_dir_path)
                     logger.info(f"Copied {original_name} to {temp_file_in_converted_dir_path} for {main_tab}/{sub_tab} (RequestID: {request_id}).")
-                    temp_files_for_final_processing.append({
+                    temp_files_to_delete.append({
                         'path': temp_file_in_converted_dir_path,
                         'original_name': original_name,
                         'base_filename_no_ext': base_name_no_ext,
@@ -338,25 +440,25 @@ def process_images_view(request):
                     })
                 except PermissionError as pe:
                     logger.error(f"Permission denied for {original_name} to {temp_file_in_converted_dir_path} (RequestID: {request_id}): {pe}", exc_info=True)
-                    processed_results.append({'original_name': original_name, 'status': 'error','message': f'准备文件时权限不足: {str(pe)}'})
+                    processed_files.append({'original_name': original_name, 'status': 'error','message': f'准备文件时权限不足: {str(pe)}'})
                 except Exception as e:
                     logger.exception(f"Error preparing {original_name} for pdfToFile (RequestID: {request_id}): {e}")
-                    processed_results.append({'original_name': original_name, 'status': 'error', 'message': f'准备文件时出错: {str(e)}'})
+                    processed_files.append({'original_name': original_name, 'status': 'error', 'message': f'准备文件时出错: {str(e)}'})
             else: 
-                processed_results.append(up_file_info) # Carry over upload errors
+                processed_files.append(up_file_info) # Carry over upload errors
 
     else: 
-        if main_tab not in ['imgToFile', 'fileToPdf', 'pdfToFile'] and not any(r['status'] == 'error' for r in processed_results): 
+        if main_tab not in ['imgToFile', 'fileToPdf', 'pdfToFile'] and not any(r['status'] == 'error' for r in processed_files): 
             logger.warning(f"Unhandled main_tab '{main_tab}' or no files processed. RequestID: {request_id}")
             if not uploaded_files_info_from_frontend:
-                 processed_results.append({'original_name': '-', 'status': 'error', 'message': '没有上传文件。'})
-            elif not temp_files_for_final_processing and any(info['status'] == 'uploaded' for info in uploaded_files_info_from_frontend):
-                 processed_results.append({'original_name': '-', 'status': 'error', 'message': '上传的文件无法按当前选择的模式处理。'})
-            elif not temp_files_for_final_processing : 
-                 processed_results.append({'original_name': '-', 'status': 'error', 'message': '没有文件可供处理。'})
+                 processed_files.append({'original_name': '-', 'status': 'error', 'message': '没有上传文件。'})
+            elif not temp_files_to_delete and any(info['status'] == 'uploaded' for info in uploaded_files_info_from_frontend):
+                 processed_files.append({'original_name': '-', 'status': 'error', 'message': '上传的文件无法按当前选择的模式处理。'})
+            elif not temp_files_to_delete : 
+                 processed_files.append({'original_name': '-', 'status': 'error', 'message': '没有文件可供处理。'})
 
     # Filter out files that failed initial processing for merge/individual conversion stages
-    valid_temp_files_for_processing = [f for f in temp_files_for_final_processing if f.get('status') == 'success']
+    valid_temp_files_for_processing = [f for f in temp_files_to_delete if f.get('status') == 'success']
 
     if valid_temp_files_for_processing:
         if merge_output:
@@ -394,7 +496,7 @@ def process_images_view(request):
                         current_merge_op_message = "图片已合并为Word文档。"
                     elif output_format == 'pdf':
                         # Convert the merged DOCX to PDF
-                        pdf_success, pdf_path_or_msg, _ = convert_word_to_pdf(temp_merged_docx_path, final_merged_path), # final_merged_path has .pdf ext
+                        pdf_success, pdf_path_or_msg, _ = convert_word_to_pdf(temp_merged_docx_path, final_merged_path)
                         if pdf_success and os.path.exists(final_merged_path):
                             current_merge_op_success = True
                             current_merge_op_message = "图片已合并并转换为PDF。"
@@ -535,13 +637,13 @@ def process_images_view(request):
                         try: os.remove(f_info['path'])
                         except Exception as e_clean_pre: logger.warning(f"Failed to cleanup temp source {f_info['path']} after merge: {e_clean_pre}")
                 
-                # Add result for merge operation to processed_results
+                # Add result for merge operation to processed_files
                 if current_merge_op_success and os.path.exists(final_merged_path):
                     meta_file_path_merged = f"{final_merged_path}.meta"
                     with open(meta_file_path_merged, 'w', encoding='utf-8') as mf: mf.write(",".join(original_names_for_meta))
                     relative_media_path = os.path.join(request.user.username, today_date_str, 'converted_files', final_merged_filename).replace("\\", "/")
                     download_url = f"{settings.MEDIA_URL}{relative_media_path}"
-                    processed_results = [{
+                    processed_files = [{
                         'original_name': ",".join(original_names_for_meta),
                         'converted_name': final_merged_filename, 
                         'download_url': download_url, 
@@ -549,7 +651,7 @@ def process_images_view(request):
                         'message': current_merge_op_message or "合并成功"
                     }]
                 elif merge_output: # If merge was checked but failed
-                    processed_results = [{
+                    processed_files = [{
                         'original_name': "合并操作", 
                         'status': 'error', 
                         'message': current_merge_op_message or f'合并到 {output_format.upper()} 失败或不受支持。'
@@ -557,7 +659,7 @@ def process_images_view(request):
             except Exception as e_merge_main:
                 logger.error(f"Error during main merge operation block (RequestID: {request_id}): {e_merge_main}", exc_info=True)
                 if merge_output: # Ensure an error is reported if merge was intended
-                    processed_results = [{'original_name': "合并操作", 'status': 'error', 'message': f"合并文件时发生严重错误: {str(e_merge_main)}"}]
+                    processed_files = [{'original_name': "合并操作", 'status': 'error', 'message': f"合并文件时发生严重错误: {str(e_merge_main)}"}]
 
         else: # Not merge_output: Process individual files
             for file_info in valid_temp_files_for_processing:
@@ -632,7 +734,7 @@ def process_images_view(request):
 
                         relative_media_path_indiv = os.path.join(request.user.username, today_date_str, 'converted_files', os.path.basename(actual_final_path_for_individual)).replace("\\", "/")
                         download_url_indiv = f"{settings.MEDIA_URL}{relative_media_path_indiv}"
-                        processed_results.append({
+                        processed_files.append({
                             'original_name': original_input_name,
                             'converted_name': os.path.basename(actual_final_path_for_individual),
                             'download_url': download_url_indiv,
@@ -653,22 +755,22 @@ def process_images_view(request):
 
                     else: # Individual conversion failed
                         logger.error(f"Conversion failed for '{original_input_name}' to {output_format}. Error: {err_msg_for_individual} (RequestID: {request_id})")
-                        processed_results.append({
+                        processed_files.append({
                             'original_name': original_input_name, 
                             'status': 'error', 
                             'message': str(err_msg_for_individual or '转换失败，未返回具体错误信息。')
                         })
                 except Exception as e_ind_main:
                     logger.error(f"Error converting individual file '{original_input_name}' (RequestID: {request_id}): {e_ind_main}", exc_info=True)
-                    processed_results.append({'original_name': original_input_name, 'status': 'error', 'message': f'处理单个文件转换时发生意外错误: {str(e_ind_main)}'})
+                    processed_files.append({'original_name': original_input_name, 'status': 'error', 'message': f'处理单个文件转换时发生意外错误: {str(e_ind_main)}'})
     
     elif not uploaded_files_info_from_frontend : # No files were uploaded at all
-        processed_results.append({'original_name': '-', 'status': 'error', 'message': '没有上传文件，无法开始转换。'})
-    # If temp_files_for_final_processing is empty but uploaded_files_info_from_frontend is not,
-    # it means all initial file preparations failed and errors are already in processed_results.
+        processed_files.append({'original_name': '-', 'status': 'error', 'message': '没有上传文件，无法开始转换。'})
+    # If temp_files_to_delete is empty but uploaded_files_info_from_frontend is not,
+    # it means all initial file preparations failed and errors are already in processed_files.
     
-    logger.info(f"Final processed results to be sent to client (RequestID: {request_id}): {processed_results}")
-    return JsonResponse({'results': processed_results, 'merge_output': merge_output})
+    logger.info(f"Final processed results to be sent to client (RequestID: {request_id}): {processed_files}")
+    return JsonResponse({'results': processed_files, 'merge_output': merge_output})
 
 @login_required
 def conversion_history_view(request):
@@ -787,11 +889,9 @@ def delete_converted_file_view(request, date_str, filename):
         messages.error(request, "文件未找到或无法删除。")
         logger.warning(f"Attempt to delete non-existent file by {user.username}: {file_path}")
 
-    # Redirect to the history page, maintaining the selected date if possible
-    redirect_url = reverse('converter:conversion_history')
-    if date_str:
-        redirect_url += f'?date={date_str}'
-    return redirect(redirect_url)
+    # Redirect to the history page, potentially without the date if the folder was removed
+    # Or always redirect to the general history page to show the date is gone from the list
+    return redirect(reverse('converter:conversion_history'))
 
 @login_required
 @require_POST # Ensure this view is only accessed via POST
@@ -857,3 +957,26 @@ def delete_all_for_date_view(request, date_str):
     # Redirect to the history page, potentially without the date if the folder was removed
     # Or always redirect to the general history page to show the date is gone from the list
     return redirect(reverse('converter:conversion_history'))
+
+@login_required
+def download_converted_file_view(request, username, date_str, filename):
+    # Security check: Ensure the logged-in user matches the username in the URL
+    # or the logged-in user is a superuser.
+    if not (request.user.username == username or request.user.is_superuser):
+        raise PermissionDenied("您没有权限下载此文件。")
+
+    # Construct the full path to the file
+    # Ensure to use settings.BASE_DIR or another secure base path for `his_pic`
+    file_path = os.path.join(settings.BASE_DIR, 'his_pic', username, date_str, 'converted_files', filename)
+    
+    logger.debug(f"Download request for user {request.user.username} (URL username: {username}): {file_path}")
+
+    if os.path.exists(file_path) and os.path.isfile(file_path):
+        try:
+            return FileResponse(open(file_path, 'rb'), as_attachment=True, filename=filename)
+        except Exception as e:
+            logger.error(f"Error serving file {file_path} for download: {e}", exc_info=True)
+            raise Http404("下载文件时发生错误。")
+    else:
+        logger.error(f"File not found for download by {request.user.username}: {file_path}")
+        raise Http404("文件未找到。")

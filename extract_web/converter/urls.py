@@ -16,6 +16,7 @@ urlpatterns = [
     path("history/", views.conversion_history_view, name="conversion_history"),
     path("delete-converted-file/<str:date_str>/<str:filename>/", views.delete_converted_file_view, name="delete_converted_file"),
     path("history/delete_all_for_date/<str:date_str>/", views.delete_all_for_date_view, name="delete_all_for_date"),
+    path('download/<str:username>/<str:date_str>/<str:filename>/', views.download_converted_file_view, name='download_converted_file'),
 ]
 
 # The following line should be AFTER the urlpatterns list
