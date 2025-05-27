@@ -327,12 +327,40 @@
                 <button type="button" onclick="document.getElementById('fileUpload').click();"><i class="fas fa-plus" style="margin-right: 5px;"></i> 添加文件</button> {# Example with icon, requires FontAwesome #}
                 <button type="button" onclick="clearFileList()" style="margin-left: 10px;"><i class="fas fa-trash-alt" style="margin-right: 5px;"></i> 清空列表</button>
                 
+                <!-- PDF to Word Mode Options (Radio Group and Merge Checkbox) - Hidden by default -->
+                <div id="pdfToWordOptions" class="hidden" style="margin-left: 20px; display: flex; align-items: baseline; gap: 15px;">
+                    <div class="radio-button-group" style="display: flex; flex-direction: column; gap: 5px;">
+                        <label style="font-size: 0.9em; cursor:pointer; display: flex; align-items: center;"><input type="radio" name="pdfToWordMode" value="pdf2docx" checked style="margin-right: 5px;"> 使用pdf2docx（默认）</label>
+                        <label style="font-size: 0.9em; cursor:pointer; display: flex; align-items: center;"><input type="radio" name="pdfToWordMode" value="libreoffice" style="margin-right: 5px;"> 使用LibreOffice方式</label>
+                    </div>
+                </div>
+
+                <!-- PDF to Excel Mode Options (Radio Group and Merge Checkbox) - Hidden by default -->
+                <div id="pdfToExcelOptions" class="hidden" style="margin-left: 20px; display: flex; align-items: baseline; gap: 15px;">
+                    <div class="radio-button-group" style="display: flex; flex-direction: column; gap: 5px;">
+                        <label style="font-size: 0.9em; cursor:pointer; display: flex; align-items: center;"><input type="radio" name="pdfToExcelMode" value="pdfplumber" checked style="margin-right: 5px;"> 使用pdfplumber（默认）</label>
+                        <label style="font-size: 0.9em; cursor:pointer; display: flex; align-items: center;"><input type="radio" name="pdfToExcelMode" value="libreoffice" style="margin-right: 5px;"> 使用LibreOffice方式</label>
+                    </div>
+                </div>
+
+                <!-- PDF to TXT Mode Options (Radio Group and Merge Checkbox) - Hidden by default -->
+                <div id="pdfToTxtOptions" class="hidden" style="margin-left: 20px; display: flex; align-items: baseline; gap: 15px;">
+                    <div class="radio-button-group" style="display: flex; flex-direction: column; gap: 5px;">
+                        <label style="font-size: 0.9em; cursor:pointer; display: flex; align-items: center;"><input type="radio" name="pdfToTxtMode" value="pymupdf" checked style="margin-right: 5px;"> 使用PyMuPDF（默认）</label>
+                        <label style="font-size: 0.9em; cursor:pointer; display: flex; align-items: center;"><input type="radio" name="pdfToTxtMode" value="libreoffice" style="margin-right: 5px;"> 使用LibreOffice方式</label>
+                    </div>
+                </div>
+
                 <!-- PDF to PPT Mode Options (Radio Group and Merge Checkbox) - Hidden by default -->
                 <div id="pdfToPptOptions" class="hidden" style="margin-left: 20px; display: flex; align-items: baseline; gap: 15px;">
                     <div class="radio-button-group" style="display: flex; flex-direction: column; gap: 5px;">
                         <label style="font-size: 0.9em; cursor:pointer; display: flex; align-items: center;"><input type="radio" name="pdfToPptMode" value="screenshot" checked style="margin-right: 5px;"> 使用截图方式</label>
                         <label style="font-size: 0.9em; cursor:pointer; display: flex; align-items: center;"><input type="radio" name="pdfToPptMode" value="libreoffice" style="margin-right: 5px;"> 使用LibreOffice方式</label>
                     </div>
+                </div>
+
+                <!-- Common Merge Checkbox for all PDF conversions - Hidden by default -->
+                <div id="pdfMergeOption" class="hidden" style="margin-left: 20px;">
                     <label style="display: flex; align-items: center; font-size: 0.9em; font-weight: normal; cursor:pointer;">
                         <input type="checkbox" id="mergeOutputCheckbox" checked style="margin-right: 8px; cursor:pointer; transform: scale(1.1);">
                         合并为一个文件
@@ -541,16 +569,52 @@
         }
         console.log("当前选择的转换类型 (sub-tab): ", currentSelectedSubTab);
 
-        // --- NEW: Show/Hide PDF to PPT options ---
+        // --- NEW: Show/Hide PDF conversion options ---
+        const pdfToWordOptionsDiv = document.getElementById('pdfToWordOptions');
+        const pdfToExcelOptionsDiv = document.getElementById('pdfToExcelOptions');
+        const pdfToTxtOptionsDiv = document.getElementById('pdfToTxtOptions');
         const pdfToPptOptionsDiv = document.getElementById('pdfToPptOptions');
-        if (currentSelectedMainTab === 'pdfToFile' && currentSelectedSubTab === 'pdfToPpt') {
-            pdfToPptOptionsDiv.classList.remove('hidden');
-            pdfToPptOptionsDiv.style.display = 'flex'; // Explicitly set display to flex
-            console.log("[selectSubTab] PDF to PPT options SHOWN");
+        const pdfMergeOptionDiv = document.getElementById('pdfMergeOption');
+        
+        // Hide all PDF options first
+        [pdfToWordOptionsDiv, pdfToExcelOptionsDiv, pdfToTxtOptionsDiv, pdfToPptOptionsDiv, pdfMergeOptionDiv].forEach(div => {
+            div.classList.add('hidden');
+        });
+        
+        // Show the appropriate options based on current selection
+        if (currentSelectedMainTab === 'pdfToFile') {
+            let targetOptionsDiv = null;
+            
+            switch (currentSelectedSubTab) {
+                case 'pdfToWord':
+                    targetOptionsDiv = pdfToWordOptionsDiv;
+                    console.log("[selectSubTab] PDF to Word options SHOWN");
+                    break;
+                case 'pdfToExcel':
+                    targetOptionsDiv = pdfToExcelOptionsDiv;
+                    console.log("[selectSubTab] PDF to Excel options SHOWN");
+                    break;
+                case 'pdfToTxt':
+                    targetOptionsDiv = pdfToTxtOptionsDiv;
+                    console.log("[selectSubTab] PDF to TXT options SHOWN");
+                    break;
+                case 'pdfToPpt':
+                    targetOptionsDiv = pdfToPptOptionsDiv;
+                    console.log("[selectSubTab] PDF to PPT options SHOWN");
+                    break;
+            }
+            
+            if (targetOptionsDiv) {
+                targetOptionsDiv.classList.remove('hidden');
+                targetOptionsDiv.style.display = 'flex'; // Explicitly set display to flex
+            }
+            
+            // Always show the merge option for PDF conversions
+            pdfMergeOptionDiv.classList.remove('hidden');
+            pdfMergeOptionDiv.style.display = 'block';
+            console.log("[selectSubTab] PDF merge option SHOWN");
         } else {
-            pdfToPptOptionsDiv.classList.add('hidden');
-            // pdfToPptOptionsDiv.style.display = 'none'; // The .hidden class should handle this due to !important
-            console.log("[selectSubTab] PDF to PPT options HIDDEN");
+            console.log("[selectSubTab] All PDF options HIDDEN");
         }
         // --- END NEW ---
     }
@@ -673,8 +737,30 @@
             outputFormat = 'pdf'; // Always PDF for fileToPdf main tab
         } else if (currentSelectedMainTab === 'pdfToFile') {
             switch (currentSelectedSubTab) {
-                case 'pdfToWord': outputFormat = 'docx'; break;
-                case 'pdfToExcel': outputFormat = 'xlsx'; break;
+                case 'pdfToWord': 
+                    outputFormat = 'docx'; 
+                    // --- NEW: Add pdf_to_word_mode to formData ---
+                    const selectedWordMode = document.querySelector('input[name="pdfToWordMode"]:checked');
+                    if (selectedWordMode) {
+                        formData.append('pdf_to_word_mode', selectedWordMode.value);
+                        console.log("PDF to Word Mode selected:", selectedWordMode.value);
+                    } else {
+                        formData.append('pdf_to_word_mode', 'pdf2docx'); // Default if somehow none selected
+                        console.warn("No PDF to Word Mode selected, defaulting to pdf2docx.");
+                    }
+                    break;
+                case 'pdfToExcel': 
+                    outputFormat = 'xlsx'; 
+                    // --- NEW: Add pdf_to_excel_mode to formData ---
+                    const selectedExcelMode = document.querySelector('input[name="pdfToExcelMode"]:checked');
+                    if (selectedExcelMode) {
+                        formData.append('pdf_to_excel_mode', selectedExcelMode.value);
+                        console.log("PDF to Excel Mode selected:", selectedExcelMode.value);
+                    } else {
+                        formData.append('pdf_to_excel_mode', 'pdfplumber'); // Default if somehow none selected
+                        console.warn("No PDF to Excel Mode selected, defaulting to pdfplumber.");
+                    }
+                    break;
                 case 'pdfToPpt': 
                     outputFormat = 'pptx';
                     // --- NEW: Add pdf_to_ppt_mode to formData ---
@@ -686,9 +772,19 @@
                         formData.append('pdf_to_ppt_mode', 'screenshot'); // Default if somehow none selected
                         console.warn("No PDF to PPT Mode selected, defaulting to screenshot.");
                     }
-                    // --- END NEW ---
                     break;
-                case 'pdfToTxt': outputFormat = 'txt'; break;
+                case 'pdfToTxt': 
+                    outputFormat = 'txt'; 
+                    // --- NEW: Add pdf_to_txt_mode to formData ---
+                    const selectedTxtMode = document.querySelector('input[name="pdfToTxtMode"]:checked');
+                    if (selectedTxtMode) {
+                        formData.append('pdf_to_txt_mode', selectedTxtMode.value);
+                        console.log("PDF to TXT Mode selected:", selectedTxtMode.value);
+                    } else {
+                        formData.append('pdf_to_txt_mode', 'pymupdf'); // Default if somehow none selected
+                        console.warn("No PDF to TXT Mode selected, defaulting to pymupdf.");
+                    }
+                    break;
             }
         }
         formData.append('output_format', outputFormat);
