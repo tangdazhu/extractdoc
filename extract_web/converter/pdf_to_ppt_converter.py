@@ -44,10 +44,11 @@ def convert_pdf_to_ppt(pdf_path, output_folder, mode='screenshot', desired_filen
 
         try:
             cmd = [
-                'soffice', # Or full path to soffice.exe on Windows if not in PATH
+                'soffice', 
                 '--headless',
-                '--convert-to', 'pptx:impress_pdf_import',
-                '--outdir', actual_output_dir, # soffice will use the input PDF's basename
+                '--infilter=impress_pdf_import',
+                '--convert-to', 'pptx',
+                '--outdir', actual_output_dir,
                 pdf_path
             ]
             logger.info(f"Executing LibreOffice command: {' '.join(cmd)}")
