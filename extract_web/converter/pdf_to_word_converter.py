@@ -1,53 +1,117 @@
 from pdf2docx import Converter
 import os
 import logging
+import subprocess
+import tempfile
 from docx import Document
 from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
 
 logger = logging.getLogger('converter')
 
-def convert_pdf_to_word(input_pdf_path, output_docx_path):
+def convert_pdf_to_word(input_pdf_path, output_docx_path, mode='pdf2docx'):
     """
     Converts a PDF file to a DOCX file.
 
     Args:
         input_pdf_path (str): Path to the input PDF file.
         output_docx_path (str): Path to save the output DOCX file.
+        mode (str): Conversion mode - 'pdf2docx' (default) or 'libreoffice'
 
     Returns:
         tuple: (success: bool, actual_output_path: str or None, error_message: str or None)
     """
     try:
-        logger.info(f"Starting PDF to Word conversion: {input_pdf_path} -> {output_docx_path}")
+        logger.info(f"Starting PDF to Word conversion using {mode} mode: {input_pdf_path} -> {output_docx_path}")
 
         if not os.path.exists(input_pdf_path):
             return False, None, "Input PDF file not found."
 
+        if mode == 'libreoffice':
+            return _convert_pdf_to_word_libreoffice(input_pdf_path, output_docx_path)
+        else:  # Default to pdf2docx mode
+            return _convert_pdf_to_word_pdf2docx(input_pdf_path, output_docx_path)
+
+    except Exception as e:
+        logger.error(f"Error during PDF to Word conversion for '{input_pdf_path}' using {mode}: {e}", exc_info=True)
+        return False, None, f"PDF转Word失败: {str(e)}"
+
+def _convert_pdf_to_word_pdf2docx(input_pdf_path, output_docx_path):
+    """Convert PDF to Word using pdf2docx library."""
+    try:
         # Create a Converter object
         cv = Converter(input_pdf_path)
         
         # Convert to Word (output_docx_path specifies the output file)
-        # The pages argument can be used to specify a range of pages, e.g., pages=[0, 1] for first two pages.
-        # None means all pages.
         cv.convert(output_docx_path, start=0, end=None)
         
         # Close the converter object
         cv.close()
 
         if os.path.exists(output_docx_path):
-            logger.info(f"Successfully converted PDF to Word: {output_docx_path}")
+            logger.info(f"Successfully converted PDF to Word using pdf2docx: {output_docx_path}")
             return True, output_docx_path, None
         else:
-            # This case should ideally not be reached if convert() doesn't raise an error
-            # but pdf2docx might have peculiarities.
-            error_msg = "Conversion completed but output DOCX file not found."
+            error_msg = "pdf2docx conversion completed but output DOCX file not found."
             logger.error(error_msg)
             return False, None, error_msg
 
     except Exception as e:
-        logger.error(f"Error during PDF to Word conversion for '{input_pdf_path}': {e}", exc_info=True)
-        return False, None, f"PDF转Word失败: {str(e)}"
+        logger.error(f"Error during pdf2docx conversion: {e}", exc_info=True)
+        return False, None, f"pdf2docx转换失败: {str(e)}"
+
+def _convert_pdf_to_word_libreoffice(input_pdf_path, output_docx_path):
+    """Convert PDF to Word using LibreOffice."""
+    try:
+        output_dir = os.path.dirname(output_docx_path)
+        os.makedirs(output_dir, exist_ok=True)
+        
+        logger.info(f"Using LibreOffice to convert {input_pdf_path} to {output_docx_path}")
+        
+        cmd = [
+            'soffice', 
+            '--headless',
+            '--infilter=writer_pdf_import',
+            '--convert-to', 'docx',
+            '--outdir', output_dir,
+            input_pdf_path
+        ]
+        
+        logger.info(f"Executing LibreOffice command: {' '.join(cmd)}")
+        
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+        
+        if result.returncode == 0:
+            # LibreOffice creates output with the same base name as input but different extension
+            input_basename = os.path.splitext(os.path.basename(input_pdf_path))[0]
+            expected_output = os.path.join(output_dir, f"{input_basename}.docx")
+            
+            if os.path.exists(expected_output):
+                # Rename to desired output path if different
+                if expected_output != output_docx_path:
+                    if os.path.exists(output_docx_path):
+                        os.remove(output_docx_path)
+                    os.rename(expected_output, output_docx_path)
+                
+                logger.info(f"LibreOffice conversion successful: {output_docx_path}")
+                return True, output_docx_path, "LibreOffice转换成功"
+            else:
+                error_msg = f"LibreOffice conversion error: Expected output {expected_output} not found. Stdout: {result.stdout}, stderr: {result.stderr}"
+                logger.error(error_msg)
+                return False, None, error_msg
+        else:
+            error_msg = f"LibreOffice process failed with return code {result.returncode}. Stdout: {result.stdout}, stderr: {result.stderr}"
+            logger.error(error_msg)
+            return False, None, error_msg
+
+    except subprocess.TimeoutExpired:
+        error_msg = "LibreOffice conversion timed out after 60 seconds"
+        logger.error(error_msg)
+        return False, None, error_msg
+    except Exception as e:
+        error_msg = f"LibreOffice conversion failed: {str(e)}"
+        logger.error(error_msg, exc_info=True)
+        return False, None, error_msg
 
 def _append_document(source_doc, target_doc):
     """Appends the content of source_doc to target_doc."""
@@ -56,7 +120,7 @@ def _append_document(source_doc, target_doc):
     # Add a page break after appending, if desired
     # target_doc.add_page_break()
 
-def convert_and_merge_pdfs_to_docx(pdf_paths, merged_docx_path, request_id=""):
+def convert_and_merge_pdfs_to_docx(pdf_paths, merged_docx_path, request_id="", mode='pdf2docx'):
     """Converts multiple PDFs to DOCX and merges them into a single DOCX file."""
     logger.info(f"Starting convert_and_merge_pdfs_to_docx for {len(pdf_paths)} files. Output: {merged_docx_path}. RequestID: {request_id}")
     
@@ -71,7 +135,7 @@ def convert_and_merge_pdfs_to_docx(pdf_paths, merged_docx_path, request_id=""):
         temp_docx_filename = f"temp_merge_{request_id}_{i}.docx"
         temp_docx_path = os.path.join(output_folder, temp_docx_filename)
         
-        success, actual_output_path, error_msg = convert_pdf_to_word(pdf_path, temp_docx_path)
+        success, actual_output_path, error_msg = convert_pdf_to_word(pdf_path, temp_docx_path, mode=mode)
         
         if success and actual_output_path and os.path.exists(actual_output_path):
             temp_docx_files.append(actual_output_path)

@@ -200,20 +200,34 @@ def process_images_view(request):
     main_tab = request.POST.get('main_tab', 'imgToFile')
     sub_tab = request.POST.get('sub_tab', '')
     output_format = ''
+    
+    # Get conversion mode parameters for all PDF conversion types
     pdf_to_ppt_mode = 'screenshot' # Default for all cases, will be overridden if applicable
+    pdf_to_word_mode = 'pdf2docx' # Default mode for PDF to Word
+    pdf_to_excel_mode = 'pdfplumber' # Default mode for PDF to Excel
+    pdf_to_txt_mode = 'pymupdf' # Default mode for PDF to TXT
 
     if main_tab == 'fileToPdf':
         output_format = 'pdf'
     elif main_tab == 'imgToFile':
         output_format = output_format_param if output_format_param else 'docx'
     elif main_tab == 'pdfToFile':
-        if sub_tab == 'pdfToWord': output_format = 'docx'
-        elif sub_tab == 'pdfToExcel': output_format = 'xlsx'
+        if sub_tab == 'pdfToWord': 
+            output_format = 'docx'
+            pdf_to_word_mode = request.POST.get('pdf_to_word_mode', 'pdf2docx')
+            logger.info(f"[process_images_view] PDF to Word mode explicitly set to: {pdf_to_word_mode} for RequestID: {request_id}")
+        elif sub_tab == 'pdfToExcel': 
+            output_format = 'xlsx'
+            pdf_to_excel_mode = request.POST.get('pdf_to_excel_mode', 'pdfplumber')
+            logger.info(f"[process_images_view] PDF to Excel mode explicitly set to: {pdf_to_excel_mode} for RequestID: {request_id}")
         elif sub_tab == 'pdfToPpt': 
             output_format = 'pptx'
-            pdf_to_ppt_mode = request.POST.get('pdf_to_ppt_mode', 'screenshot') # Get the mode from POST
+            pdf_to_ppt_mode = request.POST.get('pdf_to_ppt_mode', 'screenshot')
             logger.info(f"[process_images_view] PDF to PPT mode explicitly set to: {pdf_to_ppt_mode} for RequestID: {request_id}")
-        elif sub_tab == 'pdfToTxt': output_format = 'txt'
+        elif sub_tab == 'pdfToTxt': 
+            output_format = 'txt'
+            pdf_to_txt_mode = request.POST.get('pdf_to_txt_mode', 'pymupdf')
+            logger.info(f"[process_images_view] PDF to TXT mode explicitly set to: {pdf_to_txt_mode} for RequestID: {request_id}")
         else:
             output_format = output_format_param
             logger.warning(f"pdfToFile: Unknown sub_tab ('{sub_tab}'), fallback to param: '{output_format_param}', RequestID: {request_id}")
@@ -223,7 +237,7 @@ def process_images_view(request):
         logger.warning(f"Unhandled main_tab '{main_tab}', fallback to param: '{output_format_param}', RequestID: {request_id}")
         if not output_format: output_format = 'docx'; logger.error(f"Fallback: Critical fallback to docx for unhandled main_tab, RequestID: {request_id}")
 
-    logger.debug(f"Process Request: User={request.user.username}, Date={today_date_str}, Merge={merge_output}, RequestedFormat='{output_format_param}', EffectiveOutputFormat='{output_format}', MainTab={main_tab}, SubTab={sub_tab}, PDFtoPPTMode={pdf_to_ppt_mode}, RequestID: {request_id}")
+    logger.debug(f"Process Request: User={request.user.username}, Date={today_date_str}, Merge={merge_output}, RequestedFormat='{output_format_param}', EffectiveOutputFormat='{output_format}', MainTab={main_tab}, SubTab={sub_tab}, PDFtoWordMode={pdf_to_word_mode}, PDFtoExcelMode={pdf_to_excel_mode}, PDFtoPPTMode={pdf_to_ppt_mode}, PDFtoTXTMode={pdf_to_txt_mode}, RequestID: {request_id}")
 
     if main_tab == 'fileToPdf' and output_format == 'pdf' and not DOCX2PDF_AVAILABLE_IN_VIEW and sub_tab == 'wordToPdf':
         logger.error(f"PDF output requested for Word file, but docx2pdf is not available. RequestID: {request_id}")
@@ -440,7 +454,8 @@ def process_images_view(request):
                 elif main_tab == 'pdfToFile': # Merging for pdfToFile (PDFs to various formats)
                     # paths_of_temp_sources_for_merge contains paths to _preFinal_ PDF copies
                     if output_format == 'docx':
-                        current_merge_op_success, current_merge_op_message = convert_and_merge_pdfs_to_docx(paths_of_temp_sources_for_merge, final_merged_path, request_id)
+                        # Pass the mode parameter to the conversion function
+                        current_merge_op_success, current_merge_op_message = convert_and_merge_pdfs_to_docx(paths_of_temp_sources_for_merge, final_merged_path, request_id, mode=pdf_to_word_mode)
                     elif output_format == 'pptx':
                         # pdf_to_ppt_mode is available from earlier in the function
                         if pdf_to_ppt_mode == 'libreoffice':
@@ -503,7 +518,8 @@ def process_images_view(request):
                         else: # Screenshot mode for PDF to PPT merge
                             current_merge_op_success, current_merge_op_message = convert_and_merge_pdfs_to_pptx(paths_of_temp_sources_for_merge, final_merged_path, request_id, ppt_creation_mode='screenshot')
                     elif output_format == 'txt':
-                        current_merge_op_success, current_merge_op_message = convert_and_merge_pdfs_to_txt(paths_of_temp_sources_for_merge, final_merged_path, request_id)
+                        # Pass the mode parameter to the conversion function
+                        current_merge_op_success, current_merge_op_message = convert_and_merge_pdfs_to_txt(paths_of_temp_sources_for_merge, final_merged_path, request_id, mode=pdf_to_txt_mode)
                     elif output_format == 'xlsx':
                         current_merge_op_message = "不支持将多个PDF直接合并为一个Excel文件。请取消勾选合并选项。"
                         # current_merge_op_success remains False
@@ -589,14 +605,17 @@ def process_images_view(request):
                     elif main_tab == 'pdfToFile':
                         # temp_source_for_individual_conversion is a _preFinal_ copy of the original PDF
                         if output_format == 'docx':
-                            conversion_successful_individual, actual_final_path_for_individual, err_msg_for_individual = convert_pdf_to_word(temp_source_for_individual_conversion, final_output_path_indiv)
+                            # Pass the mode parameter to the conversion function
+                            conversion_successful_individual, actual_final_path_for_individual, err_msg_for_individual = convert_pdf_to_word(temp_source_for_individual_conversion, final_output_path_indiv, mode=pdf_to_word_mode)
                         elif output_format == 'pptx':
                             # Use pdf_to_ppt_mode retrieved earlier
                             conversion_successful_individual, actual_final_path_for_individual, err_msg_for_individual = convert_pdf_to_ppt(temp_source_for_individual_conversion, final_output_path_indiv, mode=pdf_to_ppt_mode, desired_filename_base=final_output_base_indiv)
                         elif output_format == 'xlsx':
-                            conversion_successful_individual, actual_final_path_for_individual, err_msg_for_individual = convert_pdf_to_excel(temp_source_for_individual_conversion, final_output_path_indiv)
+                            # Pass the mode parameter to the conversion function
+                            conversion_successful_individual, actual_final_path_for_individual, err_msg_for_individual = convert_pdf_to_excel(temp_source_for_individual_conversion, final_output_path_indiv, mode=pdf_to_excel_mode)
                         elif output_format == 'txt':
-                            conversion_successful_individual, actual_final_path_for_individual, err_msg_for_individual = convert_pdf_to_txt(temp_source_for_individual_conversion, final_output_path_indiv)
+                            # Pass the mode parameter to the conversion function
+                            conversion_successful_individual, actual_final_path_for_individual, err_msg_for_individual = convert_pdf_to_txt(temp_source_for_individual_conversion, final_output_path_indiv, mode=pdf_to_txt_mode)
                         else:
                             err_msg_for_individual = f"pdfToFile: 不支持的独立输出格式 '{output_format}'"
                     else:

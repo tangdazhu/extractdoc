@@ -2,10 +2,11 @@ import pdfplumber
 import openpyxl
 import os
 import logging
+import subprocess
 
 logger = logging.getLogger('converter')
 
-def convert_pdf_to_excel(input_pdf_path, output_excel_path):
+def convert_pdf_to_excel(input_pdf_path, output_excel_path, mode='pdfplumber'):
     """
     Converts tables from a PDF file to an Excel file.
     Each table in the PDF will be a sheet in the Excel file.
@@ -13,16 +14,29 @@ def convert_pdf_to_excel(input_pdf_path, output_excel_path):
     Args:
         input_pdf_path (str): Path to the input PDF file.
         output_excel_path (str): Path to save the output Excel file.
+        mode (str): Conversion mode - 'pdfplumber' (default) or 'libreoffice'
 
     Returns:
         tuple: (success: bool, actual_output_path: str or None, error_message: str or None)
     """
     try:
-        logger.info(f"Starting PDF to Excel conversion: {input_pdf_path} -> {output_excel_path}")
+        logger.info(f"Starting PDF to Excel conversion using {mode} mode: {input_pdf_path} -> {output_excel_path}")
 
         if not os.path.exists(input_pdf_path):
             return False, None, "Input PDF file not found."
 
+        if mode == 'libreoffice':
+            return _convert_pdf_to_excel_libreoffice(input_pdf_path, output_excel_path)
+        else:  # Default to pdfplumber mode
+            return _convert_pdf_to_excel_pdfplumber(input_pdf_path, output_excel_path)
+
+    except Exception as e:
+        logger.error(f"Error during PDF to Excel conversion for '{input_pdf_path}' using {mode}: {e}", exc_info=True)
+        return False, None, f"PDF转Excel失败: {str(e)}"
+
+def _convert_pdf_to_excel_pdfplumber(input_pdf_path, output_excel_path):
+    """Convert PDF to Excel using pdfplumber."""
+    try:
         workbook = openpyxl.Workbook()
         # Remove default sheet created by openpyxl
         if "Sheet" in workbook.sheetnames:
@@ -36,15 +50,12 @@ def convert_pdf_to_excel(input_pdf_path, output_excel_path):
 
             for i, page in enumerate(pdf.pages):
                 # Extract tables from the current page
-                # page.extract_tables() returns a list of tables,
-                # where each table is a list of lists (rows and cells)
                 tables_on_page = page.extract_tables()
                 
                 if tables_on_page:
                     has_tables = True
                     for table_idx, table_data in enumerate(tables_on_page):
                         # Create a new sheet for each table
-                        # Sheet names have a max length and restricted characters, be careful
                         sheet_title = f"Page{i+1}_Table{table_idx+1}"
                         # Truncate sheet title if too long (Excel limit is 31 chars)
                         if len(sheet_title) > 31:
@@ -63,7 +74,6 @@ def convert_pdf_to_excel(input_pdf_path, output_excel_path):
                             if counter > 100: # Safety break
                                 return False, None, "Too many tables with similar names, cannot create unique sheet names."
 
-
                         sheet = workbook.create_sheet(title=sheet_title)
                         
                         for row_data in table_data:
@@ -76,20 +86,69 @@ def convert_pdf_to_excel(input_pdf_path, output_excel_path):
                     logger.info(f"No tables found on page {i+1}")
 
         if not has_tables:
-            logger.warning(f"No tables found in the PDF: {input_pdf_path}")
-            # Decide if this is an error or just an empty Excel file outcome
-            # For now, let's create an empty Excel file and return success, but with a message.
-            # Or, return False, None, "No tables found in the PDF to convert." - User might expect tables.
-            # Let's return an error as this converter is specifically for table extraction.
+            logger.warning(f"No tables found in the PDF using pdfplumber: {input_pdf_path}")
             return False, None, "未在PDF中找到可供转换的表格。"
 
         workbook.save(output_excel_path)
-        logger.info(f"Successfully converted PDF to Excel: {output_excel_path}")
+        logger.info(f"Successfully converted PDF to Excel using pdfplumber: {output_excel_path}")
         return True, output_excel_path, None
 
     except Exception as e:
-        logger.error(f"Error during PDF to Excel conversion for '{input_pdf_path}': {e}", exc_info=True)
-        return False, None, f"PDF转Excel失败: {str(e)}"
+        logger.error(f"Error during pdfplumber PDF to Excel conversion: {e}", exc_info=True)
+        return False, None, f"pdfplumber转换失败: {str(e)}"
+
+def _convert_pdf_to_excel_libreoffice(input_pdf_path, output_excel_path):
+    """Convert PDF to Excel using LibreOffice."""
+    try:
+        output_dir = os.path.dirname(output_excel_path)
+        os.makedirs(output_dir, exist_ok=True)
+        
+        logger.info(f"Using LibreOffice to convert {input_pdf_path} to {output_excel_path}")
+        
+        cmd = [
+            'soffice', 
+            '--headless',
+            '--infilter=calc_pdf_import',
+            '--convert-to', 'xlsx',
+            '--outdir', output_dir,
+            input_pdf_path
+        ]
+        
+        logger.info(f"Executing LibreOffice command: {' '.join(cmd)}")
+        
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+        
+        if result.returncode == 0:
+            # LibreOffice creates output with the same base name as input but different extension
+            input_basename = os.path.splitext(os.path.basename(input_pdf_path))[0]
+            expected_output = os.path.join(output_dir, f"{input_basename}.xlsx")
+            
+            if os.path.exists(expected_output):
+                # Rename to desired output path if different
+                if expected_output != output_excel_path:
+                    if os.path.exists(output_excel_path):
+                        os.remove(output_excel_path)
+                    os.rename(expected_output, output_excel_path)
+                
+                logger.info(f"LibreOffice conversion successful: {output_excel_path}")
+                return True, output_excel_path, "LibreOffice转换成功"
+            else:
+                error_msg = f"LibreOffice conversion error: Expected output {expected_output} not found. Stdout: {result.stdout}, stderr: {result.stderr}"
+                logger.error(error_msg)
+                return False, None, error_msg
+        else:
+            error_msg = f"LibreOffice process failed with return code {result.returncode}. Stdout: {result.stdout}, stderr: {result.stderr}"
+            logger.error(error_msg)
+            return False, None, error_msg
+
+    except subprocess.TimeoutExpired:
+        error_msg = "LibreOffice conversion timed out after 60 seconds"
+        logger.error(error_msg)
+        return False, None, error_msg
+    except Exception as e:
+        error_msg = f"LibreOffice conversion failed: {str(e)}"
+        logger.error(error_msg, exc_info=True)
+        return False, None, error_msg
 
 if __name__ == '__main__':
     # Create dummy PDF and test (requires reportlab for dummy creation)
