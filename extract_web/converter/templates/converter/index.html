@@ -326,10 +326,18 @@
             <div style="display: flex; align-items: center;">
                 <button type="button" onclick="document.getElementById('fileUpload').click();"><i class="fas fa-plus" style="margin-right: 5px;"></i> 添加文件</button> {# Example with icon, requires FontAwesome #}
                 <button type="button" onclick="clearFileList()" style="margin-left: 10px;"><i class="fas fa-trash-alt" style="margin-right: 5px;"></i> 清空列表</button>
-                <label style="margin-left: 20px; display: flex; align-items: center; font-size: 0.95em; font-weight: normal; cursor:pointer;">
-                    <input type="checkbox" id="mergeOutputCheckbox" checked style="margin-right: 8px; cursor:pointer; transform: scale(1.1);">
-                    合并为一个文件
-                </label>
+                
+                <!-- PDF to PPT Mode Options (Radio Group and Merge Checkbox) - Hidden by default -->
+                <div id="pdfToPptOptions" class="hidden" style="margin-left: 20px; display: flex; align-items: baseline; gap: 15px;">
+                    <div class="radio-button-group" style="display: flex; flex-direction: column; gap: 5px;">
+                        <label style="font-size: 0.9em; cursor:pointer; display: flex; align-items: center;"><input type="radio" name="pdfToPptMode" value="screenshot" checked style="margin-right: 5px;"> 使用截图方式</label>
+                        <label style="font-size: 0.9em; cursor:pointer; display: flex; align-items: center;"><input type="radio" name="pdfToPptMode" value="libreoffice" style="margin-right: 5px;"> 使用LibreOffice方式</label>
+                    </div>
+                    <label style="display: flex; align-items: center; font-size: 0.9em; font-weight: normal; cursor:pointer;">
+                        <input type="checkbox" id="mergeOutputCheckbox" checked style="margin-right: 8px; cursor:pointer; transform: scale(1.1);">
+                        合并为一个文件
+                    </label>
+                </div>
             </div>
             <div id="fileUploadTips" style="font-size: 0.85em; color: #6c757d; margin-top: 10px;">
                 提示：最多选择10个文件，单个文件不超过10MB。
@@ -532,6 +540,19 @@
             console.log("[selectSubTab] Skipping file upload accept type update (shouldUpdateAccept=false).");
         }
         console.log("当前选择的转换类型 (sub-tab): ", currentSelectedSubTab);
+
+        // --- NEW: Show/Hide PDF to PPT options ---
+        const pdfToPptOptionsDiv = document.getElementById('pdfToPptOptions');
+        if (currentSelectedMainTab === 'pdfToFile' && currentSelectedSubTab === 'pdfToPpt') {
+            pdfToPptOptionsDiv.classList.remove('hidden');
+            pdfToPptOptionsDiv.style.display = 'flex'; // Explicitly set display to flex
+            console.log("[selectSubTab] PDF to PPT options SHOWN");
+        } else {
+            pdfToPptOptionsDiv.classList.add('hidden');
+            // pdfToPptOptionsDiv.style.display = 'none'; // The .hidden class should handle this due to !important
+            console.log("[selectSubTab] PDF to PPT options HIDDEN");
+        }
+        // --- END NEW ---
     }
 
     // Function to add styling to the file list items dynamically
@@ -654,7 +675,19 @@
             switch (currentSelectedSubTab) {
                 case 'pdfToWord': outputFormat = 'docx'; break;
                 case 'pdfToExcel': outputFormat = 'xlsx'; break;
-                case 'pdfToPpt': outputFormat = 'pptx'; break;
+                case 'pdfToPpt': 
+                    outputFormat = 'pptx';
+                    // --- NEW: Add pdf_to_ppt_mode to formData ---
+                    const selectedPptMode = document.querySelector('input[name="pdfToPptMode"]:checked');
+                    if (selectedPptMode) {
+                        formData.append('pdf_to_ppt_mode', selectedPptMode.value);
+                        console.log("PDF to PPT Mode selected:", selectedPptMode.value);
+                    } else {
+                        formData.append('pdf_to_ppt_mode', 'screenshot'); // Default if somehow none selected
+                        console.warn("No PDF to PPT Mode selected, defaulting to screenshot.");
+                    }
+                    // --- END NEW ---
+                    break;
                 case 'pdfToTxt': outputFormat = 'txt'; break;
             }
         }

@@ -32,6 +32,23 @@ from .pdf_to_txt_converter import convert_pdf_to_txt
 from .libreoffice_converter import convert_to_pdf as convert_to_pdf_libreoffice # Import LO converter
 from .word_to_pdf_converter import convert_word_to_pdf # ADDED: Import for the new Word to PDF converter
 
+# PDF to X Merge Converters
+from .pdf_to_word_converter import convert_and_merge_pdfs_to_docx 
+from .pdf_to_ppt_converter import convert_and_merge_pdfs_to_pptx 
+from .pdf_to_txt_converter import convert_and_merge_pdfs_to_txt 
+
+# Try to import docx2pdf and set a flag
+DOCX2PDF_AVAILABLE_IN_VIEW = False
+try:
+    from docx2pdf import convert as docx_to_pdf_converter_internal
+    DOCX2PDF_AVAILABLE_IN_VIEW = True
+except ImportError:
+    logging.warning("docx2pdf library is not installed. Word to PDF conversion will be skipped for direct docx2pdf method.")
+    # Optionally define a fallback or placeholder function if needed, or just rely on the flag
+    def docx_to_pdf_converter_internal(input_path, output_path):
+        logging.error("docx2pdf is not available, cannot convert Word to PDF using this method.")
+        raise NotImplementedError("docx2pdf is not installed.")
+
 logger = logging.getLogger('converter') # 获取 logger 实例
 
 # Attempt to import PyPDF2 for PDF merging
@@ -41,13 +58,6 @@ try:
 except ImportError:
     PYPDF2_AVAILABLE = False
     logger.warning("PyPDF2 library is not installed. Merging multiple PPT/PPTX files into a single PDF will not be available.")
-
-# 尝试导入 docx2pdf，如果失败则记录错误，但脚本仍可生成docx
-try:
-    from docx2pdf import convert as convert_docx_to_pdf
-    DOCX2PDF_AVAILABLE_IN_VIEW = True
-except ImportError:
-    DOCX2PDF_AVAILABLE_IN_VIEW = False
 
 # Create your views here.
 
@@ -190,6 +200,7 @@ def process_images_view(request):
     main_tab = request.POST.get('main_tab', 'imgToFile')
     sub_tab = request.POST.get('sub_tab', '')
     output_format = ''
+    pdf_to_ppt_mode = 'screenshot' # Default for all cases, will be overridden if applicable
 
     if main_tab == 'fileToPdf':
         output_format = 'pdf'
@@ -198,7 +209,10 @@ def process_images_view(request):
     elif main_tab == 'pdfToFile':
         if sub_tab == 'pdfToWord': output_format = 'docx'
         elif sub_tab == 'pdfToExcel': output_format = 'xlsx'
-        elif sub_tab == 'pdfToPpt': output_format = 'pptx'
+        elif sub_tab == 'pdfToPpt': 
+            output_format = 'pptx'
+            pdf_to_ppt_mode = request.POST.get('pdf_to_ppt_mode', 'screenshot') # Get the mode from POST
+            logger.info(f"[process_images_view] PDF to PPT mode explicitly set to: {pdf_to_ppt_mode} for RequestID: {request_id}")
         elif sub_tab == 'pdfToTxt': output_format = 'txt'
         else:
             output_format = output_format_param
@@ -209,7 +223,7 @@ def process_images_view(request):
         logger.warning(f"Unhandled main_tab '{main_tab}', fallback to param: '{output_format_param}', RequestID: {request_id}")
         if not output_format: output_format = 'docx'; logger.error(f"Fallback: Critical fallback to docx for unhandled main_tab, RequestID: {request_id}")
 
-    logger.debug(f"Process Request: User={request.user.username}, Date={today_date_str}, Merge={merge_output}, RequestedFormat='{output_format_param}', EffectiveOutputFormat='{output_format}', MainTab={main_tab}, SubTab={sub_tab}, RequestID: {request_id}")
+    logger.debug(f"Process Request: User={request.user.username}, Date={today_date_str}, Merge={merge_output}, RequestedFormat='{output_format_param}', EffectiveOutputFormat='{output_format}', MainTab={main_tab}, SubTab={sub_tab}, PDFtoPPTMode={pdf_to_ppt_mode}, RequestID: {request_id}")
 
     if main_tab == 'fileToPdf' and output_format == 'pdf' and not DOCX2PDF_AVAILABLE_IN_VIEW and sub_tab == 'wordToPdf':
         logger.error(f"PDF output requested for Word file, but docx2pdf is not available. RequestID: {request_id}")
@@ -288,34 +302,25 @@ def process_images_view(request):
                 original_name = up_file_info['name']
                 source_file_path = up_file_info['path']
                 base_name_no_ext = os.path.splitext(original_name)[0]
-                target_ext = ''
-                if sub_tab == 'pdfToWord': target_ext = '.docx'
-                elif sub_tab == 'pdfToExcel': target_ext = '.xlsx'
-                elif sub_tab == 'pdfToPpt': target_ext = '.pptx'
-                elif sub_tab == 'pdfToTxt': target_ext = '.txt'
-                else:
-                    error_message = f"不支持的PDF转换类型: {sub_tab}"
-                    logger.warning(f"{error_message} (RequestID: {request_id})")
-                    processed_results.append({'original_name': original_name, 'status': 'error', 'message': error_message})
-                    continue
-
+                
+                # For pdfToFile, the temp files are just copies of the original PDFs, 
+                # as the conversion happens during the final merge or individual processing step.
                 temp_file_in_converted_dir_filename = f"{base_name_no_ext}_preFinal_{request_id}{os.path.splitext(original_name)[1]}"
                 temp_file_in_converted_dir_path = os.path.join(user_converted_dir, temp_file_in_converted_dir_filename)
                 try:
-                    valid_type = False
-                    if original_name.lower().endswith('.pdf') and sub_tab in ['pdfToWord', 'pdfToExcel', 'pdfToPpt', 'pdfToTxt']:
-                        valid_type = True
-                    if not valid_type:
+                    if not original_name.lower().endswith('.pdf'):
                         error_message = f"文件类型不匹配 ({sub_tab}): {original_name} (应为PDF)"
                         logger.warning(f"{error_message} (RequestID: {request_id})")
                         processed_results.append({'original_name': original_name, 'status': 'error', 'message': error_message})
-                        continue
+                        continue # Skip this file for temp_files_for_final_processing
+                    
                     shutil.copy(source_file_path, temp_file_in_converted_dir_path)
-                    logger.info(f"Copied {original_name} to {temp_file_in_converted_dir_path} for {sub_tab} (RequestID: {request_id}).")
+                    logger.info(f"Copied {original_name} to {temp_file_in_converted_dir_path} for {main_tab}/{sub_tab} (RequestID: {request_id}).")
                     temp_files_for_final_processing.append({
                         'path': temp_file_in_converted_dir_path,
                         'original_name': original_name,
-                        'base_filename_no_ext': base_name_no_ext
+                        'base_filename_no_ext': base_name_no_ext,
+                        'status': 'success' # Mark as success for this stage
                     })
                 except PermissionError as pe:
                     logger.error(f"Permission denied for {original_name} to {temp_file_in_converted_dir_path} (RequestID: {request_id}): {pe}", exc_info=True)
@@ -324,7 +329,8 @@ def process_images_view(request):
                     logger.exception(f"Error preparing {original_name} for pdfToFile (RequestID: {request_id}): {e}")
                     processed_results.append({'original_name': original_name, 'status': 'error', 'message': f'准备文件时出错: {str(e)}'})
             else: 
-                processed_results.append(up_file_info)
+                processed_results.append(up_file_info) # Carry over upload errors
+
     else: 
         if main_tab not in ['imgToFile', 'fileToPdf', 'pdfToFile'] and not any(r['status'] == 'error' for r in processed_results): 
             logger.warning(f"Unhandled main_tab '{main_tab}' or no files processed. RequestID: {request_id}")
@@ -335,501 +341,313 @@ def process_images_view(request):
             elif not temp_files_for_final_processing : 
                  processed_results.append({'original_name': '-', 'status': 'error', 'message': '没有文件可供处理。'})
 
-    if temp_files_for_final_processing: 
+    # Filter out files that failed initial processing for merge/individual conversion stages
+    valid_temp_files_for_processing = [f for f in temp_files_for_final_processing if f.get('status') == 'success']
+
+    if valid_temp_files_for_processing:
         if merge_output:
-            logger.debug(f"Attempting to merge {len(temp_files_for_final_processing)} files. MainTab: {main_tab}, SubTab: {sub_tab}, OutputFormat: {output_format}, RequestID: {request_id}.")
-            random_chars_final_merge = ''.join(random.choices(string.ascii_lowercase + string.digits, k=8))
-            merged_base_filename = f"{request.user.username}_{today_date_str}_{random_chars_final_merge}" # Final merged file name base
-            final_merged_filename = f"{merged_base_filename}.{output_format}"
+            logger.debug(f"Attempting to merge {len(valid_temp_files_for_processing)} files. MainTab: {main_tab}, SubTab: {sub_tab}, OutputFormat: {output_format}, RequestID: {request_id}.")
+            # Use a consistent merged base name for all merged files
+            merged_base_name_for_file = f"merged_{request_id}"
+            final_merged_filename = f"{merged_base_name_for_file}.{output_format}"
             final_merged_path = os.path.join(user_converted_dir, final_merged_filename)
-            logger.info(f"MERGE_OUTPUT: Generated final_merged_path: {final_merged_path} for RequestID: {request_id}")
-
-            files_to_cleanup_after_merge = [info['path'] for info in temp_files_for_final_processing]
-            temp_individual_outputs_for_merging = []
             
+            original_names_for_meta = [item['original_name'] for item in valid_temp_files_for_processing]
+            if not original_names_for_meta: original_names_for_meta = ["Unknown original files"]
+
+            current_merge_op_success = False
+            current_merge_op_message = ""
+            paths_of_temp_sources_for_merge = [item['path'] for item in valid_temp_files_for_processing]
+
             try:
-                merge_successful = False
-                if main_tab == 'fileToPdf' and sub_tab in ['excelToPdf', 'pptToPdf', 'txtToPdf']:
-                    conversion_func = None
-                    if sub_tab == 'excelToPdf': conversion_func = convert_excel_to_pdf
-                    elif sub_tab == 'pptToPdf': conversion_func = ppt_pdf_converter.convert_pptx_to_pdf
-                    elif sub_tab == 'txtToPdf': conversion_func = convert_txt_to_pdf
-
-                    all_individual_conversions_successful = True
-                    for item_info in temp_files_for_final_processing:
-                        item_path = item_info['path']
-                        item_original_name = item_info['original_name']
-                        base_for_temp_pdf = os.path.splitext(os.path.basename(item_path))[0].replace(f"_prePdf_{request_id}", "") # Get original base before _prePdf_requestId
-                        temp_pdf_name_for_merge = f"{base_for_temp_pdf}_merged_temp_{request_id}.pdf" # Add request_id
-                        temp_pdf_path_for_merge = os.path.join(user_converted_dir, temp_pdf_name_for_merge)
-                        
-                        logger.info(f"Converting individual {sub_tab} file '{item_original_name}' to PDF for merging: {item_path} -> {temp_pdf_path_for_merge}")
-                        success, actual_pdf_output, err_msg = conversion_func(item_path, temp_pdf_path_for_merge)
-                        
-                        if success and actual_pdf_output and os.path.exists(actual_pdf_output):
-                            temp_individual_outputs_for_merging.append(actual_pdf_output)
-                        else:
-                            all_individual_conversions_successful = False
-                            processed_results.append({'original_name': item_original_name, 'status': 'error', 'message': f"合并前转换为PDF失败 ({item_original_name}): {err_msg or '未知错误'}"})
-                            break 
+                if main_tab == 'imgToFile': # Merging for imgToFile (always to DOCX, then optionally to PDF)
+                    # This implies intermediate DOCX files were created by process_images_to_files
+                    # and are in paths_of_temp_sources_for_merge
+                    temp_merged_docx_path = os.path.join(user_converted_dir, f"{merged_base_name_for_file}_intermediate.docx")
                     
-                    if all_individual_conversions_successful and temp_individual_outputs_for_merging:
-                        pdf_merger = PdfMerger()
-                        for pdf_path in temp_individual_outputs_for_merging: 
-                            logger.debug(f"MERGE_OUTPUT (excelToPdf): Appending to PdfMerger: {pdf_path} for RequestID: {request_id}")
-                            pdf_merger.append(pdf_path)
-                        
-                        logger.info(f"MERGE_OUTPUT (excelToPdf): Writing merged PDF to {final_merged_path} for RequestID: {request_id}")
-                        pdf_merger.write(final_merged_path)
-                        pdf_merger.close()
-                        logger.info(f"Successfully merged PDFs from {sub_tab} into: {final_merged_path} (RequestID: {request_id})")
-                        merge_successful = True
-                    elif not temp_individual_outputs_for_merging and all_individual_conversions_successful:
-                        if not any(r['status'] == 'error' for r in processed_results):
-                            processed_results.append({'original_name': "Merged Document", 'status': 'error', 'message': '没有PDF文件可供合并，即使单个转换报告成功。'})
-
-                elif main_tab == 'pdfToFile':
-                    conversion_func_pdf_to_target = None
-                    target_ext_for_individual_conversion = ''
-                    perform_pdf_to_target_conversion_step = True
+                    master_doc = Document(paths_of_temp_sources_for_merge[0])
+                    for doc_path in paths_of_temp_sources_for_merge[1:]:
+                        sub_doc = Document(doc_path)
+                        master_doc.add_page_break()
+                        append_document(sub_doc, master_doc)
+                    master_doc.save(temp_merged_docx_path)
+                    logger.info(f"imgToFile: Merged intermediate DOCX saved to {temp_merged_docx_path}. RequestID: {request_id}")
 
                     if output_format == 'docx':
-                        conversion_func_pdf_to_target = convert_pdf_to_word
-                        target_ext_for_individual_conversion = '.docx'
-                    elif output_format == 'txt':
-                        conversion_func_pdf_to_target = convert_pdf_to_txt
-                        target_ext_for_individual_conversion = '.txt'
-                    else: # pdfToPpt, pdfToExcel - merging not supported for single output file
-                        logger.warning(f"Merging PDFs to a single {output_format.upper()} file is not supported. Each PDF will be converted individually if 'merge output' was checked, or an error will be shown if no individual processing logic follows.")
-                        processed_results.append({
-                            'original_name': "Merged Document", 
-                            'status': 'error', 
-                            'message': f"合并多个PDF到单个 {output_format.upper()} 文件暂不支持。请取消勾选'合并为一个文件'以单独转换每个PDF，或选择DOCX/TXT作为合并输出格式。"
-                        })
-                        merge_successful = False 
-                        perform_pdf_to_target_conversion_step = False # Skip the conversion-then-merge logic
-
-                    if perform_pdf_to_target_conversion_step:
-                        all_individual_pdf_to_target_conversions_ok = True
-                        for item_info in temp_files_for_final_processing: # item_info['path'] are .pdf file copies
-                            item_pdf_path = item_info['path'] 
-                            item_original_pdf_name = item_info['original_name']
-                            base_for_temp_conv = os.path.splitext(os.path.basename(item_pdf_path))[0].replace(f"_preFinal_{request_id}", "")
-                            temp_indv_target_filename = f"{base_for_temp_conv}_indv_conv_{request_id}{target_ext_for_individual_conversion}" # Add request_id
-                            temp_indv_target_path = os.path.join(user_converted_dir, temp_indv_target_filename)
-                            
-                            logger.info(f"Converting PDF '{item_original_pdf_name}' to {output_format.upper()} for potential merging: {item_pdf_path} -> {temp_indv_target_path}")
-                            success, actual_converted_path, err_msg = conversion_func_pdf_to_target(item_pdf_path, temp_indv_target_path)
-                            
-                            if success and actual_converted_path and os.path.exists(actual_converted_path):
-                                temp_individual_outputs_for_merging.append(actual_converted_path)
-                            else:
-                                all_individual_pdf_to_target_conversions_ok = False
-                                processed_results.append({'original_name': item_original_pdf_name, 'status': 'error', 'message': f"合并前PDF转 {output_format.upper()} 失败 ({item_original_pdf_name}): {err_msg or '未知错误'}"})
-                                break
-                        
-                        if all_individual_pdf_to_target_conversions_ok and temp_individual_outputs_for_merging:
-                            if output_format == 'docx':
-                                master_doc = Document(temp_individual_outputs_for_merging[0])
-                                for doc_path in temp_individual_outputs_for_merging[1:]:
-                                    sub_doc = Document(doc_path)
-                                    master_doc.add_page_break()
-                                    append_document(sub_doc, master_doc)
-                                master_doc.save(final_merged_path) # final_merged_path target ext is .docx
-                                logger.info(f"Successfully merged DOCX from PDFs into: {final_merged_path}")
-                                merge_successful = True
-                            elif output_format == 'txt':
-                                all_text_content = []
-                                for txt_path in temp_individual_outputs_for_merging:
-                                    with open(txt_path, 'r', encoding='utf-8') as f_txt:
-                                        all_text_content.append(f_txt.read())
-                                with open(final_merged_path, 'w', encoding='utf-8') as merged_f: # final_merged_path target ext is .txt
-                                    merged_f.write("\n\n--- New File ---\n\n".join(all_text_content))
-                                logger.info(f"Successfully merged TXT from PDFs into: {final_merged_path}")
-                                merge_successful = True
-                        elif not temp_individual_outputs_for_merging and all_individual_pdf_to_target_conversions_ok:
-                            # This means all conversions were reported as success, but no files were produced to merge.
-                            if not any(r['status'] == 'error' for r in processed_results):
-                                processed_results.append({'original_name': "Merged Document", 'status': 'error', 'message': f'没有 {output_format.upper()} 文件可供合并 (来自PDF转换)。'})
-                
-                # --- imgToFile (to DOCX) or wordToPdf (original Word uploads to PDF merge) ---
-                elif main_tab == 'imgToFile' or (main_tab == 'fileToPdf' and sub_tab == 'wordToPdf'):
-                    merged_docx_intermediate_path = os.path.join(user_converted_dir, f"{merged_base_filename}_intermediate_{request_id}.docx")
-                    first_doc_path = temp_files_for_final_processing[0]['path']
-                    is_from_imgToFile = first_doc_path.endswith(f"_tempScriptOutput_{request_id}.docx")
-                    is_from_wordToPdf_prePdf = sub_tab == 'wordToPdf' and f"_prePdf_{request_id}" in first_doc_path and first_doc_path.lower().endswith(('.doc', '.docx'))
-
-                    if not (is_from_imgToFile or is_from_wordToPdf_prePdf):
-                        logger.error(f"Merge logic error for {main_tab}/{sub_tab} (RequestID: {request_id}): Expected temp DOCX with request_id, but got {first_doc_path}")
-                        processed_results.append({'original_name': "Merged Document", 'status': 'error', 'message': f'内部合并错误：期望处理的文件类型不匹配 ({os.path.basename(first_doc_path)}).'})
-                        merge_successful = False 
-                    else:
-                        master_doc = Document(first_doc_path)
-                        for doc_info in temp_files_for_final_processing[1:]:
-                            sub_doc = Document(doc_info['path'])
-                            master_doc.add_page_break()
-                            append_document(sub_doc, master_doc)
-                        master_doc.save(merged_docx_intermediate_path)
-                        logger.info(f"Merged DOCX (intermediate for {main_tab}/{sub_tab}, RequestID: {request_id}) saved: {merged_docx_intermediate_path}")
-                        if merged_docx_intermediate_path not in files_to_cleanup_after_merge:
-                             files_to_cleanup_after_merge.append(merged_docx_intermediate_path)
-                        
-                        if output_format == 'pdf': # This case is for wordToPdf merge to PDF
-                            logger.info(f"Attempting to convert merged DOCX {merged_docx_intermediate_path} to PDF {final_merged_path} using LibreOffice. (RequestID: {request_id})")
-                            
-                            # output_dir for LO should be user_converted_dir
-                            # final_merged_path is the TARGET path for the PDF with our unique naming
-                            # final_merged_filename is the base filename part of final_merged_path
-
-                            lo_success, lo_output_or_error, lo_original_pdf_filename = convert_word_to_pdf(merged_docx_intermediate_path, final_merged_path)
-                            
-                            if lo_success and lo_output_or_error and lo_original_pdf_filename:
-                                # actual_lo_generated_pdf_path = lo_output_or_error # This is where LO placed the file, e.g., merged_base_intermediate.pdf
-                                # The new converter's lo_output_or_error IS the final_merged_path if successful and move occurred, or the LO path if move failed.
-                                actual_lo_generated_pdf_path = lo_output_or_error 
-
-                                # Now we need to move/rename this to our desired final_merged_path
-                                # This logic is now INSIDE convert_word_to_pdf if final_merged_path was different from LO's initial output.
-                                # So, if lo_success is True, lo_output_or_error should be the path we want (final_merged_path)
-                                # or the path where the file was successfully created if a subsequent move failed (indicated in lo_original_pdf_filename as a message string)
-                                
-                                if os.path.exists(final_merged_path) and actual_lo_generated_pdf_path == final_merged_path:
-                                    logger.info(f"Word to PDF (via word_to_pdf_converter) successfully converted. PDF is at: {final_merged_path} (RequestID: {request_id})")
-                                    merge_successful = True
-                                    # Ensure the intermediate DOCX is cleaned up
-                                    if merged_docx_intermediate_path in files_to_cleanup_after_merge:
-                                        pass # It's already marked
-                                    else:
-                                        files_to_cleanup_after_merge.append(merged_docx_intermediate_path)
-
-                                elif lo_success and actual_lo_generated_pdf_path != final_merged_path and "Conversion OK, but move to final path failed" in str(lo_original_pdf_filename):
-                                    # This case means conversion was OK, but the final rename/move to final_merged_path failed.
-                                    # The file exists at actual_lo_generated_pdf_path. We should serve this, but indicate the issue.
-                                    logger.error(f"Word to PDF conversion by word_to_pdf_converter succeeded, but final move failed. Serving from: {actual_lo_generated_pdf_path}. Message: {lo_original_pdf_filename}")
-                                    final_merged_path = actual_lo_generated_pdf_path # Serve the file from where it is
-                                    final_merged_filename = os.path.basename(actual_lo_generated_pdf_path)
-                                    processed_results = [r for r in processed_results if r.get('original_name') != "Merged Document"]
-                                    processed_results.append({
-                                        'original_name': "Merged Document (PDF - Partial Success)", 
-                                        'status': 'error', # Or a new status like 'success_with_issue'
-                                        'message': str(lo_original_pdf_filename), # Contains the error message about move failure
-                                        'converted_name': final_merged_filename,
-                                        'download_url': None # URL will be set later if file exists
-                                    })
-                                    merge_successful = True # It's a success in terms of having a PDF
-                                    if merged_docx_intermediate_path not in files_to_cleanup_after_merge:
-                                        files_to_cleanup_after_merge.append(merged_docx_intermediate_path)
-
-                                else:
-                                    # This implies lo_success was true, but the file isn't at final_merged_path and it wasn't a reported move error from the converter.
-                                    # This state should ideally not be reached if the converter works as expected.
-                                    logger.error(f"Word to PDF conversion by word_to_pdf_converter reported success, but final PDF {final_merged_path} not found and not a reported move issue. Actual path: {actual_lo_generated_pdf_path}. RequestID: {request_id}")
-                                    # Fallback to serving DOCX
-                                    final_merged_path = merged_docx_intermediate_path 
-                                    final_merged_filename = os.path.basename(merged_docx_intermediate_path)
-                                    merge_successful = True # Serving DOCX
-                                    processed_results = [r for r in processed_results if r.get('original_name') != "Merged Document"]
-                                    processed_results.append({
-                                        'original_name': "Merged Document (DOCX Fallback)", 
-                                        'status': 'error', 
-                                        'message': f'Word转PDF后未找到最终文件，已合并为DOCX。',
-                                        'converted_name': final_merged_filename,
-                                        'download_url': None
-                                    })
-
-                        elif output_format == 'docx': # This case is for imgToFile merge to DOCX
-                            if merged_docx_intermediate_path != final_merged_path: 
-                                try:
-                                    shutil.move(merged_docx_intermediate_path, final_merged_path)
-                                    logger.info(f"Moved intermediate DOCX to final path: {final_merged_path} (RequestID: {request_id})")
-                                    # If moved, merged_docx_intermediate_path might be in cleanup list, ensure no double removal attempts if it was renamed
-                                    if merged_docx_intermediate_path in files_to_cleanup_after_merge:
-                                         files_to_cleanup_after_merge.remove(merged_docx_intermediate_path) # It no longer exists at old path
-                                except Exception as e_move:
-                                    logger.error(f"Failed to move intermediate DOCX {merged_docx_intermediate_path} to {final_merged_path} (RequestID: {request_id}): {e_move}")
-                                    # If move fails, the final_merged_path won't exist. We should signal this.
-                                    merge_successful = False # Override to false if move fails
-                                    processed_results.append({
-                                        'original_name': "Merged Document", 
-                                        'status': 'error', 
-                                        'message': f'移动合并后的DOCX文件失败: {str(e_move)}'
-                                    })
-                            else: # Intermediate is already the final path (should not happen with current naming)
-                                logger.info(f"Intermediate DOCX is already the final DOCX: {final_merged_path} (RequestID: {request_id})")
-                            
-                            if os.path.exists(final_merged_path): # Only set successful if final file exists
-                                merge_successful = True
-                            # else merge_successful remains as per move operation or initial False if path doesn't exist
-
-                        else: 
-                            logger.error(f"Unexpected output_format '{output_format}' for main_tab {main_tab}/{sub_tab} in DOCX-direct-merge path. (RequestID: {request_id})")
-                            merge_successful = False
-                
-                # --- Common post-merge attempt processing --- 
-                if merge_successful and os.path.exists(final_merged_path):
-                    meta_file_path_merged = f"{final_merged_path}.meta"
-                    # Ensure merged_original_names_list is correctly populated
-                    merged_original_names_list = [info['original_name'] for info in temp_files_for_final_processing if isinstance(info, dict) and 'original_name' in info]
-                    if not merged_original_names_list: # Fallback if something went wrong with temp_files_for_final_processing structure
-                        merged_original_names_list = ["Unknown Original Files"] 
-                        logger.warning(f"Could not determine original filenames for merged output (RequestID: {request_id}). Using placeholder.")
-
-                    with open(meta_file_path_merged, 'w', encoding='utf-8') as mf: mf.write(",".join(merged_original_names_list))
-                    
-                    relative_media_path = os.path.join(request.user.username, today_date_str, 'converted_files', os.path.basename(final_merged_path)).replace("\\\\", "/")
-                    download_url = f"{settings.MEDIA_URL}{relative_media_path}"
-                    
-                    # Check if it was a DOCX fallback case that now has a valid file
-                    fallback_entry_idx = -1
-                    for i, r_item in enumerate(processed_results):
-                        if r_item.get('original_name') == "Merged Document (DOCX Fallback)":
-                            fallback_entry_idx = i
-                            break
-                    
-                    if fallback_entry_idx != -1:
-                        processed_results[fallback_entry_idx]['download_url'] = download_url 
-                        processed_results[fallback_entry_idx]['status'] = 'success_fallback' 
-                        # Ensure this is the only result if it was a fallback success
-                        processed_results = [processed_results[fallback_entry_idx]]
-                    else:
-                        # Standard success: Clear previous errors and set the success message.
-                        processed_results = [{
-                            'original_name': ",".join(merged_original_names_list), 
-                            'converted_name': os.path.basename(final_merged_path), 
-                            'download_url': download_url, 
-                            'status': 'success'
-                        }]
-                
-                elif merge_output and not merge_successful:
-                    # If already has a specific error for "Merged Document", don't add another generic one.
-                    if not any(r.get('original_name') == "Merged Document" and r.get('status') == 'error' for r in processed_results):
-                         processed_results.append({'original_name': "Merged Document", 'status': 'error', 'message': '所选的合并操作不受支持或未能完成。'})
-                # If merge_output is false, individual results are already in processed_results
-
-            except Exception as e_merge:
-                logger.error(f"Error during merge operation (MainTab: {main_tab}, SubTab: {sub_tab}, OutputFormat: {output_format}, RequestID: {request_id}): {e_merge}", exc_info=True)
-                if not any(r.get('original_name') == "Merged Document" and r.get('status') == 'error' for r in processed_results):
-                    processed_results.append({'original_name': "Merged Document", 'status': 'error', 'message': f"合并文件时发生严重错误: {str(e_merge)}"})
-            finally:
-                logger.debug(f"Starting cleanup for RequestID: {request_id}. Files initially marked for cleanup: {files_to_cleanup_after_merge}")
-                logger.debug(f"Intermediate files from conversions for merging (also to cleanup for RequestID: {request_id}): {temp_individual_outputs_for_merging}")
-                
-                # Add all individually converted intermediate files to the main cleanup list *before* making it unique
-                for temp_f in temp_individual_outputs_for_merging:
-                    if temp_f not in files_to_cleanup_after_merge:
-                        files_to_cleanup_after_merge.append(temp_f)
-                
-                unique_files_to_cleanup = list(set(files_to_cleanup_after_merge))
-                logger.debug(f"Unique files to attempt cleanup for RequestID: {request_id}: {unique_files_to_cleanup}")
-
-                for f_path in unique_files_to_cleanup:
-                    try: 
-                        if os.path.exists(f_path):
-                            # More robust check: ensure the file is truly a temporary file related to *this* request_id
-                            # or a general temp file type that doesn't use request_id in its name pattern.
-                            filename_only = os.path.basename(f_path)
-                            is_this_request_specific_temp = f"_{request_id}.docx" in filename_only or \
-                                                          f"_{request_id}.pdf" in filename_only or \
-                                                          f"_{request_id}{os.path.splitext(filename_only)[1]}" in filename_only # for _prePdf_id.ext, _preFinal_id.ext, _indv_conv_id.ext
-                            
-                            is_general_known_temp_pattern = "_prePdf" in filename_only or \
-                                                            "_preFinal" in filename_only or \
-                                                            "_merged_temp.pdf" in filename_only or \
-                                                            "_indv_conv" in filename_only or \
-                                                            "_tempScriptOutput" in filename_only or \
-                                                            "_intermediate" in filename_only
-
-                            # If it's a request-specific temp, the request_id must match.
-                            # If it's a general temp pattern AND doesn't have another request's ID, it might be from this request before ID was added everywhere.
-                            # The most reliable way is if all temp files that should be request-specific *do* contain the request_id.
-                            
-                            can_delete = False
-                            if f"_{request_id}" in filename_only: # Primary check for request-specific files
-                                can_delete = True
-                            elif is_general_known_temp_pattern:
-                                # Check if it might belong to *another* request by trying to find any 6-char alphanumeric ID pattern
-                                import re
-                                other_request_id_pattern = r'_([a-z0-9]{6})\.(docx|pdf|txt|xlsx|pptx|doc|xls|ppt|jpeg|jpg|png|bmp)$'
-                                match_other_id = re.search(other_request_id_pattern, filename_only)
-                                if match_other_id and match_other_id.group(1) != request_id:
-                                    logger.debug(f"Skipping cleanup of general temp pattern file {f_path} as it seems to belong to another request ID {match_other_id.group(1)} (Current RequestID: {request_id})")
-                                else: # No other ID found, or it matches current, safe to assume it's from this request or an older non-ID'd temp
-                                    can_delete = True 
-                            
-                            if can_delete:
-                                os.remove(f_path)
-                                logger.info(f"Cleaned up temp file (RequestID: {request_id}): {f_path}")
-                            elif not is_general_known_temp_pattern and f"_{request_id}" not in filename_only:
-                                logger.warning(f"Skipped cleanup of non-temp-pattern file {f_path} without current RequestID {request_id}. This might be an issue or an unrelated file.")
-                                
+                        if temp_merged_docx_path != final_merged_path:
+                             shutil.move(temp_merged_docx_path, final_merged_path)
+                        current_merge_op_success = True
+                        current_merge_op_message = "图片已合并为Word文档。"
+                    elif output_format == 'pdf':
+                        # Convert the merged DOCX to PDF
+                        pdf_success, pdf_path_or_msg, _ = convert_word_to_pdf(temp_merged_docx_path, final_merged_path), # final_merged_path has .pdf ext
+                        if pdf_success and os.path.exists(final_merged_path):
+                            current_merge_op_success = True
+                            current_merge_op_message = "图片已合并并转换为PDF。"
                         else:
-                            logger.debug(f"Temp file already removed or does not exist (RequestID: {request_id}): {f_path}")
-                    except OSError as e_clean:
-                        logger.warning(f"Failed to clean up temp file {f_path} (RequestID: {request_id}): {e_clean}")
+                            current_merge_op_message = pdf_path_or_msg or "图片合并为Word后，转换为PDF失败。"
+                        if os.path.exists(temp_merged_docx_path): # Clean up intermediate merged DOCX
+                            os.remove(temp_merged_docx_path)
+                    else:
+                        current_merge_op_message = f"imgToFile merge: Unexpected output format '{output_format}'"
+                        if os.path.exists(temp_merged_docx_path): os.remove(temp_merged_docx_path) # cleanup
+                
+                elif main_tab == 'fileToPdf': # Merging for fileToPdf (various file types to a single PDF)
+                    if not PYPDF2_AVAILABLE:
+                        current_merge_op_message = "PDF合并库 (PyPDF2) 不可用，无法合并输出。"
+                    else:
+                        intermediate_pdfs_for_merging = []
+                        all_individual_to_pdf_ok = True
+                        conversion_map = {
+                            'wordToPdf': convert_word_to_pdf,
+                            'excelToPdf': convert_excel_to_pdf,
+                            'pptToPdf': ppt_pdf_converter.convert_pptx_to_pdf, # Assuming this takes (source, target_pdf_path)
+                            'txtToPdf': convert_txt_to_pdf
+                        }
+                        selected_conversion_func = conversion_map.get(sub_tab)
+
+                        if not selected_conversion_func:
+                            current_merge_op_message = f"未知的子类型 {sub_tab} 用于 fileToPdf 合并。"
+                            all_individual_to_pdf_ok = False
+                        else:
+                            for item in valid_temp_files_for_processing: # These are _prePdf_ copies
+                                temp_pdf_for_merge_name = f"{item['base_filename_no_ext']}_tempMerge_{request_id}.pdf"
+                                temp_pdf_for_merge_path = os.path.join(user_converted_dir, temp_pdf_for_merge_name)
+                                
+                                ind_success, ind_path_or_msg, _ = selected_conversion_func(item['path'], temp_pdf_for_merge_path)
+                                if ind_success and os.path.exists(temp_pdf_for_merge_path):
+                                    intermediate_pdfs_for_merging.append(temp_pdf_for_merge_path)
+                                else:
+                                    current_merge_op_message = f"将 {item['original_name']} 转换为PDF以进行合并时失败: {ind_path_or_msg or '未知错误'}"
+                                    all_individual_to_pdf_ok = False
+                                    break
+                        
+                        if all_individual_to_pdf_ok and intermediate_pdfs_for_merging:
+                            pdf_merger = PdfMerger()
+                            for pdf_path in intermediate_pdfs_for_merging:
+                                pdf_merger.append(pdf_path)
+                            pdf_merger.write(final_merged_path) # final_merged_path has .pdf ext
+                            pdf_merger.close()
+                            current_merge_op_success = True
+                            current_merge_op_message = "文件已合并并转换为PDF。"
+                        elif all_individual_to_pdf_ok and not intermediate_pdfs_for_merging : # All reported success but no files
+                             current_merge_op_message = "所有文件单独转换为PDF均报告成功，但未生成可合并的PDF文件。"
+                        
+                        # Cleanup intermediate PDFs created for merging
+                        for temp_pdf in intermediate_pdfs_for_merging:
+                            if os.path.exists(temp_pdf): os.remove(temp_pdf)
+
+                elif main_tab == 'pdfToFile': # Merging for pdfToFile (PDFs to various formats)
+                    # paths_of_temp_sources_for_merge contains paths to _preFinal_ PDF copies
+                    if output_format == 'docx':
+                        current_merge_op_success, current_merge_op_message = convert_and_merge_pdfs_to_docx(paths_of_temp_sources_for_merge, final_merged_path, request_id)
+                    elif output_format == 'pptx':
+                        # pdf_to_ppt_mode is available from earlier in the function
+                        if pdf_to_ppt_mode == 'libreoffice':
+                            if not PYPDF2_AVAILABLE:
+                                current_merge_op_message = "PDF合并库 (PyPDF2) 不可用，无法使用LibreOffice模式合并PDF到PPTX。"
+                            else:
+                                temp_merged_pdf_for_lo_ppt_path = os.path.join(user_converted_dir, f"temp_lo_merged_pdf_{request_id}.pdf")
+                                try:
+                                    pdf_merger = PdfMerger()
+                                    for pdf_path in paths_of_temp_sources_for_merge:
+                                        pdf_merger.append(pdf_path)
+                                    
+                                    if not pdf_merger.inputs:
+                                        logger.warning(f"No valid PDFs were appended to PdfMerger. Cannot create merged PDF. RequestID: {request_id}")
+                                        current_merge_op_message = "没有有效的PDF文件可供合并。"
+                                        current_merge_op_success = False # Ensure this path is marked as failure
+                                    else:
+                                        pdf_merger.write(temp_merged_pdf_for_lo_ppt_path)
+                                        pdf_merger.close()
+                                        logger.info(f"pdfToFile/PPT-LO: Merged source PDFs to {temp_merged_pdf_for_lo_ppt_path}. RequestID: {request_id}")
+
+                                        if not os.path.exists(temp_merged_pdf_for_lo_ppt_path):
+                                            logger.error(f"CRITICAL FAILURE: PyPDF2 claimed to write {temp_merged_pdf_for_lo_ppt_path} but it does NOT exist. RequestID: {request_id}")
+                                            current_merge_op_message = "PDF合并失败：未能创建合并后的文件。"
+                                            current_merge_op_success = False # Mark as failure
+                                            # Do not proceed to call convert_pdf_to_ppt
+                                        else:
+                                            # File exists, proceed with LibreOffice conversion
+                                            logger.info(f"Merged PDF {temp_merged_pdf_for_lo_ppt_path} confirmed to exist. Proceeding with LibreOffice. RequestID: {request_id}")
+                                            lo_conv_success, lo_conv_actual_path, lo_conv_msg = convert_pdf_to_ppt(
+                                                temp_merged_pdf_for_lo_ppt_path, 
+                                                user_converted_dir, 
+                                                mode='libreoffice', 
+                                                desired_filename_base=merged_base_name_for_file
+                                            )
+                                            if lo_conv_success and lo_conv_actual_path and os.path.exists(lo_conv_actual_path):
+                                                if lo_conv_actual_path != final_merged_path: # Ensure final name
+                                                    if os.path.exists(final_merged_path): os.remove(final_merged_path)
+                                                    os.rename(lo_conv_actual_path, final_merged_path)
+                                                current_merge_op_success = True
+                                                current_merge_op_message = lo_conv_msg or "PDF已合并并通过LibreOffice转换为PPTX。"
+                                            else:
+                                                current_merge_op_message = lo_conv_msg or "LibreOffice转换合并后的PDF为PPTX时失败。"
+                                                current_merge_op_success = False # Mark as failure
+
+                                except Exception as e_lo_ppt_merge:
+                                    current_merge_op_message = f"PDF合并或LibreOffice转换预处理过程中出错: {str(e_lo_ppt_merge)}"
+                                    logger.error(f"{current_merge_op_message}. RequestID: {request_id}", exc_info=True)
+                                    current_merge_op_success = False # Mark as failure
+                                finally:
+                                    # Cleanup the merged PDF (temp_lo_merged_pdf_for_lo_ppt_path) only if it exists
+                                    # This cleanup happens regardless of soffice success, as it's an intermediate for this specific path.
+                                    if os.path.exists(temp_merged_pdf_for_lo_ppt_path):
+                                        try:
+                                            os.remove(temp_merged_pdf_for_lo_ppt_path)
+                                            logger.info(f"Cleaned up temporary merged PDF for LO: {temp_merged_pdf_for_lo_ppt_path}. RequestID: {request_id}")
+                                        except Exception as e_clean_merged_lo:
+                                            logger.warning(f"Failed to clean up temporary merged PDF for LO {temp_merged_pdf_for_lo_ppt_path}: {e_clean_merged_lo}. RequestID: {request_id}")
+                        
+                        else: # Screenshot mode for PDF to PPT merge
+                            current_merge_op_success, current_merge_op_message = convert_and_merge_pdfs_to_pptx(paths_of_temp_sources_for_merge, final_merged_path, request_id, ppt_creation_mode='screenshot')
+                    elif output_format == 'txt':
+                        current_merge_op_success, current_merge_op_message = convert_and_merge_pdfs_to_txt(paths_of_temp_sources_for_merge, final_merged_path, request_id)
+                    elif output_format == 'xlsx':
+                        current_merge_op_message = "不支持将多个PDF直接合并为一个Excel文件。请取消勾选合并选项。"
+                        # current_merge_op_success remains False
+                    else:
+                        current_merge_op_message = f"pdfToFile合并: 未知的输出格式 '{output_format}'"
+
+                else: # Should not be reached if main_tab is validated
+                    current_merge_op_message = f"合并操作: 未知的主选项卡 '{main_tab}'"
+
+                # Cleanup _prePdf_ or _preFinal_ temp files after merge attempt
+                for f_info in valid_temp_files_for_processing:
+                    if os.path.exists(f_info['path']): 
+                        try: os.remove(f_info['path'])
+                        except Exception as e_clean_pre: logger.warning(f"Failed to cleanup temp source {f_info['path']} after merge: {e_clean_pre}")
+                
+                # Add result for merge operation to processed_results
+                if current_merge_op_success and os.path.exists(final_merged_path):
+                    meta_file_path_merged = f"{final_merged_path}.meta"
+                    with open(meta_file_path_merged, 'w', encoding='utf-8') as mf: mf.write(",".join(original_names_for_meta))
+                    relative_media_path = os.path.join(request.user.username, today_date_str, 'converted_files', final_merged_filename).replace("\\", "/")
+                    download_url = f"{settings.MEDIA_URL}{relative_media_path}"
+                    processed_results = [{
+                        'original_name': ",".join(original_names_for_meta),
+                        'converted_name': final_merged_filename, 
+                        'download_url': download_url, 
+                        'status': 'success',
+                        'message': current_merge_op_message or "合并成功"
+                    }]
+                elif merge_output: # If merge was checked but failed
+                    processed_results = [{
+                        'original_name': "合并操作", 
+                        'status': 'error', 
+                        'message': current_merge_op_message or f'合并到 {output_format.upper()} 失败或不受支持。'
+                    }]
+            except Exception as e_merge_main:
+                logger.error(f"Error during main merge operation block (RequestID: {request_id}): {e_merge_main}", exc_info=True)
+                if merge_output: # Ensure an error is reported if merge was intended
+                    processed_results = [{'original_name': "合并操作", 'status': 'error', 'message': f"合并文件时发生严重错误: {str(e_merge_main)}"}]
 
         else: # Not merge_output: Process individual files
-            for file_info in temp_files_for_final_processing:
-                temp_source_for_individual_conversion = file_info['path'] 
+            for file_info in valid_temp_files_for_processing:
+                temp_source_for_individual_conversion = file_info['path'] # This is the _prePdf_ or _preFinal_ or _tempScriptOutput_ file
                 original_input_name = file_info['original_name']
-                base_filename_no_ext = file_info['base_filename_no_ext']
+                base_filename_no_ext_for_indiv = file_info['base_filename_no_ext']
 
-                # Final output filename should NOT contain the request_id, but be unique
                 random_chars_final_indv = ''.join(random.choices(string.ascii_lowercase + string.digits, k=8))
-                final_output_base = f"{base_filename_no_ext}_{random_chars_final_indv}" 
-                final_output_filename = f"{final_output_base}.{output_format}"
-                final_output_path = os.path.join(user_converted_dir, final_output_filename)
+                final_output_base_indiv = f"{base_filename_no_ext_for_indiv}_{random_chars_final_indv}" 
+                final_output_filename_indiv = f"{final_output_base_indiv}.{output_format}"
+                final_output_path_indiv = os.path.join(user_converted_dir, final_output_filename_indiv)
                 
                 conversion_successful_individual = False
-                actual_final_path_individual = final_output_path 
-                
+                actual_final_path_for_individual = final_output_path_indiv 
+                err_msg_for_individual = None
+
                 try:
-                    logger.info(f"Converting individual file '{original_input_name}' to {output_format} (RequestID: {request_id}): {temp_source_for_individual_conversion} -> {final_output_path}")
+                    logger.info(f"Converting individual file '{original_input_name}' to {output_format} (RequestID: {request_id}): {temp_source_for_individual_conversion} -> {final_output_path_indiv}")
                     
-                    err_msg_ind = None # Initialize error message
+                    # Determine the correct conversion function based on main_tab, sub_tab, and output_format
+                    if main_tab == 'imgToFile':
+                        # temp_source_for_individual_conversion is already the DOCX from OCR script (e.g., ..._tempScriptOutput_XYZ.docx)
+                        if output_format == 'docx':
+                            shutil.move(temp_source_for_individual_conversion, final_output_path_indiv)
+                            conversion_successful_individual = True
+                        elif output_format == 'pdf':
+                            conversion_successful_individual, actual_final_path_for_individual, err_msg_for_individual = convert_word_to_pdf(temp_source_for_individual_conversion, final_output_path_indiv)
+                        else:
+                            err_msg_for_individual = f"imgToFile: 不支持的独立输出格式 '{output_format}'"
 
-                    if output_format == 'docx': 
-                        if main_tab == 'pdfToFile' and sub_tab == 'pdfToWord':
-                            conversion_successful_individual, actual_final_path_individual, err_msg_ind = convert_pdf_to_word(temp_source_for_individual_conversion, final_output_path)
-                        elif main_tab == 'imgToFile': # imgToFile to DOCX (default for imgToFile if not PDF)
-                             # The temp_source_for_individual_conversion is already the DOCX from OCR script
-                            if temp_source_for_individual_conversion.endswith(f"_tempScriptOutput_{request_id}.docx"): 
-                                shutil.move(temp_source_for_individual_conversion, final_output_path)
-                                actual_final_path_individual = final_output_path
-                                conversion_successful_individual = True
-                            else:
-                                err_msg_ind = "临时DOCX文件源不正确 (imgToFile to docx)"
-                                logger.error(f"{err_msg_ind} - Path: {temp_source_for_individual_conversion}, RequestID: {request_id}")
-                        # Add other main_tab/sub_tab combinations that might output DOCX individually
+                    elif main_tab == 'fileToPdf':
+                        # temp_source_for_individual_conversion is a _prePdf_ copy of the original file
+                        conversion_map_file_to_pdf = {
+                            'wordToPdf': convert_word_to_pdf,
+                            'excelToPdf': convert_excel_to_pdf,
+                            'pptToPdf': ppt_pdf_converter.convert_pptx_to_pdf,
+                            'txtToPdf': convert_txt_to_pdf
+                        }
+                        selected_conv_func = conversion_map_file_to_pdf.get(sub_tab)
+                        if selected_conv_func:
+                            conversion_successful_individual, actual_final_path_for_individual, err_msg_for_individual = selected_conv_func(temp_source_for_individual_conversion, final_output_path_indiv)
                         else:
-                            err_msg_ind = f"不支持的独立DOCX转换组合: {main_tab}/{sub_tab}"
-                            logger.warning(f"{err_msg_ind}, RequestID: {request_id}")
+                            err_msg_for_individual = f"fileToPdf: 未知的子类型 '{sub_tab}' 用于独立转换。"
 
-                    elif output_format == 'pdf':
-                        if main_tab == 'imgToFile': # This is the case for '图片转PDF'
-                            # temp_source_for_individual_conversion is the path to the intermediate DOCX from OCR
-                            if temp_source_for_individual_conversion.endswith(f"_tempScriptOutput_{request_id}.docx"): 
-                                conversion_successful_individual, actual_final_path_individual, err_msg_ind = convert_word_to_pdf(temp_source_for_individual_conversion, final_output_path)
-                                # err_msg_ind from convert_word_to_pdf might be the path if move failed but conversion was ok, or an error string.
-                                # If conversion_successful_individual is True, actual_final_path_individual is where the PDF is.
-                                if conversion_successful_individual and "Conversion OK, but move to final path failed" in str(err_msg_ind):
-                                    # Handle partial success (PDF created but not moved to final_output_path)
-                                    logger.warning(f"imgToFile to PDF: Conversion OK for '{original_input_name}' but move failed. PDF at {actual_final_path_individual}. Error: {err_msg_ind}")
-                                    # We will use actual_final_path_individual and the message from err_msg_ind
-                                    final_output_filename = os.path.basename(actual_final_path_individual) # Update filename to actual
-                                    # The status will be 'success_with_issue' or similar, message will be err_msg_ind
-                                else:
-                                    pass # Standard success or failure handled by conversion_successful_individual flag
-                            else:
-                                err_msg_ind = "图片转PDF时，临时的DOCX文件源不正确。"
-                                logger.error(f"{err_msg_ind} - Path: {temp_source_for_individual_conversion}, RequestID: {request_id}")
-                        
-                        elif main_tab == 'fileToPdf':
-                            conversion_func_file_to_pdf = None
-                            if sub_tab == 'wordToPdf': 
-                                conversion_func_file_to_pdf = convert_word_to_pdf
-                            elif sub_tab == 'excelToPdf': 
-                                conversion_func_file_to_pdf = convert_excel_to_pdf
-                            elif sub_tab == 'pptToPdf': 
-                                conversion_func_file_to_pdf = ppt_pdf_converter.convert_pptx_to_pdf
-                            elif sub_tab == 'txtToPdf': 
-                                conversion_func_file_to_pdf = convert_txt_to_pdf
-                            
-                            if conversion_func_file_to_pdf:
-                                conversion_successful_individual, actual_final_path_individual, err_msg_ind = conversion_func_file_to_pdf(temp_source_for_individual_conversion, final_output_path)
-                                # Handle partial success for fileToPdf (e.g. wordToPdf if move failed)
-                                if conversion_successful_individual and err_msg_ind and "Conversion OK, but move to final path failed" in str(err_msg_ind):
-                                    logger.warning(f"{sub_tab} to PDF: Conversion OK for '{original_input_name}' but move failed. PDF at {actual_final_path_individual}. Error: {err_msg_ind}")
-                                    final_output_filename = os.path.basename(actual_final_path_individual)
-                            else:
-                                err_msg_ind = f"未找到合适的转换函数 fileToPdf/{sub_tab}"
-                                logger.error(f"{err_msg_ind}, RequestID: {request_id}")
+                    elif main_tab == 'pdfToFile':
+                        # temp_source_for_individual_conversion is a _preFinal_ copy of the original PDF
+                        if output_format == 'docx':
+                            conversion_successful_individual, actual_final_path_for_individual, err_msg_for_individual = convert_pdf_to_word(temp_source_for_individual_conversion, final_output_path_indiv)
+                        elif output_format == 'pptx':
+                            # Use pdf_to_ppt_mode retrieved earlier
+                            conversion_successful_individual, actual_final_path_for_individual, err_msg_for_individual = convert_pdf_to_ppt(temp_source_for_individual_conversion, final_output_path_indiv, mode=pdf_to_ppt_mode, desired_filename_base=final_output_base_indiv)
+                        elif output_format == 'xlsx':
+                            conversion_successful_individual, actual_final_path_for_individual, err_msg_for_individual = convert_pdf_to_excel(temp_source_for_individual_conversion, final_output_path_indiv)
+                        elif output_format == 'txt':
+                            conversion_successful_individual, actual_final_path_for_individual, err_msg_for_individual = convert_pdf_to_txt(temp_source_for_individual_conversion, final_output_path_indiv)
                         else:
-                            err_msg_ind = f"不支持的独立PDF转换组合: {main_tab}/{sub_tab}"
-                            logger.warning(f"{err_msg_ind}, RequestID: {request_id}")
-                    
-                    elif output_format == 'xlsx':
-                        if main_tab == 'pdfToFile' and sub_tab == 'pdfToExcel':
-                            conversion_successful_individual, actual_final_path_individual, err_msg_ind = convert_pdf_to_excel(temp_source_for_individual_conversion, final_output_path)
-                        else:
-                            err_msg_ind = f"不支持的独立XLSX转换组合: {main_tab}/{sub_tab}"
-                            logger.warning(f"{err_msg_ind}, RequestID: {request_id}")
-
-                    elif output_format == 'pptx':
-                        if main_tab == 'pdfToFile' and sub_tab == 'pdfToPpt':
-                            conversion_successful_individual, actual_final_path_individual, err_msg_ind = convert_pdf_to_ppt(temp_source_for_individual_conversion, final_output_path)
-                        else:
-                            err_msg_ind = f"不支持的独立PPTX转换组合: {main_tab}/{sub_tab}"
-                            logger.warning(f"{err_msg_ind}, RequestID: {request_id}")
-
-                    elif output_format == 'txt':
-                        if main_tab == 'pdfToFile' and sub_tab == 'pdfToTxt':
-                            conversion_successful_individual, actual_final_path_individual, err_msg_ind = convert_pdf_to_txt(temp_source_for_individual_conversion, final_output_path)
-                        else:
-                            err_msg_ind = f"不支持的独立TXT转换组合: {main_tab}/{sub_tab}"
-                            logger.warning(f"{err_msg_ind}, RequestID: {request_id}")
+                            err_msg_for_individual = f"pdfToFile: 不支持的独立输出格式 '{output_format}'"
                     else:
-                        err_msg_ind = f"不支持的独立转换输出格式: {output_format}"
-                        logger.error(f"{err_msg_ind} for {main_tab}/{sub_tab}, RequestID: {request_id}")
+                        err_msg_for_individual = f"未知的主选项卡 '{main_tab}' 用于独立文件处理。"
 
-                    # After successful conversion (where actual_final_path_individual is the final file path)
-                    if conversion_successful_individual and os.path.exists(actual_final_path_individual):
-                        logger.info(f"Successfully processed '{original_input_name}' to '{os.path.basename(actual_final_path_individual)}' (RequestID: {request_id})")
-                        
-                        status_msg = 'success'
-                        message_for_user = '转换成功'
-                        # Check for partial success messages (e.g. from word_to_pdf if move failed)
-                        if err_msg_ind and "Conversion OK, but move to final path failed" in str(err_msg_ind):
-                            status_msg = 'success_with_issue' # Custom status for frontend to potentially display differently
-                            message_for_user = str(err_msg_ind) # Pass the detailed error to user
+                    # Common result handling for individual conversion
+                    if conversion_successful_individual and os.path.exists(actual_final_path_for_individual):
+                        logger.info(f"Successfully processed '{original_input_name}' to '{os.path.basename(actual_final_path_for_individual)}' (RequestID: {request_id})")
+                        status_for_frontend = 'success'
+                        message_for_frontend = err_msg_for_individual or '转换成功' # Some converters might put success msg in err_msg_for_individual
+                        if err_msg_for_individual and "Conversion OK, but move to final path failed" in str(err_msg_for_individual):
+                             status_for_frontend = 'success_fallback' # Or a more specific status
+                             message_for_frontend = str(err_msg_for_individual) # Pass detailed error
 
-                        relative_media_path = os.path.join(request.user.username, today_date_str, 'converted_files', os.path.basename(actual_final_path_individual)).replace("\\", "/")
-                        download_url = f"{settings.MEDIA_URL}{relative_media_path}"
+                        relative_media_path_indiv = os.path.join(request.user.username, today_date_str, 'converted_files', os.path.basename(actual_final_path_for_individual)).replace("\\", "/")
+                        download_url_indiv = f"{settings.MEDIA_URL}{relative_media_path_indiv}"
                         processed_results.append({
                             'original_name': original_input_name,
-                            'converted_name': os.path.basename(actual_final_path_individual), # Use the actual filename
-                            'download_url': download_url,
-                            'status': status_msg,
-                            'message': message_for_user
+                            'converted_name': os.path.basename(actual_final_path_for_individual),
+                            'download_url': download_url_indiv,
+                            'status': status_for_frontend,
+                            'message': message_for_frontend
                         })
-                        # Create .meta file
-                        meta_file_path = f"{actual_final_path_individual}.meta"
-                        with open(meta_file_path, 'w', encoding='utf-8') as mf: mf.write(original_input_name)
-
-                        # Clean up the temp_source_for_individual_conversion if it's different from final and contains request_id
-                        # temp_source_for_individual_conversion would be the intermediate DOCX for imgToPdf
-                        if temp_source_for_individual_conversion != actual_final_path_individual and \
+                        meta_file_path_indiv = f"{actual_final_path_for_individual}.meta"
+                        with open(meta_file_path_indiv, 'w', encoding='utf-8') as mf: mf.write(original_input_name)
+                        
+                        # Cleanup the temp source if it's different from final output and was a _prePpdf/_preFinal_ etc.
+                        if temp_source_for_individual_conversion != actual_final_path_for_individual and \
                            os.path.exists(temp_source_for_individual_conversion) and \
-                           (f"_tempScriptOutput_{request_id}.docx" in os.path.basename(temp_source_for_individual_conversion) or 
-                            f"_prePdf_{request_id}" in os.path.basename(temp_source_for_individual_conversion) or
-                            f"_preFinal_{request_id}" in os.path.basename(temp_source_for_individual_conversion)):
-                            try:
+                           any(temp_marker in os.path.basename(temp_source_for_individual_conversion) for temp_marker in [f"_prePdf_{request_id}", f"_preFinal_{request_id}", f"_tempScriptOutput_{request_id}"]):
+                            try: 
                                 os.remove(temp_source_for_individual_conversion)
-                                logger.info(f"Removed temp source after individual conversion (RequestID: {request_id}): {temp_source_for_individual_conversion}")
-                            except OSError as e_clean_indiv:
-                                logger.warning(f"Failed to remove temp source {temp_source_for_individual_conversion} after individual conversion (RequestID: {request_id}): {e_clean_indiv}")
-                    elif err_msg_ind: # Conversion failed, and we have an error message from the converter
-                        logger.error(f"Conversion failed for '{original_input_name}' to {output_format}. Error: {err_msg_ind} (RequestID: {request_id})")
+                                logger.info(f"Cleaned up temp source {temp_source_for_individual_conversion} after individual conversion. RequestID: {request_id}")
+                            except OSError as e_clean_ind_src: logger.warning(f"Failed to clean up temp source {temp_source_for_individual_conversion}: {e_clean_ind_src}")
+
+                    else: # Individual conversion failed
+                        logger.error(f"Conversion failed for '{original_input_name}' to {output_format}. Error: {err_msg_for_individual} (RequestID: {request_id})")
                         processed_results.append({
                             'original_name': original_input_name, 
                             'status': 'error', 
-                            'message': str(err_msg_ind)
+                            'message': str(err_msg_for_individual or '转换失败，未返回具体错误信息。')
                         })
-                    else: # Conversion failed, but no specific error message was captured from the converter (should be rare)
-                        logger.error(f"Conversion failed for '{original_input_name}' to {output_format}, and no specific error message from converter. (RequestID: {request_id})")
-                        processed_results.append({
-                            'original_name': original_input_name, 
-                            'status': 'error', 
-                            'message': '转换失败，未返回具体错误信息。'
-                        })
-
-                except Exception as e_ind:
-                    logger.error(f"Error converting individual file '{original_input_name}' to {output_format} (RequestID: {request_id}): {e_ind}", exc_info=True)
-                    processed_results.append({
-                        'original_name': original_input_name, 
-                        'status': 'error', 
-                        'message': f'处理单个文件转换时发生意外错误: {str(e_ind)}'
-                    })
-
+                except Exception as e_ind_main:
+                    logger.error(f"Error converting individual file '{original_input_name}' (RequestID: {request_id}): {e_ind_main}", exc_info=True)
+                    processed_results.append({'original_name': original_input_name, 'status': 'error', 'message': f'处理单个文件转换时发生意外错误: {str(e_ind_main)}'})
+    
+    elif not uploaded_files_info_from_frontend : # No files were uploaded at all
+        processed_results.append({'original_name': '-', 'status': 'error', 'message': '没有上传文件，无法开始转换。'})
+    # If temp_files_for_final_processing is empty but uploaded_files_info_from_frontend is not,
+    # it means all initial file preparations failed and errors are already in processed_results.
+    
     logger.info(f"Final processed results to be sent to client (RequestID: {request_id}): {processed_results}")
     return JsonResponse({'results': processed_results, 'merge_output': merge_output})
 
