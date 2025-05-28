@@ -12,7 +12,16 @@ urlpatterns = [
     path("admin-console/file-management/", views.admin_file_management, name="admin_file_management"),
     path("admin-console/user/delete/<int:user_id>/", views.admin_delete_user, name="admin_delete_user"),
     path("admin/users/edit/<int:user_id>/", views.admin_edit_user, name="admin_edit_user"),
+    
+    # 新的API端点
+    path("api/file-to-pdf/", views.file_to_pdf_view, name="api_file_to_pdf"),
+    path("api/img-to-file/", views.img_to_file_view, name="api_img_to_file"),
+    path("api/pdf-to-file/", views.pdf_to_file_view, name="api_pdf_to_file"),
+
+    # 旧的 process_images 端点 - 现在指向一个废弃提示视图
+    # 客户端应更新为使用上述新的API端点。
     path("process-images/", views.process_images_view, name="process_images"),
+    
     path("history/", views.conversion_history_view, name="conversion_history"),
     path("delete-converted-file/<str:date_str>/<str:filename>/", views.delete_converted_file_view, name="delete_converted_file"),
     path("history/delete_all_for_date/<str:date_str>/", views.delete_all_for_date_view, name="delete_all_for_date"),

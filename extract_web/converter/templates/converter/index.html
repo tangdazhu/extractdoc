@@ -279,7 +279,7 @@
 {# Add converter-container class for specific styling #}
 <div class="container converter-container">
     <div class="main-tabs-container">
-        <h1 class="page-title">文本转换器</h1>
+        <h1 class="page-title">智能文档转换工作室</h1>
         <div class="tabs">
             <button id="btnImgToFile" class="tab-button active" onclick="showTab('imgToFile')">图片转文件</button>
             <button id="btnFileToPdf" class="tab-button" onclick="showTab('fileToPdf')">文件转PDF</button>
@@ -789,7 +789,31 @@
 
         const csrfToken = getCookie('csrftoken');
 
-        fetch('{% url "converter:process_images" %}', {
+        // Determine the correct API endpoint based on the main tab
+        let apiUrl = '';
+        if (currentSelectedMainTab === 'fileToPdf') {
+            apiUrl = '/api/file-to-pdf/';
+        } else if (currentSelectedMainTab === 'imgToFile') {
+            apiUrl = '/api/img-to-file/';
+        } else if (currentSelectedMainTab === 'pdfToFile') {
+            apiUrl = '/api/pdf-to-file/';
+        } else {
+            console.error('Unknown main tab:', currentSelectedMainTab);
+            alert('内部错误：无法确定API端点。');
+            // Reset button and isConverting state
+            isConverting = false;
+            updateMainTabButtonsState(false);
+            const btn = document.getElementById('startConversionBtn');
+            btn.disabled = false;
+            btn.textContent = '开始转换';
+            btn.style.backgroundColor = '#007bff';
+            btn.style.borderColor = '#007bff';
+            return;
+        }
+
+        console.log(`[startConversion] Determined API URL: ${apiUrl}`);
+
+        fetch(apiUrl, {
             method: 'POST',
             headers: {
                 'X-CSRFToken': csrfToken
@@ -802,8 +826,7 @@
         })
         .catch(error => {
             console.error('转换出错:', error);
-            alert("转换过程中发生错误，请检查控制台获取更多信息。");
-            displayConvertedFiles([{ original_name: '错误', converted_name: '-', status: 'error', message: '客户端请求错误' }], false);
+            displayConvertedFiles([{ original_name: '错误', converted_name: '-', status: 'error', message: '客户端请求错误，详情请查看控制台。' }], false);
             const btn = document.getElementById('startConversionBtn');
             btn.disabled = false;
             btn.textContent = '开始转换';
