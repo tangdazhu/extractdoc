@@ -315,6 +315,7 @@ def segment_text(text):
     
     # Analyze structure and create formatted content
     formatted_content = []
+    current_main_section = None  # Track current main section for proper sub-item assignment
     
     for i, line in enumerate(lines):
         # Check line patterns and apply appropriate formatting
@@ -324,33 +325,43 @@ def segment_text(text):
         if (line.upper() == line and len(line) <= 20 and 
             any(keyword in line.upper() for keyword in ['CONTENT', 'WHITEPAPER', '目录', '内容'])):
             formatted_line = {'type': 'title', 'text': line, 'level': 0}
+            current_main_section = None
         
         # Document description/subtitle
         elif ('whitepaper' in line.lower() or 'solution' in line.lower() or 
               '开发团队' in line or '系统架构' in line):
             formatted_line = {'type': 'subtitle', 'text': line, 'level': 0}
+            current_main_section = None
         
         # Main numbered sections (1. 2. 3.)
         elif re.match(r'^\d+[.、]\s*(.+)', line):
             match = re.match(r'^\d+[.、]\s*(.+)', line)
             if match:
                 formatted_line = {'type': 'numbered_main', 'text': match.group(1), 'number': line.split('.')[0], 'level': 1}
+                current_main_section = match.group(1)
         
-        # Sub-items with bullets (·)
+        # Sub-items with bullets (·) - should be under current main section
         elif line.startswith('·'):
             text_content = line[1:].strip()
-            formatted_line = {'type': 'bullet_sub', 'text': text_content, 'level': 2}
+            if current_main_section:
+                formatted_line = {'type': 'bullet_sub', 'text': text_content, 'level': 2, 'parent': current_main_section}
+            else:
+                formatted_line = {'type': 'bullet_sub', 'text': text_content, 'level': 2}
         
         # Other bullet points
         elif line.startswith(('•', '-', '*', '○', '●')):
             text_content = line[1:].strip()
-            formatted_line = {'type': 'bullet', 'text': text_content, 'level': 2}
+            if current_main_section:
+                formatted_line = {'type': 'bullet', 'text': text_content, 'level': 2, 'parent': current_main_section}
+            else:
+                formatted_line = {'type': 'bullet', 'text': text_content, 'level': 2}
         
         # Chinese numbered sections (一、二、三、)
         elif re.match(r'^[一二三四五六七八九十]+[、.]\s*(.+)', line):
             match = re.match(r'^[一二三四五六七八九十]+[、.]\s*(.+)', line)
             if match:
                 formatted_line = {'type': 'numbered_chinese', 'text': match.group(1), 'number': line.split('、')[0], 'level': 1}
+                current_main_section = match.group(1)
         
         # Sub-numbered items like "4."
         elif re.match(r'^\d+[.]\s*$', line):
@@ -359,6 +370,7 @@ def segment_text(text):
                 next_line = lines[i + 1]
                 if not re.match(r'^\d+[.、]', next_line) and not next_line.startswith(('·', '•', '-')):
                     formatted_line = {'type': 'numbered_main', 'text': next_line, 'number': line.rstrip('.'), 'level': 1}
+                    current_main_section = next_line
                     lines[i + 1] = ''  # Mark next line as processed
             else:
                 formatted_line = {'type': 'text', 'text': line, 'level': 0}
@@ -367,16 +379,31 @@ def segment_text(text):
         elif re.match(r'^[（(]\d+[）)]\s*(.+)', line):
             match = re.match(r'^[（(]\d+[）)]\s*(.+)', line)
             if match:
-                formatted_line = {'type': 'numbered_paren', 'text': match.group(1), 'number': line.split(')')[0].strip('()（）'), 'level': 2}
+                if current_main_section:
+                    formatted_line = {'type': 'numbered_paren', 'text': match.group(1), 'number': line.split(')')[0].strip('()（）'), 'level': 2, 'parent': current_main_section}
+                else:
+                    formatted_line = {'type': 'numbered_paren', 'text': match.group(1), 'number': line.split(')')[0].strip('()（）'), 'level': 2}
         
-        # Technical terms or section headers (likely important standalone terms)
+        # Technical terms or section headers that could be sub-items
         elif (len(line) <= 50 and 
               any(keyword in line for keyword in ['开发', '技术', '平台', '框架', '选型', '架构', '模型', '评估', '安全', '合规', '案例', '实践', '场景'])):
-            formatted_line = {'type': 'section_header', 'text': line, 'level': 1}
+            # Check if this could be a sub-item under current main section
+            if current_main_section and len(line) <= 30:
+                formatted_line = {'type': 'section_sub', 'text': line, 'level': 2, 'parent': current_main_section}
+            else:
+                formatted_line = {'type': 'section_header', 'text': line, 'level': 1}
+                current_main_section = line
         
-        # Regular text
+        # Regular text - could be sub-content if under a main section
         else:
-            formatted_line = {'type': 'text', 'text': line, 'level': 0}
+            if current_main_section and len(line) <= 40:
+                # Likely a sub-item
+                formatted_line = {'type': 'text_sub', 'text': line, 'level': 2, 'parent': current_main_section}
+            else:
+                formatted_line = {'type': 'text', 'text': line, 'level': 0}
+                # Long text doesn't belong to a specific section
+                if len(line) > 40:
+                    current_main_section = None
         
         if formatted_line and formatted_line['text'].strip():
             formatted_content.append(formatted_line)
@@ -396,6 +423,7 @@ def add_formatted_content_to_docx(doc, formatted_content):
         text = item.get('text', '')
         level = item.get('level', 0)
         number = item.get('number', '')
+        parent = item.get('parent', '')
         
         if item_type == 'title':
             # Main title
@@ -456,7 +484,10 @@ def add_formatted_content_to_docx(doc, formatted_content):
         elif item_type == 'bullet':
             # Regular bullet points
             para = doc.add_paragraph()
-            para.paragraph_format.left_indent = Pt(18)
+            if level >= 2:
+                para.paragraph_format.left_indent = Pt(36)  # Indent if it's a sub-item
+            else:
+                para.paragraph_format.left_indent = Pt(18)
             bullet_run = para.add_run("• ")
             bullet_run.font.size = Pt(11)
             text_run = para.add_run(text)
@@ -469,6 +500,21 @@ def add_formatted_content_to_docx(doc, formatted_content):
             run = para.add_run(text)
             run.font.size = Pt(11)
             run.font.bold = True
+            
+        elif item_type == 'section_sub':
+            # Sub-section headers (under main sections)
+            para = doc.add_paragraph()
+            para.paragraph_format.left_indent = Pt(36)  # More indent for sub-sections
+            run = para.add_run(text)
+            run.font.size = Pt(11)
+            run.font.bold = True
+            
+        elif item_type == 'text_sub':
+            # Sub-text items (under main sections)
+            para = doc.add_paragraph()
+            para.paragraph_format.left_indent = Pt(36)  # Indent for sub-items
+            run = para.add_run(text)
+            run.font.size = Pt(11)
             
         else:
             # Regular text
@@ -494,6 +540,7 @@ def add_formatted_content_to_pptx(doc, formatted_content):
         text = item.get('text', '')
         level = item.get('level', 0)
         number = item.get('number', '')
+        parent = item.get('parent', '')
         
         if item_type == 'title':
             # Main title becomes the first slide
@@ -511,9 +558,10 @@ def add_formatted_content_to_pptx(doc, formatted_content):
                 slides.append(current_slide)
             current_slide = {'title': f"{number}. {text}", 'content': []}
             
-        elif item_type in ['bullet_sub', 'bullet', 'numbered_paren']:
-            # Add as bullet point to current slide
-            current_slide['content'].append({'type': 'bullet', 'text': text})
+        elif item_type in ['bullet_sub', 'bullet', 'numbered_paren', 'section_sub', 'text_sub']:
+            # Add as bullet point to current slide with appropriate indentation
+            indent_level = 1 if item_type in ['section_sub', 'text_sub'] else 0
+            current_slide['content'].append({'type': 'bullet', 'text': text, 'indent': indent_level})
             
         elif item_type == 'section_header':
             # Section headers as sub-headings
@@ -544,6 +592,7 @@ def add_formatted_content_to_pptx(doc, formatted_content):
         for content_item in slide['content']:
             content_type = content_item['type']
             content_text = content_item['text']
+            indent_level = content_item.get('indent', 0)
             
             if content_type == 'subtitle':
                 para = doc.add_paragraph(content_text)
@@ -560,7 +609,12 @@ def add_formatted_content_to_pptx(doc, formatted_content):
                 
             elif content_type == 'bullet':
                 para = doc.add_paragraph()
-                bullet_run = para.add_run("• ")
+                # Apply indentation based on indent_level
+                if indent_level > 0:
+                    para.paragraph_format.left_indent = Pt(36)  # Sub-bullet
+                    bullet_run = para.add_run("  ◦ ")  # Different bullet for sub-items
+                else:
+                    bullet_run = para.add_run("• ")
                 bullet_run.font.size = Pt(12)
                 text_run = para.add_run(content_text)
                 text_run.font.size = Pt(12)
