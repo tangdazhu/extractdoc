@@ -168,6 +168,7 @@ def create_pptx_from_docx(docx_path, output_dir):
     """
     Creates a PPTX file from a DOCX file using python-pptx library.
     Reads tables and text from DOCX and creates slides in PPTX with improved formatting.
+    Each image's content is kept on a single slide to preserve the original structure.
     
     Args:
         docx_path (str): Path to the input DOCX file
@@ -241,55 +242,73 @@ def create_pptx_from_docx(docx_path, output_dir):
             if text:
                 paragraphs.append(text)
         
-        # Create content slides - simple approach
+        # Create a single content slide for all text content (preserving original structure)
         if paragraphs:
-            # Group paragraphs into slides (max 8 paragraphs per slide)
-            max_paras_per_slide = 8
+            # Create one slide for all content
+            slide_layout = prs.slide_layouts[1]  # Title and content layout
+            slide = prs.slides.add_slide(slide_layout)
             
-            for i in range(0, len(paragraphs), max_paras_per_slide):
-                slide_paras = paragraphs[i:i + max_paras_per_slide]
+            # Set title - use first paragraph if it looks like a title, otherwise use generic title
+            title_shape = slide.shapes.title
+            title_text = "Content"
+            content_start_idx = 0
+            
+            if title_shape:
+                first_para = paragraphs[0]
+                # Check if first paragraph looks like a title
+                if (len(first_para) <= 50 and 
+                    (any(keyword in first_para for keyword in ['目的', 'Content', 'Whitepaper']) or 
+                     re.match(r'^\d+[.、]', first_para) or
+                     first_para.isupper())):
+                    title_text = first_para
+                    content_start_idx = 1
+                title_shape.text = title_text
+            
+            # Set content - put ALL remaining content on this single slide
+            content_shape = slide.placeholders[1]
+            if content_shape:
+                text_frame = content_shape.text_frame
+                text_frame.clear()
                 
-                # Create slide
-                slide_layout = prs.slide_layouts[1]  # Title and content layout
-                slide = prs.slides.add_slide(slide_layout)
+                # Add all paragraphs to the single slide
+                content_paragraphs = paragraphs[content_start_idx:]
                 
-                # Set title
-                title_shape = slide.shapes.title
-                if title_shape:
-                    # Use first paragraph as title if it looks like a title, otherwise use generic title
-                    first_para = slide_paras[0]
-                    if len(first_para) <= 50 and any(keyword in first_para for keyword in ['目的', 'Content', 'Whitepaper']) or re.match(r'^\d+[.、]', first_para):
-                        title_shape.text = first_para
-                        slide_paras = slide_paras[1:]  # Remove title from content
+                for i, para_text in enumerate(content_paragraphs):
+                    if i == 0:
+                        p = text_frame.paragraphs[0]
                     else:
-                        title_shape.text = f"内容 {i // max_paras_per_slide + 1}"
-                
-                # Set content
-                content_shape = slide.placeholders[1]
-                if content_shape and slide_paras:
-                    text_frame = content_shape.text_frame
-                    text_frame.clear()
+                        p = text_frame.add_paragraph()
                     
-                    for j, para_text in enumerate(slide_paras):
-                        if j == 0:
-                            p = text_frame.paragraphs[0]
-                        else:
-                            p = text_frame.add_paragraph()
-                        
-                        p.text = para_text
+                    p.text = para_text
+                    
+                    # Apply formatting based on content patterns
+                    if re.match(r'^\d+[.、]\s*\S', para_text):  # Numbered sections (1. 2. 3.)
+                        p.font.bold = True
+                        p.font.size = Pt(16)
+                        p.font.color.rgb = RGBColor(0, 51, 102)  # Dark blue for main sections
+                    elif para_text.startswith(('•', '·', '-', '*')):  # Bullet points
+                        p.level = 1  # Indent bullet points
+                        p.font.size = Pt(12)
+                    elif any(keyword in para_text for keyword in ['开发', '技术', '平台', '框架', '选型', '架构', '安全', '评估']) and len(para_text) <= 80:
+                        # Technical terms that might be headings
+                        p.font.bold = True
                         p.font.size = Pt(14)
-                        
-                        # Simple formatting
-                        if re.match(r'^\d+[.、]', para_text):  # Numbered items
-                            p.font.bold = True
-                            p.font.size = Pt(15)
-                        elif para_text.startswith(('•', '·', '-', '*')):  # Bullet points
-                            p.level = 1
-                        elif len(para_text) <= 30:  # Short text might be headings
-                            p.font.bold = True
+                        p.font.color.rgb = RGBColor(51, 51, 153)  # Medium blue for sub-headings
+                    elif len(para_text) <= 30:  # Short text might be headings
+                        p.font.bold = True
+                        p.font.size = Pt(13)
+                    else:
+                        # Regular content
+                        p.font.size = Pt(11)
+                
+                # Adjust text frame to fit more content
+                text_frame.margin_bottom = Inches(0.1)
+                text_frame.margin_top = Inches(0.1)
+                text_frame.margin_left = Inches(0.1)
+                text_frame.margin_right = Inches(0.1)
         
         # If no paragraphs, create a simple slide
-        if len(prs.slides) == slide_count:  # Only table slides exist
+        elif len(prs.slides) == slide_count:  # Only table slides exist or no content at all
             slide_layout = prs.slide_layouts[1]  # Title and content layout
             slide = prs.slides.add_slide(slide_layout)
             
