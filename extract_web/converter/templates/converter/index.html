@@ -4,6 +4,95 @@
 
 {% block extra_head %}
 <style>
+    /* Styles for the new page layout container */
+    .page-layout-container {
+        display: flex;
+        height: calc(100vh - 56px); /* Adjust 56px if your header height is different */
+        overflow: hidden;
+    }
+
+    /* Resetting body styles that might have been added here previously */
+    /* body { */
+        /* font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; */
+        /* background-color: #f0f2f5; */
+        /* color: #333; */
+        /* line-height: 1.6; */
+        /* display: flex; */ /* Moved to .page-layout-container */
+        /* margin: 0; */
+        /* height: 100vh; */ /* Moved to .page-layout-container */
+        /* overflow: hidden; */ /* Moved to .page-layout-container */
+    /* } */
+
+    .sidebar {
+        width: 200px; /* Slightly narrower to match screenshot 2 */
+        background-color: #f8f9fa; /* Light beige/gray background like screenshot 2 */
+        padding: 20px 15px; /* Adjusted padding */
+        color: #333; /* Darker text color */
+        height: 100%;
+        display: flex;
+        flex-direction: column;
+        border-right: 1px solid #dee2e6; /* Subtle border */
+    }
+
+    .sidebar-nav ul {
+        list-style-type: none;
+        padding: 0;
+        margin: 0;
+    }
+
+    .sidebar-nav li button {
+        background-color: #e9ecef; /* Light gray button background */
+        color: #2c3e50; /* Dark blue-gray text */
+        border: 1px solid #dee2e6; /* Border for buttons */
+        padding: 10px 15px;
+        width: 100%;
+        text-align: left;
+        cursor: pointer;
+        font-size: 15px; /* Slightly smaller font */
+        border-radius: 5px;
+        margin-bottom: 10px; /* Increased margin */
+        transition: background-color 0.2s, color 0.2s, border-color 0.2s;
+    }
+
+    .sidebar-nav li button.active {
+        background-color: #007bff; /* Blue for active item */
+        color: white;
+        border-color: #007bff;
+        font-weight: 500;
+    }
+
+    .sidebar-nav li button:hover:not(.active) {
+        background-color: #ced4da; /* Darker gray on hover */
+        border-color: #adb5bd;
+    }
+    
+    .sidebar-nav li button.disabled {
+        color: #6c757d; /* Grayed out for disabled items */
+        cursor: not-allowed;
+        background-color: #f8f9fa; /* Lighter background for disabled */
+        border-color: #e9ecef;
+    }
+    .sidebar-nav li button.disabled:hover {
+        background-color: #f8f9fa;
+        border-color: #e9ecef;
+    }
+
+    .main-content-wrapper {
+        flex-grow: 1;
+        padding: 0; 
+        background-color: #f0f2f5; /* Main content background color from original body */
+        overflow-y: auto; 
+        height: 100%; /* Fill the .page-layout-container height */
+    }
+    
+    .converter-container { 
+        background-color: #fff; 
+        padding: 25px 30px;
+        border-radius: 8px; /* Example: add a slight rounding */
+        box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+        margin: 20px;
+    }
+
     /* General Body & Container - Assuming base.html might have some */
     body {
         font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
@@ -272,126 +361,256 @@
 
     .hidden { display: none !important; } /* Ensure hidden is always effective */
 
+    /* Video Analysis Section Specific Styles */
+    #videoAnalysisContent .form-group {
+        margin-bottom: 20px;
+    }
+    #videoAnalysisContent label {
+        display: block;
+        margin-bottom: 8px;
+        font-weight: 500;
+        color: #34495e; /* Darker label color */
+    }
+    #videoAnalysisContent input[type="text"],
+    #videoAnalysisContent input[type="file"] {
+        width: 100%;
+        padding: 10px;
+        border: 1px solid #bdc3c7; /* Softer border */
+        border-radius: 4px;
+        box-sizing: border-box;
+    }
+    #videoAnalysisContent input[type="file"] {
+        padding: 7px; /* Adjust for file input */
+    }
+    #videoAnalysisContent .video-drop-area {
+        border: 2px dashed #3498db; /* Blue dashed border */
+        padding: 30px;
+        text-align: center;
+        border-radius: 6px;
+        background-color: #f8f9faff;
+        margin-bottom: 20px;
+        cursor: pointer;
+        transition: background-color 0.2s ease-in-out;
+    }
+    #videoAnalysisContent .video-drop-area:hover {
+        background-color: #eaf5ff; /* Light blue on hover */
+    }
+    #videoAnalysisContent .video-drop-area p {
+        margin: 0;
+        font-size: 1em;
+        color: #3498db;
+    }
+     #videoAnalysisContent .action-buttons { /* Re-style for video section if needed */
+        margin-top: 20px;
+        padding-top: 20px;
+        border-top: 1px solid #e9ecef;
+        display: flex;
+        justify-content: flex-end; /* Align button to the right */
+    }
+    #videoAnalysisContent .action-buttons button {
+        background-color: #27ae60; /* Green for "Extract PPT" */
+        color: white;
+        padding: 12px 25px;
+        border: none;
+        border-radius: 6px;
+        cursor: pointer;
+        font-size: 16px;
+        font-weight: 500;
+    }
+     #videoAnalysisContent .action-buttons button:hover {
+        background-color: #229954; /* Darker green on hover */
+    }
+    /* Ensure progress bar is visible if used in video */
+    .progress-bar-container {
+        width: 100%;
+        background-color: #e9ecef;
+        border-radius: 4px;
+        margin-top: 10px;
+        height: 10px; /* Make it thinner */
+        display: none; /* Hidden by default */
+    }
+    .progress-bar {
+        width: 0%;
+        height: 100%; /* Full height of container */
+        background-color: #007bff; /* Blue progress */
+        border-radius: 4px;
+        text-align: center;
+        line-height: 10px; /* Adjust if you make it thicker */
+        color: white;
+        font-size: 0.7em; /* Small percentage text */
+    }
+
 </style>
 {% endblock %}
 
 {% block content %}
-{# Add converter-container class for specific styling #}
-<div class="container converter-container">
-    <div class="main-tabs-container">
-        <h1 class="page-title">文档转换</h1>
-        <div class="tabs">
-            <button id="btnImgToFile" class="tab-button active" onclick="showTab('imgToFile')">图片转文件</button>
-            <button id="btnFileToPdf" class="tab-button" onclick="showTab('fileToPdf')">文件转PDF</button>
-            <button id="btnPdfToFile" class="tab-button" onclick="showTab('pdfToFile')">PDF转文件</button>
-        </div>
+<div class="page-layout-container"> 
+    <div class="sidebar">
+        <nav class="sidebar-nav">
+            <ul>
+                <li><button id="navDocConversion" class="active" onclick="selectMainNavigation('docConversion')">文档转换</button></li>
+                <li><button id="navVideoAnalysis" onclick="selectMainNavigation('videoAnalysis')">视频分析</button></li>
+                <li><button id="navImageAnalysis" class="disabled" onclick="selectMainNavigation('imageAnalysis')" disabled>图像分析</button></li>
+                <li><button id="navVoiceAnalysis" class="disabled" onclick="selectMainNavigation('voiceAnalysis')" disabled>语音分析</button></li>
+            </ul>
+        </nav>
     </div>
 
-    <div id="imgToFileContent" class="tab-content">
-        <div class="sub-tabs">
-            <button class="sub-tab-button active" onclick="selectSubTab(this, 'imgToWord')">图片转Word</button>
-            <button class="sub-tab-button" onclick="selectSubTab(this, 'imgToPdf')">图片转PDF</button>
-            <button class="sub-tab-button" onclick="selectSubTab(this, 'imgToPpt')">图片转PPT</button>
-        </div>
-    </div>
+    <div class="main-content-wrapper">
+        <div id="docConversionContent" class="converter-container">
+            <div class="main-tabs-container">
+                <h1 class="page-title">文档转换</h1>
+                <div class="tabs">
+                    <button id="btnImgToFile" class="tab-button active" onclick="showTab('imgToFile')">图片转文件</button>
+                    <button id="btnFileToPdf" class="tab-button" onclick="showTab('fileToPdf')">文件转PDF</button>
+                    <button id="btnPdfToFile" class="tab-button" onclick="showTab('pdfToFile')">PDF转文件</button>
+                </div>
+            </div>
 
-    <div id="fileToPdfContent" class="tab-content hidden">
-        <div class="sub-tabs">
-            <button class="sub-tab-button active" onclick="selectSubTab(this, 'wordToPdf')">Word转PDF</button>
-            <button class="sub-tab-button" onclick="selectSubTab(this, 'excelToPdf')">Excel转PDF</button>
-            <button class="sub-tab-button" onclick="selectSubTab(this, 'pptToPdf')">PPT转PDF</button>
-            <button class="sub-tab-button" onclick="selectSubTab(this, 'txtToPdf')">TXT转PDF</button>
-        </div>
-    </div>
+            <div id="imgToFileContent" class="tab-content">
+                <div class="sub-tabs">
+                    <button class="sub-tab-button active" onclick="selectSubTab(this, 'imgToWord')">图片转Word</button>
+                    <button class="sub-tab-button" onclick="selectSubTab(this, 'imgToPdf')">图片转PDF</button>
+                    <button class="sub-tab-button" onclick="selectSubTab(this, 'imgToPpt')">图片转PPT</button>
+                </div>
+            </div>
 
-    <div id="pdfToFileContent" class="tab-content hidden">
-        <div class="sub-tabs">
-            <button class="sub-tab-button active" onclick="selectSubTab(this, 'pdfToWord')">PDF转Word</button>
-            <button class="sub-tab-button" onclick="selectSubTab(this, 'pdfToExcel')">PDF转Excel</button>
-            <button class="sub-tab-button" onclick="selectSubTab(this, 'pdfToPpt')">PDF转PPT</button>
-            <button class="sub-tab-button" onclick="selectSubTab(this, 'pdfToTxt')">PDF转TXT</button>
-        </div>
-    </div>
+            <div id="fileToPdfContent" class="tab-content hidden">
+                <div class="sub-tabs">
+                    <button class="sub-tab-button active" onclick="selectSubTab(this, 'wordToPdf')">Word转PDF</button>
+                    <button class="sub-tab-button" onclick="selectSubTab(this, 'excelToPdf')">Excel转PDF</button>
+                    <button class="sub-tab-button" onclick="selectSubTab(this, 'pptToPdf')">PPT转PDF</button>
+                    <button class="sub-tab-button" onclick="selectSubTab(this, 'txtToPdf')">TXT转PDF</button>
+                </div>
+            </div>
 
-    <div class="content-area" onclick="document.getElementById('fileUpload').click();" id="dropZone">
-        <p>点击添加文件 或 拖拽至此区域</p>
-        <input type="file" id="fileUpload" multiple style="display: none;" onchange="handleFiles(this.files)">
-        {% csrf_token %}
-    </div>
-    
-    <ul id="fileList"></ul>
+            <div id="pdfToFileContent" class="tab-content hidden">
+                <div class="sub-tabs">
+                    <button class="sub-tab-button active" onclick="selectSubTab(this, 'pdfToWord')">PDF转Word</button>
+                    <button class="sub-tab-button" onclick="selectSubTab(this, 'pdfToExcel')">PDF转Excel</button>
+                    <button class="sub-tab-button" onclick="selectSubTab(this, 'pdfToPpt')">PDF转PPT</button>
+                    <button class="sub-tab-button" onclick="selectSubTab(this, 'pdfToTxt')">PDF转TXT</button>
+                </div>
+            </div>
 
-    <div class="action-buttons">
-        <div class="left-buttons" style="display: flex; flex-direction: column; align-items: flex-start;">
-            <div style="display: flex; align-items: center;">
-                <button type="button" onclick="document.getElementById('fileUpload').click();"><i class="fas fa-plus" style="margin-right: 5px;"></i> 添加文件</button> {# Example with icon, requires FontAwesome #}
-                <button type="button" onclick="clearFileList()" style="margin-left: 10px;"><i class="fas fa-trash-alt" style="margin-right: 5px;"></i> 清空列表</button>
+            <div class="content-area" onclick="document.getElementById('fileUpload').click();" id="dropZone">
+                <p>点击添加文件 或 拖拽至此区域</p>
+                <input type="file" id="fileUpload" multiple style="display: none;" onchange="handleFiles(this.files)">
+                {% csrf_token %}
+            </div>
+            
+            <ul id="fileList"></ul>
+
+            <div class="action-buttons">
+                <div class="left-buttons" style="display: flex; flex-direction: column; align-items: flex-start;">
+                    <div style="display: flex; align-items: center;">
+                        <button type="button" onclick="document.getElementById('fileUpload').click();"><i class="fas fa-plus" style="margin-right: 5px;"></i> 添加文件</button> {# Example with icon, requires FontAwesome #}
+                        <button type="button" onclick="clearFileList()" style="margin-left: 10px;"><i class="fas fa-trash-alt" style="margin-right: 5px;"></i> 清空列表</button>
+                        
+                        <!-- PDF to Word Mode Options (Radio Group and Merge Checkbox) - Hidden by default -->
+                        <div id="pdfToWordOptions" class="hidden" style="margin-left: 20px; display: flex; align-items: baseline; gap: 15px;">
+                            <div class="radio-button-group" style="display: flex; flex-direction: column; gap: 5px;">
+                                <label style="font-size: 0.9em; cursor:pointer; display: flex; align-items: center;"><input type="radio" name="pdfToWordMode" value="pdf2docx" checked style="margin-right: 5px;"> 使用pdf2docx（默认）</label>
+                                <label style="font-size: 0.9em; cursor:pointer; display: flex; align-items: center;"><input type="radio" name="pdfToWordMode" value="libreoffice" style="margin-right: 5px;"> 使用Office转换方式</label>
+                            </div>
+                        </div>
+
+                        <!-- PDF to Excel Mode Options (Radio Group and Merge Checkbox) - Hidden by default -->
+                        <div id="pdfToExcelOptions" class="hidden" style="margin-left: 20px; display: flex; align-items: baseline; gap: 15px;">
+                            <div class="radio-button-group" style="display: flex; flex-direction: column; gap: 5px;">
+                                <label style="font-size: 0.9em; cursor:pointer; display: flex; align-items: center;"><input type="radio" name="pdfToExcelMode" value="pdfplumber" checked style="margin-right: 5px;"> 使用pdfplumber（默认）</label>
+                            </div>
+                        </div>
+
+                        <!-- PDF to TXT Mode Options (Radio Group and Merge Checkbox) - Hidden by default -->
+                        <div id="pdfToTxtOptions" class="hidden" style="margin-left: 20px; display: flex; align-items: baseline; gap: 15px;">
+                            <div class="radio-button-group" style="display: flex; flex-direction: column; gap: 5px;">
+                                <label style="font-size: 0.9em; cursor:pointer; display: flex; align-items: center;"><input type="radio" name="pdfToTxtMode" value="pymupdf" checked style="margin-right: 5px;"> 使用PyMuPDF（默认）</label>
+                            </div>
+                        </div>
+
+                        <!-- PDF to PPT Mode Options (Radio Group and Merge Checkbox) - Hidden by default -->
+                        <div id="pdfToPptOptions" class="hidden" style="margin-left: 20px; display: flex; align-items: baseline; gap: 15px;">
+                            <div class="radio-button-group" style="display: flex; flex-direction: column; gap: 5px;">
+                                <label style="font-size: 0.9em; cursor:pointer; display: flex; align-items: center;"><input type="radio" name="pdfToPptMode" value="screenshot" checked style="margin-right: 5px;"> 使用截图方式</label>
+                                <label style="font-size: 0.9em; cursor:pointer; display: flex; align-items: center;"><input type="radio" name="pdfToPptMode" value="libreoffice" style="margin-right: 5px;"> 使用Office转换方式</label>
+                            </div>
+                        </div>
+
+                        <!-- Common Merge Checkbox for all PDF conversions - Hidden by default -->
+                        <div id="pdfMergeOption" class="hidden" style="margin-left: 20px;">
+                            <label style="display: flex; align-items: center; font-size: 0.9em; font-weight: normal; cursor:pointer;">
+                                <input type="checkbox" id="mergeOutputCheckbox" checked style="margin-right: 8px; cursor:pointer; transform: scale(1.1);">
+                                合并为一个文件
+                            </label>
+                        </div>
+                    </div>
+                    <div id="fileUploadTips" style="font-size: 0.85em; color: #6c757d; margin-top: 10px;">
+                        提示：最多选择10个文件，单个文件不超过10MB。
+                    </div>
+                </div>
                 
-                <!-- PDF to Word Mode Options (Radio Group and Merge Checkbox) - Hidden by default -->
-                <div id="pdfToWordOptions" class="hidden" style="margin-left: 20px; display: flex; align-items: baseline; gap: 15px;">
-                    <div class="radio-button-group" style="display: flex; flex-direction: column; gap: 5px;">
-                        <label style="font-size: 0.9em; cursor:pointer; display: flex; align-items: center;"><input type="radio" name="pdfToWordMode" value="pdf2docx" checked style="margin-right: 5px;"> 使用pdf2docx（默认）</label>
-                        <label style="font-size: 0.9em; cursor:pointer; display: flex; align-items: center;"><input type="radio" name="pdfToWordMode" value="libreoffice" style="margin-right: 5px;"> 使用Office转换方式</label>
-                    </div>
-                </div>
-
-                <!-- PDF to Excel Mode Options (Radio Group and Merge Checkbox) - Hidden by default -->
-                <div id="pdfToExcelOptions" class="hidden" style="margin-left: 20px; display: flex; align-items: baseline; gap: 15px;">
-                    <div class="radio-button-group" style="display: flex; flex-direction: column; gap: 5px;">
-                        <label style="font-size: 0.9em; cursor:pointer; display: flex; align-items: center;"><input type="radio" name="pdfToExcelMode" value="pdfplumber" checked style="margin-right: 5px;"> 使用pdfplumber（默认）</label>
-                    </div>
-                </div>
-
-                <!-- PDF to TXT Mode Options (Radio Group and Merge Checkbox) - Hidden by default -->
-                <div id="pdfToTxtOptions" class="hidden" style="margin-left: 20px; display: flex; align-items: baseline; gap: 15px;">
-                    <div class="radio-button-group" style="display: flex; flex-direction: column; gap: 5px;">
-                        <label style="font-size: 0.9em; cursor:pointer; display: flex; align-items: center;"><input type="radio" name="pdfToTxtMode" value="pymupdf" checked style="margin-right: 5px;"> 使用PyMuPDF（默认）</label>
-                    </div>
-                </div>
-
-                <!-- PDF to PPT Mode Options (Radio Group and Merge Checkbox) - Hidden by default -->
-                <div id="pdfToPptOptions" class="hidden" style="margin-left: 20px; display: flex; align-items: baseline; gap: 15px;">
-                    <div class="radio-button-group" style="display: flex; flex-direction: column; gap: 5px;">
-                        <label style="font-size: 0.9em; cursor:pointer; display: flex; align-items: center;"><input type="radio" name="pdfToPptMode" value="screenshot" checked style="margin-right: 5px;"> 使用截图方式</label>
-                        <label style="font-size: 0.9em; cursor:pointer; display: flex; align-items: center;"><input type="radio" name="pdfToPptMode" value="libreoffice" style="margin-right: 5px;"> 使用Office转换方式</label>
-                    </div>
-                </div>
-
-                <!-- Common Merge Checkbox for all PDF conversions - Hidden by default -->
-                <div id="pdfMergeOption" class="hidden" style="margin-left: 20px;">
-                    <label style="display: flex; align-items: center; font-size: 0.9em; font-weight: normal; cursor:pointer;">
-                        <input type="checkbox" id="mergeOutputCheckbox" checked style="margin-right: 8px; cursor:pointer; transform: scale(1.1);">
-                        合并为一个文件
-                    </label>
+                <div class="right-buttons">
+                    <button type="button" id="startConversionBtn">开始转换 <i class="fas fa-arrow-right" style="margin-left: 5px;"></i></button>
                 </div>
             </div>
-            <div id="fileUploadTips" style="font-size: 0.85em; color: #6c757d; margin-top: 10px;">
-                提示：最多选择10个文件，单个文件不超过10MB。
+
+            <div class="converted-files-container">
+                <h3>转换结果</h3>
+                <div id="convertedFilesTableContainer">
+                    <!-- Table will be inserted here by JavaScript -->
+                </div>
             </div>
         </div>
-        
-        <div class="right-buttons">
-            <button type="button" id="startConversionBtn">开始转换 <i class="fas fa-arrow-right" style="margin-left: 5px;"></i></button>
+
+        <div id="videoAnalysisContent" class="converter-container" style="display: none;">
+            <div class="main-tabs-container">
+                 <h1 class="page-title">视频分析</h1>
+            </div>
+            
+            <div class="form-group">
+                <label for="videoUrl">视频URL:</label>
+                <input type="text" id="videoUrl" name="videoUrl" placeholder="例如: https://www.youtube.com/watch?v=...">
+            </div>
+
+            <p style="text-align: center; margin: 15px 0; font-weight: 500;">或者</p>
+
+            <div id="videoFileDropArea" class="video-drop-area">
+                <input type="file" id="videoFileUpload" accept="video/*" hidden>
+                <p>点击或拖拽视频文件到此区域</p>
+            </div>
+            <ul id="videoFileList" style="list-style-type: none; padding: 0; margin-bottom: 15px;">
+                <!-- Uploaded video file will be listed here -->
+            </ul>
+            
+            <div class="action-buttons">
+                <button onclick="startVideoAnalysis()">提取PPT</button>
+            </div>
+
+            <!-- Progress Bar for video analysis (optional) -->
+            <div class="progress-bar-container" id="videoProgressBarContainer">
+                <div class="progress-bar" id="videoProgressBar">0%</div>
+            </div>
+
+            <!-- Results for video analysis -->
+            <div id="videoConversionResults" style="margin-top: 20px;">
+                <h4>分析结果:</h4>
+                <ul id="videoResultList"></ul>
+            </div>
         </div>
-    </div>
 
-    <div class="converted-files-container">
-        <h3>转换结果</h3>
-        <div id="convertedFilesTableContainer">
-            <!-- Table will be inserted here by JavaScript -->
-        </div>
-    </div>
-</div>
+    </div> <!-- main-content-wrapper -->
+</div> <!-- page-layout-container -->
 
-{# Assuming your base.html includes FontAwesome, otherwise the icons won't show #}
-{# If not, you can add this in base.html or here (but base is better): #}
-{# <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css"> #}
+{% endblock %}
 
+{% block extra_scripts %}
 <script>
     let currentSelectedMainTab = 'imgToFile'; 
     let currentSelectedSubTab = 'imgToWord'; 
     let isConverting = false;
     const uploadedFiles = []; 
+    let uploadedVideoFile = null; // For single video file
 
     // --- NEW --- Helper function to disable/enable main tab buttons
     function updateMainTabButtonsState(disableNonActive) {
@@ -921,6 +1140,205 @@
         }
         renderFileList(); // Initialize file list rendering
     });
+
+    // Video Analysis Section JS
+    document.getElementById('videoFileDropArea').addEventListener('click', () => {
+        document.getElementById('videoFileUpload').click();
+    });
+
+    document.getElementById('videoFileDropArea').addEventListener('dragover', (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        event.currentTarget.style.backgroundColor = '#eaf5ff';
+    });
+
+    document.getElementById('videoFileDropArea').addEventListener('dragleave', (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        event.currentTarget.style.backgroundColor = '#f8f9faff';
+    });
+
+    document.getElementById('videoFileDropArea').addEventListener('drop', (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        event.currentTarget.style.backgroundColor = '#f8f9faff';
+        const files = event.dataTransfer.files;
+        if (files.length > 0) {
+            handleVideoFile(files[0]); // Handle only the first file for video
+        }
+    });
+
+    document.getElementById('videoFileUpload').addEventListener('change', (event) => {
+        const files = event.target.files;
+        if (files.length > 0) {
+            handleVideoFile(files[0]);
+        }
+        event.target.value = ''; // Reset file input
+    });
+
+    function handleVideoFile(file) {
+        const videoFileList = document.getElementById('videoFileList');
+        const maxSizeMB = 100; // Example: Max 100MB for video, adjust as needed
+        const maxSizeBytes = maxSizeMB * 1024 * 1024;
+
+        if (!file.type.startsWith('video/')) {
+            showVideoErrorMessage(`请上传有效的视频文件。`);
+            return;
+        }
+
+        if (file.size > maxSizeBytes) {
+            showVideoErrorMessage(`视频文件 "${file.name}" 大小不能超过 ${maxSizeMB}MB。`);
+            return;
+        }
+
+        uploadedVideoFile = file;
+        videoFileList.innerHTML = ''; // Clear previous, only one video
+        const listItem = document.createElement('li');
+        listItem.style.backgroundColor = "#e9ecef";
+        listItem.style.padding = "8px 12px";
+        listItem.style.borderRadius = "4px";
+        listItem.textContent = `已选视频: ${file.name}`;
+        videoFileList.appendChild(listItem);
+        showVideoErrorMessage(''); // Clear any previous error
+    }
+
+    function startVideoAnalysis() {
+        const videoUrl = document.getElementById('videoUrl').value.trim();
+        
+        if (!videoUrl && !uploadedVideoFile) {
+            showVideoErrorMessage('请输入视频URL或上传一个视频文件。');
+            return;
+        }
+        if (videoUrl && uploadedVideoFile) {
+            showVideoErrorMessage('请只提供视频URL或上传文件，不要同时提供两者。');
+            return;
+        }
+
+        showVideoErrorMessage(''); // Clear previous errors
+        document.getElementById('videoResultList').innerHTML = ''; // Clear previous results
+        showVideoProgressBar();
+
+        const formData = new FormData();
+        if (videoUrl) {
+            formData.append('video_url', videoUrl);
+        }
+        if (uploadedVideoFile) {
+            formData.append('video_file', uploadedVideoFile);
+        }
+        // Add CSRF token if not already handled globally or by middleware
+        const csrfToken = document.querySelector('[name=csrfmiddlewaretoken]') ? document.querySelector('[name=csrfmiddlewaretoken]').value : '{{ csrf_token }}';
+        if (csrfToken) {
+             formData.append('csrfmiddlewaretoken', csrfToken);
+        } else {
+            console.warn("CSRF token not found. Ensure it is available in the template as {{ csrf_token }} or in a meta tag.");
+            // Depending on server setup, requests might fail without CSRF token
+        }
+       
+        // Add a unique request ID for tracking (optional, backend might generate its own)
+        const clientRequestId = 'vid-' + Date.now() + '-' + Math.random().toString(36).substring(2, 8);
+        formData.append('client_request_id', clientRequestId);
+
+        fetch("{% url 'converter:process_video' %}", { 
+            method: 'POST',
+            body: formData,
+            headers: {
+                'X-Requested-With': 'XMLHttpRequest', // Standard header for AJAX requests
+                'X-Request-ID': clientRequestId // Send client-generated request ID
+            }
+        })
+        .then(response => {
+            if (!response.ok) {
+                // Try to parse error from JSON if possible
+                return response.json().then(errData => {
+                    throw new Error(errData.error || `服务器错误: ${response.status}`);
+                }).catch(() => {
+                    // Fallback if error response is not JSON
+                    throw new Error(`服务器响应错误: ${response.status} ${response.statusText}`);
+                });
+            }
+            return response.json();
+        })
+        .then(data => {
+            updateVideoProgressBar(100); // Mark as 100% on receiving response
+            if (data.success && data.output_file_url) {
+                document.getElementById('videoResultList').innerHTML = 
+                    `<li>${data.message || '视频处理成功'}: <a href="${data.output_file_url}" download="${data.output_file_name}">${data.output_file_name}</a> (请求ID: ${data.request_id || clientRequestId})</li>`;
+                const progressBar = document.getElementById('videoProgressBar');
+                progressBar.style.backgroundColor = '#28a745';
+                progressBar.textContent = '完成!';
+            } else {
+                throw new Error(data.error || '视频处理失败，但未收到明确错误信息。');
+            }
+        })
+        .catch(error => {
+            console.error('Video analysis error:', error);
+            showVideoErrorMessage('视频分析请求失败: ' + error.message);
+            const progressBar = document.getElementById('videoProgressBar');
+            progressBar.style.width = '100%';
+            progressBar.style.backgroundColor = '#dc3545';
+            progressBar.textContent = '错误';
+        });
+    }
+
+    function showVideoErrorMessage(message) {
+        // For simplicity, reusing existing error display or create a new one for video
+        // For now, let's use an alert for quick feedback
+        if (message) alert(`视频分析错误: ${message}`);
+        // Or, target a specific div:
+        // const errorDiv = document.getElementById('videoErrorMessages');
+        // if (errorDiv) errorDiv.textContent = message;
+    }
+    
+    function showVideoProgressBar() {
+        const progressBar = document.getElementById('videoProgressBar');
+        const progressBarContainer = document.getElementById('videoProgressBarContainer');
+        progressBarContainer.style.display = 'block';
+        progressBar.style.width = '0%';
+        progressBar.textContent = '0%';
+        progressBar.style.backgroundColor = '#007bff';
+    }
+
+    function updateVideoProgressBar(percentage) {
+        const progressBar = document.getElementById('videoProgressBar');
+        progressBar.style.width = percentage + '%';
+        progressBar.textContent = percentage + '%';
+    }
+
+    function hideVideoProgressBar() {
+        const progressBarContainer = document.getElementById('videoProgressBarContainer');
+        // progressBarContainer.style.display = 'none'; // Keep it visible with "Done!" or "Error"
+    }
+
+    // Sidebar Navigation
+    function selectMainNavigation(navId) {
+        // Hide all content sections
+        document.getElementById('docConversionContent').style.display = 'none';
+        document.getElementById('videoAnalysisContent').style.display = 'none';
+        // Potentially hide other future sections here
+
+        // Deactivate all nav buttons
+        document.querySelectorAll('.sidebar-nav li button').forEach(button => {
+            button.classList.remove('active');
+        });
+
+        // Activate selected nav button and show content
+        if (navId === 'docConversion') {
+            document.getElementById('docConversionContent').style.display = 'block';
+            document.getElementById('navDocConversion').classList.add('active');
+            // Default to the 'imgToFile' main tab and its first sub-tab when '文档转换' is selected
+            showTab('imgToFile'); 
+        } else if (navId === 'videoAnalysis') {
+            document.getElementById('videoAnalysisContent').style.display = 'block';
+            document.getElementById('navVideoAnalysis').classList.add('active');
+        }
+        // Add else if for 'imageAnalysis', 'voiceAnalysis' when implemented
+    }
+
+    function updateFileUploadTips() {
+        const tipsElement = document.getElementById('fileUploadTips');
+        const maxFiles = 10;
+        tipsElement.textContent = `提示: 最多选择${maxFiles}个文件 (${uploadedFiles.length}/${maxFiles}已选), 单个文件不超过10MB。`;
+    }
 
 </script>
 {% endblock %} 

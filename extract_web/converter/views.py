@@ -9,6 +9,7 @@ import subprocess # For running the script
 from django.contrib import messages # 新增导入
 from django.http import JsonResponse, FileResponse, Http404
 from django.views.decorators.http import require_POST # To restrict to POST requests
+from django.views.decorators.csrf import csrf_exempt # <<< Import csrf_exempt
 import random
 import string
 import traceback # 新增导入 for detailed exception logging
@@ -1071,20 +1072,88 @@ def download_converted_file_view(request, username, date_str, filename):
     # Security check: Ensure the logged-in user matches the username in the URL
     # or the logged-in user is a superuser.
     if not (request.user.username == username or request.user.is_superuser):
+        logger.warning(f"Permission denied for user {request.user.username} trying to download file for user {username}.")
         raise PermissionDenied("您没有权限下载此文件。")
 
     # Construct the full path to the file
     # Ensure to use settings.BASE_DIR or another secure base path for `his_pic`
     file_path = os.path.join(settings.BASE_DIR, 'his_pic', username, date_str, 'converted_files', filename)
     
-    logger.debug(f"Download request for user {request.user.username} (URL username: {username}): {file_path}")
+    logger.debug(f"Attempting to serve file: {file_path} for user {request.user.username}")
 
-    if os.path.exists(file_path) and os.path.isfile(file_path):
+    if os.path.exists(file_path):
         try:
             return FileResponse(open(file_path, 'rb'), as_attachment=True, filename=filename)
         except Exception as e:
-            logger.error(f"Error serving file {file_path} for download: {e}", exc_info=True)
+            logger.error(f"Error serving file {file_path}: {e}", exc_info=True)
             raise Http404("下载文件时发生错误。")
     else:
         logger.error(f"File not found for download by {request.user.username}: {file_path}")
         raise Http404("文件未找到。")
+
+@csrf_exempt # Ensure CSRF exemption if you test directly without a form including {% csrf_token %}
+@require_POST
+def process_video_view(request):
+    request_id = request.META.get('HTTP_X_REQUEST_ID')
+    logger.info(f"Received request for video processing. Request ID: {request_id}")
+    try:
+        video_url = request.POST.get('video_url')
+        video_file = request.FILES.get('video_file')
+        # action = request.POST.get('action') # e.g., 'analyze_video_to_ppt'
+
+        logger.info(f"Video processing parameters for Request ID {request_id}: URL='{video_url}', File='{video_file.name if video_file else None}'")
+
+        # Simulate processing delay and success
+        # In a real scenario, this would trigger a Celery task for video analysis
+        time.sleep(5) # Simulate work being done
+
+        # Simulate a successful outcome with a dummy file
+        # This file won't actually exist, but it mimics the expected response structure
+        output_file_name = f"extracted_video_presentation_{request_id[:6]}.pptx"
+        # IMPORTANT: For actual file serving, you'd save this to a user-specific, date-specific, or request-specific temporary folder
+        # and provide a secure download link similar to download_converted_file_view or download_file_view.
+        # For this simulation, we just provide a conceptual URL.
+        dummy_output_folder = os.path.join(settings.MEDIA_ROOT, 'temp_files') # Ensure MEDIA_ROOT is configured
+        os.makedirs(dummy_output_folder, exist_ok=True)
+        # Create a placeholder file to make the download link somewhat functional if MEDIA_URL is set up
+        with open(os.path.join(dummy_output_folder, output_file_name), 'w') as f:
+            f.write("This is a simulated PPTX file.")
+        
+        output_file_url = os.path.join(settings.MEDIA_URL, 'temp_files', output_file_name) 
+
+        logger.info(f"Video processing simulation complete for Request ID {request_id}. Output: {output_file_name}")
+
+        return JsonResponse({
+            "success": True,
+            "message": "视频PPT提取成功 (模拟)",
+            "output_file_url": output_file_url,
+            "output_file_name": output_file_name,
+            "request_id": request_id
+        })
+
+    except Exception as e:
+        logger.error(f"Error in process_video_view (Request ID: {request_id}): {e}", exc_info=True)
+        return JsonResponse({"success": False, "error": str(e), "request_id": request_id}, status=500)
+
+# Celery task status check view (if you integrate Celery later)
+@login_required
+def check_task_status_view(request, task_id):
+    # Placeholder implementation
+    # In a real scenario, you would query your task queue (e.g., Celery) for the task status.
+    logger.info(f"Checking status for task_id: {task_id}. User: {request.user.username}")
+    
+    # Simulate some possible states
+    # This is highly dependent on how you implement tasks
+    if task_id.startswith("sim_success_"):
+        return JsonResponse({"task_id": task_id, "status": "SUCCESS", "result": {"message": "Task completed successfully!", "output_url": "/media/dummy_output.zip"}})
+    elif task_id.startswith("sim_pending_"):
+        return JsonResponse({"task_id": task_id, "status": "PENDING", "result": {"message": "Task is waiting to be processed."}})
+    elif task_id.startswith("sim_processing_"):
+        return JsonResponse({"task_id": task_id, "status": "PROCESSING", "result": {"message": "Task is currently being processed.", "progress": 50}})
+    elif task_id.startswith("sim_failure_"):
+        return JsonResponse({"task_id": task_id, "status": "FAILURE", "result": {"message": "Task failed to complete."}})
+    else:
+        # Default: Simulate task not found or still processing for a generic ID
+        # You might want to return a 404 if the task ID is definitively not found
+        logger.warning(f"Task ID {task_id} not found or status unknown (placeholder). Returning as PENDING.")
+        return JsonResponse({"task_id": task_id, "status": "PENDING", "message": "Status unknown or task not found (placeholder response)."})

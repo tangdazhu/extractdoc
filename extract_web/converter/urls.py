@@ -21,6 +21,10 @@ urlpatterns = [
     # 旧的 process_images 端点 - 现在指向一个废弃提示视图
     # 客户端应更新为使用上述新的API端点。
     path("process-images/", views.process_images_view, name="process_images"),
+    path("check_task_status/<str:task_id>/", views.check_task_status_view, name="check_task_status"),
+    path("download_file/<str:request_id>/<str:filename>/", views.download_converted_file_view, name="download_file"),
+    # path('api/analyze_document', views.analyze_document_view, name='analyze_document'),  # Example for a potential new API endpoint
+    path("process_video/", views.process_video_view, name="process_video"), # New URL for video processing
     
     path("history/", views.conversion_history_view, name="conversion_history"),
     path("delete-converted-file/<str:date_str>/<str:filename>/", views.delete_converted_file_view, name="delete_converted_file"),
