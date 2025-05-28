@@ -25,10 +25,10 @@ from .pic_file_converter import process_images_to_files # 导入图片转文件�
 from .excel_pdf_converter import convert_excel_to_pdf # 导入Excel转换模块
 from .txt_to_pdf_converter import convert_txt_to_pdf
 from .pdf_to_excel_converter import convert_pdf_to_excel
-from .pdf_to_word_converter import convert_pdf_to_word
+from .pdf_to_word_converter import convert_pdf_to_word, convert_and_merge_pdfs_to_docx
 # Add new imports for PDF to X converters
-from .pdf_to_ppt_converter import convert_pdf_to_ppt
-from .pdf_to_txt_converter import convert_pdf_to_txt
+from .pdf_to_ppt_converter import convert_pdf_to_ppt, convert_and_merge_pdfs_to_pptx
+from .pdf_to_txt_converter import convert_pdf_to_txt, convert_and_merge_pdfs_to_txt
 from .libreoffice_converter import convert_to_pdf as convert_to_pdf_libreoffice # Import LO converter
 from .word_to_pdf_converter import convert_word_to_pdf # ADDED: Import for the new Word to PDF converter
 from django.core.exceptions import PermissionDenied # For security checks
@@ -555,17 +555,43 @@ def process_images_view(request):
 
                 try:
                     if sub_tab == 'pdfToWord' and first_file_ext == '.docx':
-                        merge_success, merge_message = merge_docx_files(files_to_merge_paths, merged_output_path)
+                        original_pdf_sources = [f['path'] for f in uploaded_files_info_from_frontend if f.get('path') and os.path.splitext(f['name'])[1].lower() == '.pdf']
+                        if original_pdf_sources and hasattr(settings, 'CONVERSION_MODES'): # Check if pdf_to_word_mode would be available
+                            merge_success, merge_message = convert_and_merge_pdfs_to_docx(original_pdf_sources, merged_output_path, request_id, mode=pdf_to_word_mode)
+                        elif not original_pdf_sources:
+                            merge_success = False
+                            merge_message = "Could not find original PDF files to merge for DOCX output."
+                        else:
+                            merge_success = False
+                            merge_message = "PDF to Word conversion mode not available for merging."
+
                     elif sub_tab == 'pdfToPpt' and first_file_ext == '.pptx':
-                        merge_success, merge_message = merge_pptx_files(files_to_merge_paths, merged_output_path)
+                        original_pdf_sources = [f['path'] for f in uploaded_files_info_from_frontend if f.get('path') and os.path.splitext(f['name'])[1].lower() == '.pdf']
+                        if original_pdf_sources and hasattr(settings, 'CONVERSION_MODES'): # Check if pdf_to_ppt_mode would be available
+                            merge_success, merge_message = convert_and_merge_pdfs_to_pptx(original_pdf_sources, merged_output_path, request_id, ppt_creation_mode=pdf_to_ppt_mode)
+                        elif not original_pdf_sources:
+                            merge_success = False
+                            merge_message = "Could not find original PDF files to merge for PPTX output."
+                        else:
+                            merge_success = False
+                            merge_message = "PDF to PPT conversion mode not available for merging."
+
                     elif sub_tab == 'pdfToTxt' and first_file_ext == '.txt':
-                        merge_success, merge_message = merge_text_files(files_to_merge_paths, merged_output_path)
-                    # Note: Merging Excel files is complex and often not practical this way. 
-                    # For now, we won't implement merging for pdfToExcel.
-                    # If other mergeable types are added to pdfToFile, add their logic here.
+                        original_pdf_sources = [f['path'] for f in uploaded_files_info_from_frontend if f.get('path') and os.path.splitext(f['name'])[1].lower() == '.pdf']
+                        if original_pdf_sources and hasattr(settings, 'CONVERSION_MODES'): # Check if pdf_to_txt_mode would be available
+                             merge_success, merge_message = convert_and_merge_pdfs_to_txt(original_pdf_sources, merged_output_path, request_id, mode=pdf_to_txt_mode)
+                        elif not original_pdf_sources:
+                            merge_success = False
+                            merge_message = "Could not find original PDF files to merge for TXT output."
+                        else:
+                            merge_success = False
+                            merge_message = "PDF to TXT conversion mode not available for merging."
                     else:
                         logger.info(f"Merge requested for {sub_tab}, but merging for {first_file_ext} is not supported or only one file. Skipping merge. RequestID: {request_id}")
                         # Not an error, just don't merge. The individual files are still available.
+                        # To prevent issues, ensure merge_success is False if no merge action is taken.
+                        merge_success = False 
+                        merge_message = f"Merging for {first_file_ext} from {sub_tab} is not implemented in this block."
 
                     if merge_success:
                         logger.info(f"pdfToFile/{sub_tab}: Successfully merged {len(files_to_merge_paths)} files into '{merged_filename}'. RequestID: {request_id}")
