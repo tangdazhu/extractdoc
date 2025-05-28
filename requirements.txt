@@ -7,24 +7,46 @@ pillow==10.3.0          # Image processing
 numpy==1.26.4           # Numerical computing support for paddleocr
 protobuf==3.20.3        # Protocol Buffers, dependency for paddleocr
 
-# Document Processing
+# PDF Processing
+PyMuPDF>=1.23.0         # PDF text extraction and manipulation (fitz)
+pdfplumber>=0.10.0      # Extract text and tables from PDF files (primary method for PDF→Excel)
+pdf2docx>=0.5.0         # Convert PDF files to Word (.docx)
+PyPDF2==3.0.1           # PDF manipulation (merging, splitting, etc.)
+
+# Word Document Processing
 python-docx==1.1.2      # Word document (.docx) generation and manipulation
 docx2pdf==0.1.8         # Convert Word documents to PDF (requires MS Office or LibreOffice)
-PyPDF2==3.0.1           # PDF manipulation (merging, splitting, etc.)
-pdfplumber>=0.10.0      # Extract text and tables from PDF files
-pdf2docx>=0.5.0         # Convert PDF files to Word (.docx)
 
 # Excel Processing
 openpyxl==3.1.5         # Read and write Excel files (.xlsx)
-reportlab==4.4.1        # PDF generation, used for TXT to PDF and potentially table rendering
 
-# PPT Processing (Windows COM specific)
-comtypes==1.4.11        # Windows COM interface, for Office automation (e.g., PowerPoint)
+# PowerPoint Processing
+python-pptx>=0.6.21     # Create and modify PowerPoint presentations
+comtypes==1.4.11        # Windows COM interface, for Office automation (Windows only)
+
+# PDF Generation and Reporting
+reportlab==4.4.1        # PDF generation, used for TXT→PDF and Excel→PDF conversion
 
 # Configuration and Parsing
 PyYAML==6.0.1           # YAML configuration file parsing
 beautifulsoup4==4.12.3  # HTML parsing (used for OCR HTML table output)
 
-# Notes on Optional Dependencies:
-# - LibreOffice: For cross-platform Office document conversion (requires separate installation).
-# - Microsoft Office: For native Office support on Windows (requires separate installation). 
+# Testing Dependencies (Development)
+pytest>=7.4.0           # Testing framework
+pytest-django>=4.5.2    # Django integration for pytest
+
+# Notes on External Dependencies:
+# - LibreOffice: For Office document conversion (optional, requires separate installation)
+#   * Used for: PDF→Word, PDF→PPT (alternative methods)
+#   * Installation: Download from https://www.libreoffice.org/
+#   * Command: soffice (must be in system PATH)
+# 
+# - Microsoft Office: For native Office support on Windows (optional)
+#   * Used for: Enhanced Office document processing
+#   * Requires: Microsoft Office installation
+#
+# Conversion Method Priorities:
+# - PDF→Excel: pdfplumber (primary), LibreOffice (fallback, often unavailable)
+# - PDF→Word: pdf2docx (primary), LibreOffice (fallback)
+# - PDF→PPT: python-pptx screenshot method (primary), LibreOffice (fallback)
+# - PDF→TXT: PyMuPDF (primary), LibreOffice (fallback, removed from UI) 
