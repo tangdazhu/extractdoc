@@ -3,6 +3,10 @@
 """
 依赖项安装和检查脚本
 用于检查和安装文本转换器项目的所有依赖项
+新用户: 使用 install_dependencies.py 进行首次安装
+日常开发: 使用 pip install -r requirements.txt 更新依赖
+生产部署: 使用 install_dependencies.py 进行环境初始化
+现在你可以使用刚创建的 start_project.bat 文件来启动项目，它会自动处理LibreOffice路径冲突问题！
 """
 
 import subprocess
