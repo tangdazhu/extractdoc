@@ -1,4 +1,4 @@
-# Django Web应用：extract_web - 文件转换与处理平台
+# Django Web应用：OmniAI Transform Studio - 智能文档转换工作室
 
 本项目是一个基于 Django 框架构建的 Web 应用程序，旨在提供一个用户友好的界面，用于多种文件格式之间的转换和处理。它是早期命令行脚本 `extract_text_from_images.py` 的功能扩展和Web化。
 

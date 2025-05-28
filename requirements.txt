@@ -35,6 +35,13 @@ beautifulsoup4==4.12.3  # HTML parsing (used for OCR HTML table output)
 pytest>=7.4.0           # Testing framework
 pytest-django>=4.5.2    # Django integration for pytest
 
+# AI Large Language Model Integration
+requests>=2.32.0        # HTTP requests for AI API calls (already included in Django deps)
+openai>=1.54.0          # OpenAI GPT models API client
+anthropic>=0.40.0       # Anthropic Claude models API client  
+dashscope>=1.20.0       # Alibaba Qwen models API client
+ollama>=0.4.0           # Local LLM client (Ollama)
+
 # Notes on External Dependencies:
 # - LibreOffice: For Office document conversion (optional, requires separate installation)
 #   * Used for: PDF→Word, PDF→PPT (alternative methods)
