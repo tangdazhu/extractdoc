@@ -76,6 +76,192 @@ def convert_to_pdf(input_path, output_dir):
         logger.error(error_msg, exc_info=True)
         return False, error_msg, None
 
+def convert_to_pptx(input_path, output_dir):
+    """
+    Converts a document to PPTX using python-pptx library (primary) or LibreOffice (fallback).
+
+    Args:
+        input_path (str): Absolute path to the input document (e.g., a DOCX file).
+        output_dir (str): Absolute path to the directory where the PPTX should be saved.
+
+    Returns:
+        tuple: (bool_success, pptx_output_path_or_error_msg, original_pptx_filename_or_None)
+               - bool_success: True if conversion was successful, False otherwise.
+               - pptx_output_path_or_error_msg: Absolute path to the converted PPTX if successful,
+                                               or an error message string if failed.
+               - original_pptx_filename_or_None: The original filename of the PPTX as created by LibreOffice.
+    """
+    if not os.path.exists(input_path):
+        return False, f"Input file not found: {input_path}", None
+    if not os.path.isdir(output_dir):
+        return False, f"Output directory not found: {output_dir}", None
+
+    # Try Python-based PPTX creation first (more reliable)
+    logger.info(f"Attempting PPTX creation using python-pptx for: {input_path}")
+    success, result, filename = create_pptx_from_docx(input_path, output_dir)
+    
+    if success:
+        return success, result, filename
+    
+    # Fallback to LibreOffice if python-pptx fails
+    logger.warning(f"Python-pptx method failed: {result}. Trying LibreOffice fallback...")
+    
+    input_filename_stem = os.path.splitext(os.path.basename(input_path))[0]
+    expected_pptx_filename = f"{input_filename_stem}.pptx"
+    potentially_converted_pptx_path = os.path.join(output_dir, expected_pptx_filename)
+
+    if os.path.exists(potentially_converted_pptx_path):
+        try:
+            os.remove(potentially_converted_pptx_path)
+            logger.debug(f"Removed existing file before conversion: {potentially_converted_pptx_path}")
+        except OSError as e:
+            logger.error(f"Error removing existing file {potentially_converted_pptx_path}: {e}")
+            return False, f"Error removing existing file {potentially_converted_pptx_path}: {e}", None
+
+    # LibreOffice fallback - try simple direct conversion
+    command = [
+        'soffice',
+        '--headless',
+        '--convert-to', 'pptx',
+        '--outdir', output_dir,
+        input_path
+    ]
+    
+    logger.info(f"LibreOffice fallback command: {' '.join(command)}")
+    
+    try:
+        process = subprocess.run(command, capture_output=True, text=True, timeout=120, check=False)
+
+        if process.returncode == 0:
+            if os.path.exists(potentially_converted_pptx_path):
+                logger.info(f"LibreOffice successfully converted '{input_path}' to '{potentially_converted_pptx_path}'")
+                return True, potentially_converted_pptx_path, expected_pptx_filename
+            else:
+                error_message = f"LibreOffice exited successfully (code 0) but the expected output PPTX was not found: {potentially_converted_pptx_path}. stdout: {process.stdout}, stderr: {process.stderr}"
+                logger.error(error_message)
+                return False, error_message, None
+        else:
+            error_message = f"LibreOffice conversion to PPTX failed for '{input_path}'. Return code: {process.returncode}. stdout: {process.stdout}, stderr: {process.stderr}"
+            logger.error(error_message)
+            return False, error_message, None
+            
+    except FileNotFoundError:
+        error_msg = "'soffice' command not found. Please ensure LibreOffice is installed and in your system's PATH."
+        logger.error(error_msg)
+        return False, error_msg, None
+    except subprocess.TimeoutExpired:
+        error_msg = f"LibreOffice conversion to PPTX timed out for '{input_path}'."
+        logger.error(error_msg)
+        return False, error_msg, None
+    except Exception as e:
+        error_msg = f"An unexpected error occurred during LibreOffice conversion of '{input_path}' to PPTX: {e}"
+        logger.error(error_msg, exc_info=True)
+        return False, error_msg, None
+
+def create_pptx_from_docx(docx_path, output_dir):
+    """
+    Creates a PPTX file from a DOCX file using python-pptx library.
+    Reads tables and text from DOCX and creates slides in PPTX.
+    
+    Args:
+        docx_path (str): Path to the input DOCX file
+        output_dir (str): Directory where PPTX should be saved
+        
+    Returns:
+        tuple: (bool_success, pptx_output_path_or_error_msg, original_pptx_filename_or_None)
+    """
+    try:
+        from pptx import Presentation
+        from pptx.util import Inches, Pt
+        from pptx.enum.text import PP_ALIGN
+        from docx import Document
+        
+        # Read DOCX content
+        doc = Document(docx_path)
+        
+        # Create presentation
+        prs = Presentation()
+        
+        # Get filename stem for output
+        input_filename_stem = os.path.splitext(os.path.basename(docx_path))[0]
+        expected_pptx_filename = f"{input_filename_stem}.pptx"
+        output_path = os.path.join(output_dir, expected_pptx_filename)
+        
+        slide_count = 0
+        
+        # Process tables
+        for table in doc.tables:
+            # Add a new slide for each table
+            slide_layout = prs.slide_layouts[5]  # Blank layout
+            slide = prs.slides.add_slide(slide_layout)
+            slide_count += 1
+            
+            # Add title
+            title_shape = slide.shapes.title
+            if title_shape:
+                title_shape.text = f"表格 {slide_count}"
+                
+            # Calculate table dimensions
+            rows = len(table.rows)
+            cols = len(table.rows[0].cells) if rows > 0 else 0
+            
+            if rows > 0 and cols > 0:
+                # Add table to slide
+                left = Inches(1)
+                top = Inches(1.5)
+                width = Inches(8)
+                height = Inches(4)
+                
+                ppt_table = slide.shapes.add_table(rows, cols, left, top, width, height).table
+                
+                # Copy data from DOCX table to PPT table
+                for row_idx, row in enumerate(table.rows):
+                    for col_idx, cell in enumerate(row.cells):
+                        if row_idx < len(ppt_table.rows) and col_idx < len(ppt_table.rows[row_idx].cells):
+                            ppt_cell = ppt_table.rows[row_idx].cells[col_idx]
+                            ppt_cell.text = cell.text.strip()
+                            
+                            # Format header row
+                            if row_idx == 0:
+                                for paragraph in ppt_cell.text_frame.paragraphs:
+                                    for run in paragraph.runs:
+                                        run.font.bold = True
+                                        run.font.size = Pt(12)
+        
+        # Process paragraphs (if no tables found)
+        if slide_count == 0:
+            slide_layout = prs.slide_layouts[1]  # Title and content layout
+            slide = prs.slides.add_slide(slide_layout)
+            
+            title_shape = slide.shapes.title
+            content_shape = slide.placeholders[1]
+            
+            if title_shape:
+                title_shape.text = "文档内容"
+                
+            # Add paragraph content
+            text_content = []
+            for para in doc.paragraphs:
+                if para.text.strip():
+                    text_content.append(para.text.strip())
+            
+            if text_content and content_shape:
+                content_shape.text = '\n'.join(text_content)
+        
+        # Save the presentation
+        prs.save(output_path)
+        logger.info(f"Successfully created PPTX using python-pptx: {output_path}")
+        return True, output_path, expected_pptx_filename
+        
+    except ImportError as e:
+        error_msg = f"Required libraries not available for PPTX creation: {e}. Please install python-pptx and python-docx."
+        logger.error(error_msg)
+        return False, error_msg, None
+    except Exception as e:
+        error_msg = f"Error creating PPTX from DOCX '{docx_path}': {e}"
+        logger.error(error_msg, exc_info=True)
+        return False, error_msg, None
+
 if __name__ == '__main__':
     # Example usage (for testing this script directly)
     # Create dummy files and dirs for testing

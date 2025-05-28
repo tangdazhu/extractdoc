@@ -480,52 +480,63 @@ def main(input_path_arg=None, output_path_arg=None, output_format_arg='docx'): #
                         html_content = element.get("res", {}).get("html")
                         if html_content:
                             logger.info(f"检测到通用表格，自动还原为Word表格: {filename}")
+                            logger.debug(f"Table HTML content for {filename}:\n{html_content}") # DEBUG LOGGING
                             add_table_from_html_to_docx(doc, html_content)
                             doc.add_paragraph()
                             has_table = True
+                
                 if not has_table:
-                    # 没有检测到表格，按普通段落输出
-                    for element in layout_elements:
-                        if isinstance(element, dict):
-                            element_type = element.get("type", "").lower()
-                            if element_type == "text":
-                                text_content_list = element.get("res")
-                                extracted_lines = []
-                                if isinstance(text_content_list, list):
-                                    for item in text_content_list:
-                                        if isinstance(item, tuple) and len(item) == 2:
-                                            if (
-                                                isinstance(item[1], tuple)
-                                                and len(item[1]) == 2
-                                            ):
-                                                extracted_lines.append(item[1][0])
-                                            elif isinstance(item[0], str):
-                                                extracted_lines.append(item[0])
-                                        elif isinstance(item, str):
-                                            extracted_lines.append(item)
-                                elif (
-                                    isinstance(text_content_list, tuple)
-                                    and len(text_content_list) == 2
-                                    and isinstance(text_content_list[0], str)
+                    # Try to reconstruct table from coordinates
+                    is_table_detected, table_rows = reconstruct_table_from_coordinates(layout_elements, logger)
+                    
+                    if is_table_detected:
+                        logger.info(f"通过坐标重建表格结构: {filename}")
+                        add_reconstructed_table_to_docx(doc, table_rows)
+                        has_table = True
+                    else:
+                        # 没有检测到表格，按普通段落输出
+                        logger.info(f"未检测到表格结构，按段落处理: {filename}")
+                        for element in layout_elements:
+                            if isinstance(element, dict):
+                                element_type = element.get("type", "").lower()
+                                if element_type == "text":
+                                    text_content_list = element.get("res")
+                                    extracted_lines = []
+                                    if isinstance(text_content_list, list):
+                                        for item in text_content_list:
+                                            if isinstance(item, tuple) and len(item) == 2:
+                                                if (
+                                                    isinstance(item[1], tuple)
+                                                    and len(item[1]) == 2
+                                                ):
+                                                    extracted_lines.append(item[1][0])
+                                                elif isinstance(item[0], str):
+                                                    extracted_lines.append(item[0])
+                                            elif isinstance(item, str):
+                                                extracted_lines.append(item)
+                                    elif (
+                                        isinstance(text_content_list, tuple)
+                                        and len(text_content_list) == 2
+                                        and isinstance(text_content_list[0], str)
+                                    ):
+                                        extracted_lines.append(text_content_list[0])
+                                    if extracted_lines:
+                                        full_text = "\n".join(extracted_lines)
+                                        paragraphs = segment_text(full_text)
+                                        for paragraph_text in paragraphs:
+                                            doc.add_paragraph(paragraph_text)
+                            elif isinstance(element, list) and len(element) == 2:
+                                text_tuple = element[1]
+                                if (
+                                    isinstance(text_tuple, tuple)
+                                    and len(text_tuple) == 2
+                                    and isinstance(text_tuple[0], str)
                                 ):
-                                    extracted_lines.append(text_content_list[0])
-                                if extracted_lines:
-                                    full_text = "\n".join(extracted_lines)
-                                    paragraphs = segment_text(full_text)
-                                    for paragraph_text in paragraphs:
-                                        doc.add_paragraph(paragraph_text)
-                        elif isinstance(element, list) and len(element) == 2:
-                            text_tuple = element[1]
-                            if (
-                                isinstance(text_tuple, tuple)
-                                and len(text_tuple) == 2
-                                and isinstance(text_tuple[0], str)
-                            ):
-                                text_line = text_tuple[0]
-                                if text_line.strip():
-                                    paragraphs = segment_text(text_line)
-                                    for paragraph_text in paragraphs:
-                                        doc.add_paragraph(paragraph_text)
+                                    text_line = text_tuple[0]
+                                    if text_line.strip():
+                                        paragraphs = segment_text(text_line)
+                                        for paragraph_text in paragraphs:
+                                            doc.add_paragraph(paragraph_text)
 
         # If processing multiple files (not from args) and not the last image, add page break
         if not (input_path_arg and output_path_arg) and image_idx < len(image_files_to_process) - 1:
@@ -567,6 +578,160 @@ def main(input_path_arg=None, output_path_arg=None, output_format_arg='docx'): #
         logger.error(f"Error saving document '{intermediate_docx_path}': {e}", exc_info=True)
 
     logger.info("Script finished.")
+
+
+def reconstruct_table_from_coordinates(layout_elements, logger=None):
+    """
+    When PaddleOCR doesn't detect table structure, try to reconstruct it
+    based on the coordinates of text elements.
+    """
+    if logger:
+        logger.debug(f"Starting table reconstruction with {len(layout_elements) if layout_elements else 0} elements")
+    
+    if not layout_elements or len(layout_elements) < 4:
+        if logger:
+            logger.debug(f"Insufficient elements for table reconstruction: {len(layout_elements) if layout_elements else 0}")
+        return False, []
+    
+    # Extract text elements with coordinates
+    text_elements = []
+    for element in layout_elements:
+        if isinstance(element, list) and len(element) == 2:
+            coords = element[0]
+            text_info = element[1]
+            
+            if isinstance(coords, list) and len(coords) == 4 and isinstance(text_info, tuple):
+                x_center = sum(point[0] for point in coords) / 4
+                y_center = sum(point[1] for point in coords) / 4
+                text = text_info[0]
+                confidence = text_info[1]
+                
+                text_elements.append({
+                    'text': text,
+                    'x': x_center,
+                    'y': y_center,
+                    'confidence': confidence,
+                    'coords': coords
+                })
+    
+    if logger:
+        logger.debug(f"Extracted {len(text_elements)} valid text elements for table analysis")
+        for i, elem in enumerate(text_elements[:10]):
+            logger.debug(f"Element {i}: '{elem['text']}' at ({elem['x']:.1f}, {elem['y']:.1f})")
+    
+    if len(text_elements) < 4:
+        if logger:
+            logger.debug(f"Insufficient valid text elements: {len(text_elements)}")
+        return False, []
+    
+    # Sort by Y coordinate to group into rows
+    text_elements.sort(key=lambda x: x['y'])
+    
+    # Group elements into rows based on Y coordinate proximity
+    rows = []
+    current_row = [text_elements[0]]
+    row_y_threshold = 15
+    
+    for element in text_elements[1:]:
+        if abs(element['y'] - current_row[0]['y']) <= row_y_threshold:
+            current_row.append(element)
+        else:
+            current_row.sort(key=lambda x: x['x'])
+            rows.append(current_row)
+            current_row = [element]
+    
+    if current_row:
+        current_row.sort(key=lambda x: x['x'])
+        rows.append(current_row)
+    
+    if logger:
+        logger.debug(f"Grouped into {len(rows)} rows:")
+        for i, row in enumerate(rows):
+            row_texts = [elem['text'] for elem in row]
+            logger.debug(f"Row {i}: {len(row)} columns - {row_texts}")
+    
+    if len(rows) < 2:
+        if logger:
+            logger.debug(f"Not enough rows for table: {len(rows)}")
+        return False, []
+    
+    # Calculate column count statistics
+    col_counts = [len(row) for row in rows]
+    
+    # Find the most common column count
+    from collections import Counter
+    col_count_freq = Counter(col_counts)
+    
+    # Prioritize larger column counts (4+ columns) as they're more likely to be tables
+    # Find the largest column count that appears at least twice
+    suitable_col_counts = [count for count, freq in col_count_freq.items() if count >= 3 and freq >= 1]
+    
+    if suitable_col_counts:
+        # Choose the largest suitable column count
+        most_common_cols = max(suitable_col_counts)
+        main_table_rows = col_count_freq[most_common_cols]
+    else:
+        # Fallback to the actual most common if no suitable large counts found
+        most_common_cols = col_count_freq.most_common(1)[0][0]
+        main_table_rows = col_count_freq[most_common_cols]
+    
+    if logger:
+        logger.debug(f"Column counts: {col_counts}")
+        logger.debug(f"Suitable column counts (3+): {suitable_col_counts}")
+        logger.debug(f"Selected column count: {most_common_cols} (appears {main_table_rows} times)")
+    
+    # More flexible criteria: at least 1 row with 3+ columns, or 2+ rows with same count
+    table_detection_criteria = (
+        (most_common_cols >= 3 and main_table_rows >= 1) or  # At least 1 row with 3+ columns
+        (most_common_cols >= 2 and main_table_rows >= 2)     # Or at least 2 rows with 2+ columns
+    )
+    
+    if table_detection_criteria:
+        if logger:
+            logger.debug(f"Table structure detected: {main_table_rows}/{len(rows)} rows with {most_common_cols} columns")
+        
+        # Extract table rows, focusing on rows with the main column structure
+        table_rows = []
+        for row in rows:
+            if abs(len(row) - most_common_cols) <= 1:  # Accept rows with ±1 column difference
+                table_row = [elem['text'] for elem in row]
+                # Pad shorter rows with empty strings
+                while len(table_row) < most_common_cols:
+                    table_row.append('')
+                # Truncate longer rows
+                table_row = table_row[:most_common_cols]
+                table_rows.append(table_row)
+        
+        if logger:
+            logger.info(f"Reconstructed table with {len(table_rows)} rows and {most_common_cols} columns")
+            logger.debug(f"Final table structure: {table_rows}")
+        
+        return True, table_rows
+    else:
+        if logger:
+            logger.debug(f"Not enough table-like rows: {main_table_rows}/{len(rows)} with {most_common_cols} cols, ratio: {main_table_rows/len(rows):.2f}")
+        return False, []
+
+
+def add_reconstructed_table_to_docx(doc, table_rows):
+    """Add a reconstructed table to the Word document."""
+    if not table_rows:
+        return
+    
+    # Determine the maximum number of columns
+    max_cols = max(len(row) for row in table_rows)
+    
+    # Create table in Word document
+    docx_table = doc.add_table(rows=len(table_rows), cols=max_cols)
+    docx_table.style = "Table Grid"
+    
+    # Fill the table
+    for row_idx, row_data in enumerate(table_rows):
+        for col_idx, cell_text in enumerate(row_data):
+            if col_idx < max_cols:
+                docx_table.cell(row_idx, col_idx).text = cell_text
+    
+    doc.add_paragraph()  # Add some spacing after table
 
 
 if __name__ == "__main__":

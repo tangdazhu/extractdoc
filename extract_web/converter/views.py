@@ -29,7 +29,8 @@ from .pdf_to_word_converter import convert_pdf_to_word, convert_and_merge_pdfs_t
 # Add new imports for PDF to X converters
 from .pdf_to_ppt_converter import convert_pdf_to_ppt, convert_and_merge_pdfs_to_pptx
 from .pdf_to_txt_converter import convert_pdf_to_txt, convert_and_merge_pdfs_to_txt
-from .libreoffice_converter import convert_to_pdf as convert_to_pdf_libreoffice # Import LO converter
+from .libreoffice_converter import convert_to_pdf as convert_to_pdf_libreoffice
+from .libreoffice_converter import convert_to_pptx as convert_docx_to_pptx_libreoffice # Added import for DOCX to PPTX
 from .word_to_pdf_converter import convert_word_to_pdf # ADDED: Import for the new Word to PDF converter
 from django.core.exceptions import PermissionDenied # For security checks
 
@@ -526,7 +527,35 @@ def img_to_file_view(request):
                             temp_files_to_delete_final.append(final_merged_docx_path)
                         else:
                             processed_files_final = [{'original_name': "图像合并与PDF转换", 'status': 'error', 'message': pdf_path_or_msg or "无法将合并的Word文档转换为PDF。"}]
-                            if os.path.exists(final_merged_docx_path): temp_files_to_delete_final.append(final_merged_docx_path)
+                            # MODIFIED: Do not delete intermediate merged DOCX if output is PPTX for debugging
+                            # Temporarily disable cleanup to inspect the merged DOCX file
+                            # if output_format != 'pptx':
+                            #     temp_files_to_delete_final.append(final_merged_docx_path)
+                    elif output_format == 'pptx': # New: Handle PPTX output for merged files
+                        final_merged_pptx_filename = f"{merged_base_name}.pptx"
+                        final_merged_pptx_path = os.path.join(user_converted_dir, final_merged_pptx_filename)
+                        pptx_success, pptx_path_or_msg, _ = convert_docx_to_pptx_libreoffice(final_merged_docx_path, user_converted_dir)
+                        
+                        if pptx_success and pptx_path_or_msg and os.path.exists(pptx_path_or_msg):
+                            # pptx_path_or_msg from libreoffice converter is the actual path of the created file (e.g., user_converted_dir/merged_images_requestid.pptx)
+                            # We need to rename it to final_merged_pptx_path if it's different (it should be if libreoffice names it based on docx stem)
+                            if pptx_path_or_msg != final_merged_pptx_path:
+                                if os.path.exists(final_merged_pptx_path):
+                                    os.remove(final_merged_pptx_path) # Remove if somehow exists
+                                shutil.move(pptx_path_or_msg, final_merged_pptx_path)
+                            
+                            processed_files_final = [{'original_name': "合并的PPTX文档 (来自图像)", 'converted_name': final_merged_pptx_filename, 'download_url': reverse('converter:download_converted_file', args=[request.user.username, today_date_str, final_merged_pptx_filename]), 'status': 'success', 'message': "图像成功合并到Word并转换为PPTX。"}]
+                            # MODIFIED: Do not delete intermediate merged DOCX if output is PPTX for debugging
+                            # Temporarily disable cleanup to inspect the merged DOCX file
+                            # if output_format != 'pptx':
+                            #     temp_files_to_delete_final.append(final_merged_docx_path)
+                        else:
+                            processed_files_final = [{'original_name': "图像合并与PPTX转换", 'status': 'error', 'message': pptx_path_or_msg or "无法将合并的Word文档转换为PPTX。"}]
+                            # MODIFIED: Do not delete intermediate merged DOCX if output is PPTX for debugging, and it was an error with PPTX conversion
+                            # However, if the error is about PPTX conversion, the DOCX might be useful.
+                            # Let's keep it for now if output_format == 'pptx'. If it's another format, it should be deleted.
+                            # if output_format != 'pptx':
+                            #     temp_files_to_delete_final.append(final_merged_docx_path)
                 else: 
                      processed_files_final.extend(img_script_results or [{'original_name': "图像合并操作", 'status': 'info', 'message': '请求合并，但没有生成可合并的图像文档。'}])
             except Exception as e_img_merge:
@@ -573,12 +602,42 @@ def img_to_file_view(request):
                         temp_files_to_delete_final.append(intermediate_docx_full_path)
                     else:
                         temp_individual_results.append({'original_name': original_img_name, 'converted_name': intermediate_docx_name, 'download_url': reverse('converter:download_converted_file', args=[request.user.username, today_date_str, intermediate_docx_name]), 'status': 'error', 'message': pdf_msg or "图像生成的Word转PDF失败。"})
+                elif output_format == 'pptx': # New: Handle PPTX output for individual files
+                    pptx_base_name_no_ext = os.path.splitext(intermediate_docx_name)[0] # original_img_name_tempScriptOutput_requestid
+                    # We want the final name to be like: original_img_name_requestid.pptx
+                    # The intermediate_docx_name is like: original_img_name_tempScriptOutput_requestid.docx
+                    # So, pptx_base_name_no_ext is original_img_name_tempScriptOutput_requestid
+                    # Let's try to reconstruct a cleaner name if possible, or use a unique one.
+                    # For consistency, use original_img_name and request_id for the final pptx name
+                    final_pptx_name = f"{os.path.splitext(original_img_name)[0]}_{request_id}.pptx"
+                    final_pptx_full_path = os.path.join(user_converted_dir, final_pptx_name)
+
+                    pptx_succ, actual_libre_pptx_path, pptx_msg = convert_docx_to_pptx_libreoffice(intermediate_docx_full_path, user_converted_dir)
+
+                    if pptx_succ and actual_libre_pptx_path and os.path.exists(actual_libre_pptx_path):
+                        # actual_libre_pptx_path is based on intermediate_docx_full_path's stem, e.g. user_converted_dir/original_img_name_tempScriptOutput_requestid.pptx
+                        # We need to rename it to final_pptx_full_path
+                        if actual_libre_pptx_path != final_pptx_full_path:
+                            if os.path.exists(final_pptx_full_path):
+                                os.remove(final_pptx_full_path)
+                            shutil.move(actual_libre_pptx_path, final_pptx_full_path)
+                        
+                        temp_individual_results.append({'original_name': original_img_name, 'converted_name': final_pptx_name, 'download_url': reverse('converter:download_converted_file', args=[request.user.username, today_date_str, final_pptx_name]), 'status': 'success', 'message': res_info.get('message', "图像已转为PPTX。") + " (经Word)"})
+                        # MODIFIED: Do not delete intermediate merged DOCX if output is PPTX for debugging
+                        # Temporarily disable cleanup to inspect the merged DOCX file
+                        # if output_format != 'pptx':
+                        #     temp_files_to_delete_final.append(final_merged_docx_path)
+                    else:
+                        temp_individual_results.append({'original_name': original_img_name, 'converted_name': intermediate_docx_name, 'download_url': reverse('converter:download_converted_file', args=[request.user.username, today_date_str, intermediate_docx_name]), 'status': 'error', 'message': pptx_msg or "图像生成的Word转PPTX失败。"})
+                        # MODIFIED: Do not delete intermediate DOCX if output is PPTX for debugging, and it was an error with PPTX conversion
+                        # However, if the error is about PPTX conversion, the DOCX might be useful.
+                        # Let's keep it for now if output_format == 'pptx'. If it's another format, it should be deleted.
+                        # if output_format != 'pptx':
+                        #     temp_files_to_delete_final.append(final_merged_docx_path)
                 else:
                     logger.warning(f"img_to_file_view: 不支持的输出格式 '{output_format}' 用于单个图像处理. RequestID: {request_id}")
                     res_info['status'] = 'error'; res_info['message'] = f"图像转换不支持输出格式 '{output_format}'。"
                     temp_individual_results.append(res_info)
-                    if intermediate_docx_full_path and os.path.exists(intermediate_docx_full_path):
-                        temp_files_to_delete_final.append(intermediate_docx_full_path)
             
         processed_files_final = temp_individual_results
         final_product_names = [f.get('converted_name') for f in processed_files_final if f.get('status') == 'success']

@@ -291,7 +291,7 @@
         <div class="sub-tabs">
             <button class="sub-tab-button active" onclick="selectSubTab(this, 'imgToWord')">图片转Word</button>
             <button class="sub-tab-button" onclick="selectSubTab(this, 'imgToPdf')">图片转PDF</button>
-            {# Add other imgToFile sub-options if any #}
+            <button class="sub-tab-button" onclick="selectSubTab(this, 'imgToPpt')">图片转PPT</button>
         </div>
     </div>
 
@@ -730,7 +730,13 @@
         
         let outputFormat = '';
         if (currentSelectedMainTab === 'imgToFile') {
-            outputFormat = currentSelectedSubTab === 'imgToPdf' ? 'pdf' : 'docx';
+            if (currentSelectedSubTab === 'imgToPdf') {
+                outputFormat = 'pdf';
+            } else if (currentSelectedSubTab === 'imgToPpt') {
+                outputFormat = 'pptx';
+            } else {
+                outputFormat = 'docx';
+            }
         } else if (currentSelectedMainTab === 'fileToPdf') {
             outputFormat = 'pdf'; // Always PDF for fileToPdf main tab
         } else if (currentSelectedMainTab === 'pdfToFile') {

@@ -3,6 +3,7 @@ Django==5.2.1           # Web framework
 
 # OCR and Image Processing
 paddleocr==2.7.3        # OCR for text recognition
+paddlepaddle>=3.0.0     # Deep learning framework required by paddleocr
 pillow==10.3.0          # Image processing
 numpy==1.26.4           # Numerical computing support for paddleocr
 protobuf==3.20.3        # Protocol Buffers, dependency for paddleocr
