@@ -2,6 +2,7 @@ import subprocess
 import os
 import shutil # For moving file if needed
 import logging
+import re  # Add re import at module level
 
 logger = logging.getLogger('converter')
 
@@ -96,15 +97,18 @@ def convert_to_pptx(input_path, output_dir):
     if not os.path.isdir(output_dir):
         return False, f"Output directory not found: {output_dir}", None
 
-    # Try Python-based PPTX creation first (more reliable)
+    # Try Python-based PPTX creation first (more reliable for DOCX to PPTX)
     logger.info(f"Attempting PPTX creation using python-pptx for: {input_path}")
     success, result, filename = create_pptx_from_docx(input_path, output_dir)
     
     if success:
         return success, result, filename
     
-    # Fallback to LibreOffice if python-pptx fails
-    logger.warning(f"Python-pptx method failed: {result}. Trying LibreOffice fallback...")
+    # Log the python-pptx failure but continue to LibreOffice fallback
+    logger.warning(f"Python-pptx method failed: {result}")
+    
+    # LibreOffice fallback - but DOCX to PPTX conversion may not be supported
+    logger.info("Attempting LibreOffice fallback for DOCX to PPTX conversion...")
     
     input_filename_stem = os.path.splitext(os.path.basename(input_path))[0]
     expected_pptx_filename = f"{input_filename_stem}.pptx"
@@ -118,7 +122,7 @@ def convert_to_pptx(input_path, output_dir):
             logger.error(f"Error removing existing file {potentially_converted_pptx_path}: {e}")
             return False, f"Error removing existing file {potentially_converted_pptx_path}: {e}", None
 
-    # LibreOffice fallback - try simple direct conversion
+    # Try LibreOffice conversion
     command = [
         'soffice',
         '--headless',
@@ -139,29 +143,31 @@ def convert_to_pptx(input_path, output_dir):
             else:
                 error_message = f"LibreOffice exited successfully (code 0) but the expected output PPTX was not found: {potentially_converted_pptx_path}. stdout: {process.stdout}, stderr: {process.stderr}"
                 logger.error(error_message)
-                return False, error_message, None
+                # Since both methods failed, return the more informative python-pptx error
+                return False, f"PPTX conversion failed. Python-pptx error: {result}. LibreOffice error: {process.stderr}", None
         else:
             error_message = f"LibreOffice conversion to PPTX failed for '{input_path}'. Return code: {process.returncode}. stdout: {process.stdout}, stderr: {process.stderr}"
             logger.error(error_message)
-            return False, error_message, None
+            # Return the more informative python-pptx error since LibreOffice also failed
+            return False, f"PPTX conversion failed. Python-pptx error: {result}. LibreOffice error: {process.stderr}", None
             
     except FileNotFoundError:
         error_msg = "'soffice' command not found. Please ensure LibreOffice is installed and in your system's PATH."
         logger.error(error_msg)
-        return False, error_msg, None
+        return False, f"PPTX conversion failed. Python-pptx error: {result}. LibreOffice not found: {error_msg}", None
     except subprocess.TimeoutExpired:
         error_msg = f"LibreOffice conversion to PPTX timed out for '{input_path}'."
         logger.error(error_msg)
-        return False, error_msg, None
+        return False, f"PPTX conversion failed. Python-pptx error: {result}. LibreOffice timeout: {error_msg}", None
     except Exception as e:
         error_msg = f"An unexpected error occurred during LibreOffice conversion of '{input_path}' to PPTX: {e}"
         logger.error(error_msg, exc_info=True)
-        return False, error_msg, None
+        return False, f"PPTX conversion failed. Python-pptx error: {result}. LibreOffice error: {error_msg}", None
 
 def create_pptx_from_docx(docx_path, output_dir):
     """
     Creates a PPTX file from a DOCX file using python-pptx library.
-    Reads tables and text from DOCX and creates slides in PPTX.
+    Reads tables and text from DOCX and creates slides in PPTX with improved formatting.
     
     Args:
         docx_path (str): Path to the input DOCX file
@@ -174,6 +180,7 @@ def create_pptx_from_docx(docx_path, output_dir):
         from pptx import Presentation
         from pptx.util import Inches, Pt
         from pptx.enum.text import PP_ALIGN
+        from pptx.dml.color import RGBColor
         from docx import Document
         
         # Read DOCX content
@@ -189,9 +196,8 @@ def create_pptx_from_docx(docx_path, output_dir):
         
         slide_count = 0
         
-        # Process tables
+        # Process tables first (each table gets its own slide)
         for table in doc.tables:
-            # Add a new slide for each table
             slide_layout = prs.slide_layouts[5]  # Blank layout
             slide = prs.slides.add_slide(slide_layout)
             slide_count += 1
@@ -228,8 +234,62 @@ def create_pptx_from_docx(docx_path, output_dir):
                                         run.font.bold = True
                                         run.font.size = Pt(12)
         
-        # Process paragraphs (if no tables found)
-        if slide_count == 0:
+        # Collect all paragraphs
+        paragraphs = []
+        for para in doc.paragraphs:
+            text = para.text.strip()
+            if text:
+                paragraphs.append(text)
+        
+        # Create content slides - simple approach
+        if paragraphs:
+            # Group paragraphs into slides (max 8 paragraphs per slide)
+            max_paras_per_slide = 8
+            
+            for i in range(0, len(paragraphs), max_paras_per_slide):
+                slide_paras = paragraphs[i:i + max_paras_per_slide]
+                
+                # Create slide
+                slide_layout = prs.slide_layouts[1]  # Title and content layout
+                slide = prs.slides.add_slide(slide_layout)
+                
+                # Set title
+                title_shape = slide.shapes.title
+                if title_shape:
+                    # Use first paragraph as title if it looks like a title, otherwise use generic title
+                    first_para = slide_paras[0]
+                    if len(first_para) <= 50 and any(keyword in first_para for keyword in ['目的', 'Content', 'Whitepaper']) or re.match(r'^\d+[.、]', first_para):
+                        title_shape.text = first_para
+                        slide_paras = slide_paras[1:]  # Remove title from content
+                    else:
+                        title_shape.text = f"内容 {i // max_paras_per_slide + 1}"
+                
+                # Set content
+                content_shape = slide.placeholders[1]
+                if content_shape and slide_paras:
+                    text_frame = content_shape.text_frame
+                    text_frame.clear()
+                    
+                    for j, para_text in enumerate(slide_paras):
+                        if j == 0:
+                            p = text_frame.paragraphs[0]
+                        else:
+                            p = text_frame.add_paragraph()
+                        
+                        p.text = para_text
+                        p.font.size = Pt(14)
+                        
+                        # Simple formatting
+                        if re.match(r'^\d+[.、]', para_text):  # Numbered items
+                            p.font.bold = True
+                            p.font.size = Pt(15)
+                        elif para_text.startswith(('•', '·', '-', '*')):  # Bullet points
+                            p.level = 1
+                        elif len(para_text) <= 30:  # Short text might be headings
+                            p.font.bold = True
+        
+        # If no paragraphs, create a simple slide
+        if len(prs.slides) == slide_count:  # Only table slides exist
             slide_layout = prs.slide_layouts[1]  # Title and content layout
             slide = prs.slides.add_slide(slide_layout)
             
@@ -238,15 +298,8 @@ def create_pptx_from_docx(docx_path, output_dir):
             
             if title_shape:
                 title_shape.text = "文档内容"
-                
-            # Add paragraph content
-            text_content = []
-            for para in doc.paragraphs:
-                if para.text.strip():
-                    text_content.append(para.text.strip())
-            
-            if text_content and content_shape:
-                content_shape.text = '\n'.join(text_content)
+            if content_shape:
+                content_shape.text = "从图片中提取的文本内容"
         
         # Save the presentation
         prs.save(output_path)

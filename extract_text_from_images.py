@@ -291,11 +291,100 @@ def extract_text_from_image(image_path, ocr_instance):
 
 
 def segment_text(text):
-    """Segment the extracted text into paragraphs."""
-    paragraphs = [p.strip() for p in text.split("\n") if p.strip()]
-    if not paragraphs:
-        return [text]
-    return paragraphs
+    """
+    Segment the extracted text into paragraphs with improved structure preservation.
+    Analyzes text patterns to maintain logical grouping and hierarchy.
+    """
+    import re
+    
+    if not text or not text.strip():
+        return [text] if text else []
+    
+    # Split by various line separators
+    raw_lines = re.split(r'[\n\r]+', text)
+    
+    # Clean and filter lines
+    lines = []
+    for line in raw_lines:
+        line = line.strip()
+        if line and len(line) > 1:  # Filter out single characters and empty lines
+            lines.append(line)
+    
+    if not lines:
+        return [text.strip()] if text.strip() else []
+    
+    # Group lines into meaningful paragraphs
+    paragraphs = []
+    current_paragraph = []
+    
+    for i, line in enumerate(lines):
+        # Check if this line should start a new paragraph
+        should_start_new = False
+        
+        # Title patterns (numbered sections, etc.)
+        if re.match(r'^\d+[.、]\s*\S', line):  # 1. 2. 3.
+            should_start_new = True
+        elif re.match(r'^[一二三四五六七八九十]+[、.]\s*\S', line):  # 一、二、三、
+            should_start_new = True
+        elif re.match(r'^[（(]\d+[）)]\s*\S', line):  # (1) (2) (3)
+            should_start_new = True
+        elif re.match(r'^[A-Za-z]+[.、]\s*\S', line):  # A. B. C.
+            should_start_new = True
+        
+        # Bullet points
+        elif line.startswith(('•', '·', '-', '*', '○', '●')):
+            should_start_new = True
+        
+        # Content keywords that often indicate new sections
+        elif any(keyword in line for keyword in ['目的', '目标', '内容', 'Content', 'Whitepaper']):
+            if len(line) <= 50:  # Likely a heading, not body text
+                should_start_new = True
+        
+        # Technical terms that might be section headers
+        elif any(keyword in line for keyword in ['开发', '技术', '平台', '框架', '选型', '架构', '模型', '评估']):
+            if len(line) <= 80:
+                should_start_new = True
+        
+        # All caps text (likely headings)
+        elif re.match(r'^[A-Z\s\d/]+$', line) and len(line) > 3:
+            should_start_new = True
+        
+        # Lines that are significantly shorter might be headings
+        elif len(line) <= 30 and i > 0:
+            prev_line = lines[i-1] if i > 0 else ""
+            if len(prev_line) > len(line) * 2:  # Previous line much longer
+                should_start_new = True
+        
+        # Start new paragraph if needed
+        if should_start_new and current_paragraph:
+            paragraphs.append(' '.join(current_paragraph))
+            current_paragraph = []
+        
+        current_paragraph.append(line)
+        
+        # Also end paragraph if this line looks like a complete statement
+        if line.endswith(('。', '！', '？', '.', '!', '?')) and len(line) > 20:
+            if i < len(lines) - 1:  # Not the last line
+                next_line = lines[i + 1]
+                # If next line starts a new concept, end current paragraph
+                if (re.match(r'^\d+[.、]\s*\S', next_line) or 
+                    next_line.startswith(('•', '·', '-', '*')) or
+                    any(keyword in next_line for keyword in ['目的', '目标', '开发', '技术'])):
+                    paragraphs.append(' '.join(current_paragraph))
+                    current_paragraph = []
+    
+    # Add remaining content
+    if current_paragraph:
+        paragraphs.append(' '.join(current_paragraph))
+    
+    # Final cleanup and validation
+    final_paragraphs = []
+    for para in paragraphs:
+        para = para.strip()
+        if para and len(para) > 1:
+            final_paragraphs.append(para)
+    
+    return final_paragraphs if final_paragraphs else [text.strip()]
 
 
 def natural_sort_key(s):
