@@ -5,7 +5,7 @@ from django.conf import settings
 
 logger = logging.getLogger('converter')
 
-def process_images_to_files(uploaded_files_info, user_converted_dir, request_id):
+def process_images_to_files(uploaded_files_info, user_converted_dir, request_id, output_format='docx'):
     """
     处理图片转文件功能
     
@@ -13,13 +13,14 @@ def process_images_to_files(uploaded_files_info, user_converted_dir, request_id)
         uploaded_files_info: 上传文件信息列表，每个元素包含 {'name': str, 'status': str, 'path': str}
         user_converted_dir: 用户转换文件目录路径
         request_id: 本次请求的唯一标识符
+        output_format: 输出格式 ('docx' 或 'pptx')
     
     Returns:
         tuple: (processed_results, temp_files_for_final_processing)
             - processed_results: 处理结果列表
             - temp_files_for_final_processing: 准备用于最终处理的文件列表
     """
-    logger.info("Processing via imgToFile (script-based OCR to DOCX first)")
+    logger.info(f"Processing via imgToFile (script-based OCR to DOCX first), target format: {output_format}")
     
     processed_results = []
     temp_files_for_final_processing = []
@@ -36,7 +37,14 @@ def process_images_to_files(uploaded_files_info, user_converted_dir, request_id)
             
             try:
                 python_executable = 'python' 
-                command = [python_executable, script_path, input_image_path, temp_script_output_docx_path, '--format', 'docx']
+                
+                # Determine content format based on output format
+                if output_format == 'pptx':
+                    content_format = 'ppt'  # Use PPT-optimized formatting
+                else:
+                    content_format = 'docx'  # Use document formatting
+                
+                command = [python_executable, script_path, input_image_path, temp_script_output_docx_path, '--format', 'docx', '--content-format', content_format]
                 logger.debug(f"Executing script command: {' '.join(command)}")
                 
                 result = subprocess.run(
@@ -49,7 +57,7 @@ def process_images_to_files(uploaded_files_info, user_converted_dir, request_id)
                 )
                 
                 if result.returncode == 0 and os.path.exists(temp_script_output_docx_path):
-                    logger.info(f"Script successfully created DOCX (RequestID: {request_id}): {temp_script_output_docx_path} for {original_name}")
+                    logger.info(f"Script successfully created DOCX (RequestID: {request_id}): {temp_script_output_docx_path} for {original_name} (content format: {content_format})")
                     temp_files_for_final_processing.append({
                         'path': temp_script_output_docx_path, 
                         'original_name': original_name,

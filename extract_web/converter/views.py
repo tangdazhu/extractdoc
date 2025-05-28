@@ -475,7 +475,8 @@ def img_to_file_view(request):
     img_script_results, script_created_files = process_images_to_files(
         uploaded_files_info, 
         user_converted_dir, 
-        request_id
+        request_id,
+        output_format
     )
 
     for item in uploaded_files_info:

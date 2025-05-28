@@ -292,8 +292,8 @@ def extract_text_from_image(image_path, ocr_instance):
 
 def segment_text(text):
     """
-    Segment the extracted text into paragraphs with improved structure preservation.
-    Analyzes text patterns to maintain logical grouping and hierarchy.
+    Enhanced text segmentation that preserves hierarchical structure and formatting.
+    Handles numbered lists, bullet points, and maintains proper document structure.
     """
     import re
     
@@ -307,84 +307,268 @@ def segment_text(text):
     lines = []
     for line in raw_lines:
         line = line.strip()
-        if line and len(line) > 1:  # Filter out single characters and empty lines
+        if line:  # Keep all non-empty lines, including single characters that might be bullets
             lines.append(line)
     
     if not lines:
         return [text.strip()] if text.strip() else []
     
-    # Group lines into meaningful paragraphs
-    paragraphs = []
-    current_paragraph = []
+    # Analyze structure and create formatted content
+    formatted_content = []
     
     for i, line in enumerate(lines):
-        # Check if this line should start a new paragraph
-        should_start_new = False
+        # Check line patterns and apply appropriate formatting
+        formatted_line = None
         
-        # Title patterns (numbered sections, etc.)
-        if re.match(r'^\d+[.、]\s*\S', line):  # 1. 2. 3.
-            should_start_new = True
-        elif re.match(r'^[一二三四五六七八九十]+[、.]\s*\S', line):  # 一、二、三、
-            should_start_new = True
-        elif re.match(r'^[（(]\d+[）)]\s*\S', line):  # (1) (2) (3)
-            should_start_new = True
-        elif re.match(r'^[A-Za-z]+[.、]\s*\S', line):  # A. B. C.
-            should_start_new = True
+        # Main title or heading (like "Content")
+        if (line.upper() == line and len(line) <= 20 and 
+            any(keyword in line.upper() for keyword in ['CONTENT', 'WHITEPAPER', '目录', '内容'])):
+            formatted_line = {'type': 'title', 'text': line, 'level': 0}
         
-        # Bullet points
-        elif line.startswith(('•', '·', '-', '*', '○', '●')):
-            should_start_new = True
+        # Document description/subtitle
+        elif ('whitepaper' in line.lower() or 'solution' in line.lower() or 
+              '开发团队' in line or '系统架构' in line):
+            formatted_line = {'type': 'subtitle', 'text': line, 'level': 0}
         
-        # Content keywords that often indicate new sections
-        elif any(keyword in line for keyword in ['目的', '目标', '内容', 'Content', 'Whitepaper']):
-            if len(line) <= 50:  # Likely a heading, not body text
-                should_start_new = True
+        # Main numbered sections (1. 2. 3.)
+        elif re.match(r'^\d+[.、]\s*(.+)', line):
+            match = re.match(r'^\d+[.、]\s*(.+)', line)
+            if match:
+                formatted_line = {'type': 'numbered_main', 'text': match.group(1), 'number': line.split('.')[0], 'level': 1}
         
-        # Technical terms that might be section headers
-        elif any(keyword in line for keyword in ['开发', '技术', '平台', '框架', '选型', '架构', '模型', '评估']):
-            if len(line) <= 80:
-                should_start_new = True
+        # Sub-items with bullets (·)
+        elif line.startswith('·'):
+            text_content = line[1:].strip()
+            formatted_line = {'type': 'bullet_sub', 'text': text_content, 'level': 2}
         
-        # All caps text (likely headings)
-        elif re.match(r'^[A-Z\s\d/]+$', line) and len(line) > 3:
-            should_start_new = True
+        # Other bullet points
+        elif line.startswith(('•', '-', '*', '○', '●')):
+            text_content = line[1:].strip()
+            formatted_line = {'type': 'bullet', 'text': text_content, 'level': 2}
         
-        # Lines that are significantly shorter might be headings
-        elif len(line) <= 30 and i > 0:
-            prev_line = lines[i-1] if i > 0 else ""
-            if len(prev_line) > len(line) * 2:  # Previous line much longer
-                should_start_new = True
+        # Chinese numbered sections (一、二、三、)
+        elif re.match(r'^[一二三四五六七八九十]+[、.]\s*(.+)', line):
+            match = re.match(r'^[一二三四五六七八九十]+[、.]\s*(.+)', line)
+            if match:
+                formatted_line = {'type': 'numbered_chinese', 'text': match.group(1), 'number': line.split('、')[0], 'level': 1}
         
-        # Start new paragraph if needed
-        if should_start_new and current_paragraph:
-            paragraphs.append(' '.join(current_paragraph))
-            current_paragraph = []
-        
-        current_paragraph.append(line)
-        
-        # Also end paragraph if this line looks like a complete statement
-        if line.endswith(('。', '！', '？', '.', '!', '?')) and len(line) > 20:
-            if i < len(lines) - 1:  # Not the last line
+        # Sub-numbered items like "4."
+        elif re.match(r'^\d+[.]\s*$', line):
+            # This is likely a standalone number, combine with next line if available
+            if i + 1 < len(lines):
                 next_line = lines[i + 1]
-                # If next line starts a new concept, end current paragraph
-                if (re.match(r'^\d+[.、]\s*\S', next_line) or 
-                    next_line.startswith(('•', '·', '-', '*')) or
-                    any(keyword in next_line for keyword in ['目的', '目标', '开发', '技术'])):
-                    paragraphs.append(' '.join(current_paragraph))
-                    current_paragraph = []
+                if not re.match(r'^\d+[.、]', next_line) and not next_line.startswith(('·', '•', '-')):
+                    formatted_line = {'type': 'numbered_main', 'text': next_line, 'number': line.rstrip('.'), 'level': 1}
+                    lines[i + 1] = ''  # Mark next line as processed
+            else:
+                formatted_line = {'type': 'text', 'text': line, 'level': 0}
+        
+        # Parenthetical items (1) (2) (3)
+        elif re.match(r'^[（(]\d+[）)]\s*(.+)', line):
+            match = re.match(r'^[（(]\d+[）)]\s*(.+)', line)
+            if match:
+                formatted_line = {'type': 'numbered_paren', 'text': match.group(1), 'number': line.split(')')[0].strip('()（）'), 'level': 2}
+        
+        # Technical terms or section headers (likely important standalone terms)
+        elif (len(line) <= 50 and 
+              any(keyword in line for keyword in ['开发', '技术', '平台', '框架', '选型', '架构', '模型', '评估', '安全', '合规', '案例', '实践', '场景'])):
+            formatted_line = {'type': 'section_header', 'text': line, 'level': 1}
+        
+        # Regular text
+        else:
+            formatted_line = {'type': 'text', 'text': line, 'level': 0}
+        
+        if formatted_line and formatted_line['text'].strip():
+            formatted_content.append(formatted_line)
     
-    # Add remaining content
-    if current_paragraph:
-        paragraphs.append(' '.join(current_paragraph))
+    return formatted_content
+
+
+def add_formatted_content_to_docx(doc, formatted_content):
+    """
+    Add formatted content to Word document with proper styling and hierarchy.
+    """
+    from docx.shared import Pt
+    from docx.enum.text import WD_ALIGN_PARAGRAPH
     
-    # Final cleanup and validation
-    final_paragraphs = []
-    for para in paragraphs:
-        para = para.strip()
-        if para and len(para) > 1:
-            final_paragraphs.append(para)
+    for item in formatted_content:
+        item_type = item.get('type', 'text')
+        text = item.get('text', '')
+        level = item.get('level', 0)
+        number = item.get('number', '')
+        
+        if item_type == 'title':
+            # Main title
+            para = doc.add_heading(text, level=1)
+            para.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            run = para.runs[0] if para.runs else para.add_run(text)
+            run.font.size = Pt(16)
+            run.font.bold = True
+            
+        elif item_type == 'subtitle':
+            # Subtitle/description
+            para = doc.add_paragraph(text)
+            para.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            run = para.runs[0] if para.runs else para.add_run(text)
+            run.font.size = Pt(12)
+            run.font.italic = True
+            
+        elif item_type == 'numbered_main':
+            # Main numbered sections (1. 2. 3.)
+            para = doc.add_paragraph()
+            # Add number
+            num_run = para.add_run(f"{number}. ")
+            num_run.font.bold = True
+            num_run.font.size = Pt(12)
+            # Add text
+            text_run = para.add_run(text)
+            text_run.font.size = Pt(12)
+            text_run.font.bold = True
+            
+        elif item_type == 'numbered_chinese':
+            # Chinese numbered sections
+            para = doc.add_paragraph()
+            num_run = para.add_run(f"{number}、")
+            num_run.font.bold = True
+            num_run.font.size = Pt(12)
+            text_run = para.add_run(text)
+            text_run.font.size = Pt(12)
+            text_run.font.bold = True
+            
+        elif item_type == 'numbered_paren':
+            # Parenthetical numbered items
+            para = doc.add_paragraph()
+            para.paragraph_format.left_indent = Pt(36)  # Indent for sub-items
+            num_run = para.add_run(f"({number}) ")
+            num_run.font.size = Pt(11)
+            text_run = para.add_run(text)
+            text_run.font.size = Pt(11)
+            
+        elif item_type == 'bullet_sub':
+            # Sub-items with bullets (·)
+            para = doc.add_paragraph()
+            para.paragraph_format.left_indent = Pt(36)  # Indent for sub-items
+            bullet_run = para.add_run("• ")
+            bullet_run.font.size = Pt(11)
+            text_run = para.add_run(text)
+            text_run.font.size = Pt(11)
+            
+        elif item_type == 'bullet':
+            # Regular bullet points
+            para = doc.add_paragraph()
+            para.paragraph_format.left_indent = Pt(18)
+            bullet_run = para.add_run("• ")
+            bullet_run.font.size = Pt(11)
+            text_run = para.add_run(text)
+            text_run.font.size = Pt(11)
+            
+        elif item_type == 'section_header':
+            # Section headers
+            para = doc.add_paragraph()
+            para.paragraph_format.left_indent = Pt(18)
+            run = para.add_run(text)
+            run.font.size = Pt(11)
+            run.font.bold = True
+            
+        else:
+            # Regular text
+            para = doc.add_paragraph(text)
+            run = para.runs[0] if para.runs else para.add_run(text)
+            run.font.size = Pt(11)
+
+
+def add_formatted_content_to_pptx(doc, formatted_content):
+    """
+    Add formatted content to Word document optimized for PPT conversion.
+    Uses slide-like structure with clear headings and bullet points.
+    """
+    from docx.shared import Pt
+    from docx.enum.text import WD_ALIGN_PARAGRAPH
     
-    return final_paragraphs if final_paragraphs else [text.strip()]
+    # Group content by slides (main sections)
+    slides = []
+    current_slide = {'title': '', 'content': []}
+    
+    for item in formatted_content:
+        item_type = item.get('type', 'text')
+        text = item.get('text', '')
+        level = item.get('level', 0)
+        number = item.get('number', '')
+        
+        if item_type == 'title':
+            # Main title becomes the first slide
+            if current_slide['title'] or current_slide['content']:
+                slides.append(current_slide)
+            current_slide = {'title': text, 'content': []}
+            
+        elif item_type == 'subtitle':
+            # Subtitle as content of title slide
+            current_slide['content'].append({'type': 'subtitle', 'text': text})
+            
+        elif item_type == 'numbered_main':
+            # Each main numbered section starts a new slide
+            if current_slide['title'] or current_slide['content']:
+                slides.append(current_slide)
+            current_slide = {'title': f"{number}. {text}", 'content': []}
+            
+        elif item_type in ['bullet_sub', 'bullet', 'numbered_paren']:
+            # Add as bullet point to current slide
+            current_slide['content'].append({'type': 'bullet', 'text': text})
+            
+        elif item_type == 'section_header':
+            # Section headers as sub-headings
+            current_slide['content'].append({'type': 'subheading', 'text': text})
+            
+        else:
+            # Regular text
+            current_slide['content'].append({'type': 'text', 'text': text})
+    
+    # Add the last slide
+    if current_slide['title'] or current_slide['content']:
+        slides.append(current_slide)
+    
+    # Generate Word document with slide-like structure
+    for i, slide in enumerate(slides):
+        if i > 0:
+            doc.add_page_break()
+        
+        # Slide title
+        if slide['title']:
+            title_para = doc.add_heading(slide['title'], level=1)
+            title_para.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            title_run = title_para.runs[0] if title_para.runs else title_para.add_run(slide['title'])
+            title_run.font.size = Pt(18)
+            title_run.font.bold = True
+        
+        # Slide content
+        for content_item in slide['content']:
+            content_type = content_item['type']
+            content_text = content_item['text']
+            
+            if content_type == 'subtitle':
+                para = doc.add_paragraph(content_text)
+                para.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                run = para.runs[0] if para.runs else para.add_run(content_text)
+                run.font.size = Pt(14)
+                run.font.italic = True
+                
+            elif content_type == 'subheading':
+                para = doc.add_paragraph(content_text)
+                run = para.runs[0] if para.runs else para.add_run(content_text)
+                run.font.size = Pt(14)
+                run.font.bold = True
+                
+            elif content_type == 'bullet':
+                para = doc.add_paragraph()
+                bullet_run = para.add_run("• ")
+                bullet_run.font.size = Pt(12)
+                text_run = para.add_run(content_text)
+                text_run.font.size = Pt(12)
+                
+            else:  # text
+                para = doc.add_paragraph(content_text)
+                run = para.runs[0] if para.runs else para.add_run(content_text)
+                run.font.size = Pt(12)
 
 
 def natural_sort_key(s):
@@ -458,7 +642,7 @@ special_table_handlers = {
 # 6.jpg 的特殊还原逻辑已封装为 handle_table_6jpg，未来只需新增类似函数并注册即可。
 # 主循环自动分发，无需写一堆 if-else，结构清晰，易于维护和扩展。
 # #非特殊图片自动走通用表格还原逻辑。
-def main(input_path_arg=None, output_path_arg=None, output_format_arg='docx'): # Modified parameters
+def main(input_path_arg=None, output_path_arg=None, output_format_arg='docx', content_format='auto'): # Modified parameters
     global logger  # Declare logger as global to assign the initialized logger
 
     # Load configuration using the utility function
@@ -585,12 +769,14 @@ def main(input_path_arg=None, output_path_arg=None, output_format_arg='docx'): #
                     else:
                         # 没有检测到表格，按普通段落输出
                         logger.info(f"未检测到表格结构，按段落处理: {filename}")
+                        
+                        # Collect all text content
+                        all_text_lines = []
                         for element in layout_elements:
                             if isinstance(element, dict):
                                 element_type = element.get("type", "").lower()
                                 if element_type == "text":
                                     text_content_list = element.get("res")
-                                    extracted_lines = []
                                     if isinstance(text_content_list, list):
                                         for item in text_content_list:
                                             if isinstance(item, tuple) and len(item) == 2:
@@ -598,22 +784,17 @@ def main(input_path_arg=None, output_path_arg=None, output_format_arg='docx'): #
                                                     isinstance(item[1], tuple)
                                                     and len(item[1]) == 2
                                                 ):
-                                                    extracted_lines.append(item[1][0])
+                                                    all_text_lines.append(item[1][0])
                                                 elif isinstance(item[0], str):
-                                                    extracted_lines.append(item[0])
+                                                    all_text_lines.append(item[0])
                                             elif isinstance(item, str):
-                                                extracted_lines.append(item)
+                                                all_text_lines.append(item)
                                     elif (
                                         isinstance(text_content_list, tuple)
                                         and len(text_content_list) == 2
                                         and isinstance(text_content_list[0], str)
                                     ):
-                                        extracted_lines.append(text_content_list[0])
-                                    if extracted_lines:
-                                        full_text = "\n".join(extracted_lines)
-                                        paragraphs = segment_text(full_text)
-                                        for paragraph_text in paragraphs:
-                                            doc.add_paragraph(paragraph_text)
+                                        all_text_lines.append(text_content_list[0])
                             elif isinstance(element, list) and len(element) == 2:
                                 text_tuple = element[1]
                                 if (
@@ -623,9 +804,47 @@ def main(input_path_arg=None, output_path_arg=None, output_format_arg='docx'): #
                                 ):
                                     text_line = text_tuple[0]
                                     if text_line.strip():
-                                        paragraphs = segment_text(text_line)
-                                        for paragraph_text in paragraphs:
-                                            doc.add_paragraph(paragraph_text)
+                                        all_text_lines.append(text_line)
+                        
+                        # Process all collected text with enhanced formatting
+                        if all_text_lines:
+                            full_text = "\n".join(all_text_lines)
+                            formatted_content = segment_text(full_text)
+                            # Check if we got formatted content structure
+                            if formatted_content and isinstance(formatted_content[0], dict):
+                                logger.info(f"Applying structured formatting for {filename}")
+                                
+                                # Determine formatting style
+                                effective_content_format = content_format
+                                if content_format == 'auto':
+                                    # Auto-detect: if content has numbered sections and bullets, use PPT style
+                                    has_main_sections = any(item.get('type') == 'numbered_main' for item in formatted_content)
+                                    has_bullets = any(item.get('type') in ['bullet_sub', 'bullet'] for item in formatted_content)
+                                    has_title = any(item.get('type') == 'title' for item in formatted_content)
+                                    
+                                    if has_title and has_main_sections and has_bullets:
+                                        effective_content_format = 'ppt'
+                                        logger.info(f"Auto-detected PPT-style content structure for {filename}")
+                                    else:
+                                        effective_content_format = 'docx'
+                                        logger.info(f"Auto-detected document-style content structure for {filename}")
+                                
+                                # Apply appropriate formatting
+                                if effective_content_format == 'ppt':
+                                    add_formatted_content_to_pptx(doc, formatted_content)
+                                else:
+                                    add_formatted_content_to_docx(doc, formatted_content)
+                            else:
+                                # Fallback to simple paragraphs if formatting failed
+                                logger.info(f"Using fallback paragraph formatting for {filename}")
+                                for text_item in formatted_content:
+                                    if isinstance(text_item, str):
+                                        doc.add_paragraph(text_item)
+                                    elif isinstance(text_item, dict):
+                                        doc.add_paragraph(text_item.get('text', ''))
+                        else:
+                            logger.warning(f"No text content found in {filename}")
+                            doc.add_paragraph(f"[No readable text found in {filename}]")
 
         # If processing multiple files (not from args) and not the last image, add page break
         if not (input_path_arg and output_path_arg) and image_idx < len(image_files_to_process) - 1:
@@ -828,7 +1047,8 @@ if __name__ == "__main__":
     parser.add_argument("input_path", nargs='?', default=None, help="Path to a single input image file.")
     parser.add_argument("output_path", nargs='?', default=None, help="Path for the output file (e.g., document.docx or document.pdf).")
     parser.add_argument("--format", choices=['docx', 'pdf'], default='docx', help="Output format (docx or pdf). Default is docx.")
+    parser.add_argument("--content-format", choices=['auto', 'docx', 'ppt'], default='auto', help="Content formatting style: auto (detect), docx (document style), ppt (slide style). Default is auto.")
     
     args = parser.parse_args()
 
-    main(input_path_arg=args.input_path, output_path_arg=args.output_path, output_format_arg=args.format)
+    main(input_path_arg=args.input_path, output_path_arg=args.output_path, output_format_arg=args.format, content_format=args.content_format)
