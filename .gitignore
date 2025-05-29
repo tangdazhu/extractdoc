@@ -87,3 +87,7 @@ his_pic/
 
 #test output
 test_output
+video-snapshot
+video-snapshot-duplicate
+
+*.mp4
