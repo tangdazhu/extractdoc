@@ -271,15 +271,16 @@ if __name__ == "__main__":
 
     all_generated_screenshots.sort()
 
+    raw_snapshot_count = len(all_generated_screenshots)
+    deduplicated_snapshot_count = 0 # Default to 0
+
     if all_generated_screenshots:
         final_screenshots = deduplicate_slide_screenshots(
             all_generated_screenshots,
             lambda x: get_theme_from_snapshot_coarse(x, group_size=deduplication_group_size), 
             get_order_key_from_snapshot
         )
-
-        print(f"原始截图数量 (来自 {os.path.basename(source_for_dedup_dir)}): {len(all_generated_screenshots)}")
-        print(f"去重后选定截图数量: {len(final_screenshots)}")
+        deduplicated_snapshot_count = len(final_screenshots)
 
         copied_count = 0
         if final_screenshots:
@@ -297,5 +298,9 @@ if __name__ == "__main__":
             print("没有符合去重条件的截图可供复制。")
     else:
         print(f"在源目录 {source_for_dedup_dir} 中没有找到截图文件进行处理。")
+
+    # Add structured print output for counts
+    print(f"Raw snapshots count: {raw_snapshot_count}")
+    print(f"Deduplicated snapshots count: {deduplicated_snapshot_count}")
 
     print("--- 脚本执行完毕 ---") 

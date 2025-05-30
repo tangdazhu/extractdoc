@@ -1236,16 +1236,30 @@ def process_video_extraction_view(request):
                     zip_file_path = shutil.make_archive(zip_base_name, 'zip', target_dedup_snapshots_dir)
                     zip_filename = os.path.basename(zip_file_path)
                     
+                    # Parse counts from stdout_data
+                    raw_count = 0
+                    dedup_count = 0
+                    if stdout_data:
+                        raw_match = re.search(r"Raw snapshots count: (\d+)", stdout_data)
+                        if raw_match:
+                            raw_count = int(raw_match.group(1))
+                        dedup_match = re.search(r"Deduplicated snapshots count: (\d+)", stdout_data)
+                        if dedup_match:
+                            dedup_count = int(dedup_match.group(1))
+
+                    success_message = (
+                        f'视频帧提取和去重成功。'
+                        f'原始截图: {raw_count} 张，去重后截图: {dedup_count} 张。'
+                        f'原始截图位于 "video-snapshot" 目录，去重后截图位于 "video-snapshot-duplicate" 目录。'
+                        f'ZIP压缩包包含去重后的截图。'
+                    )
+
                     current_results_list.append({
                         'original_name': original_video_filename,
                         'converted_name': zip_filename,
                         'download_url': reverse('converter:download_converted_file', args=[request.user.username, today_date_str, zip_filename]),
                         'status': 'success',
-                        'message': (
-                            f'视频帧提取和去重成功。原始截图位于 "video-snapshot" 目录， '
-                            f'去重后截图位于 "video-snapshot-duplicate" 目录。'
-                            f'ZIP压缩包包含去重后的截图。脚本STDOUT: {stdout_data[:200] if stdout_data else "(无)"}'
-                        )
+                        'message': success_message
                     })
                     process_completed_successfully = True 
                 else:
@@ -1259,7 +1273,7 @@ def process_video_extraction_view(request):
                     current_results_list.append({
                         'original_name': original_video_filename,
                         'status': 'error',
-                        'message': f'视频处理脚本运行成功，但未能找到任何截图输出目录。脚本STDOUT: {stdout_data[:200] if stdout_data else "(无)"}'
+                        'message': f'视频处理脚本运行成功，但未能找到任何截图输出目录。' # Removed STDOUT from here too
                     })
                 final_result_payload = {"type": "result", "results": current_results_list, "request_id": request_id, "merge_output": False}
             else: # Script execution failed
