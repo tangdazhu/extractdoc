@@ -1135,7 +1135,9 @@
         }
 
         const table = document.createElement('table');
-        table.className = 'table table-striped'; // Using Bootstrap classes for styling
+        table.className = 'table table-striped table-bordered'; 
+        table.style.borderCollapse = 'collapse';
+
         const thead = document.createElement('thead');
         thead.innerHTML = '<tr>' +
                             '<th>原始文件名</th>' +
@@ -1424,14 +1426,15 @@
         }
 
         const table = document.createElement('table');
-        // Ensure same Bootstrap classes as displayConvertedFiles for consistency
         table.className = 'table table-striped table-bordered'; 
+        table.style.borderCollapse = 'collapse';
+
         const thead = document.createElement('thead');
         thead.innerHTML = '<tr>' +
-                            '<th scope="col">原始文件名</th>' + // Matched from displayConvertedFiles
-                            '<th scope="col">输出文件 (ZIP)</th>' + // Matched
-                            '<th scope="col">状态</th>' +         // Matched
-                            '<th scope="col">信息/下载</th>' +   // Matched
+                            '<th scope="col">原始文件名</th>' +
+                            '<th scope="col">输出文件 (ZIP)</th>' +
+                            '<th scope="col">状态</th>' +
+                            '<th scope="col">信息/下载</th>' +
                           '</tr>';
         table.appendChild(thead);
 
@@ -1439,28 +1442,33 @@
         data.results.forEach(item => {
             const row = tbody.insertRow();
             
-            // Style table cells similarly to displayConvertedFiles if specific styling was used there
-            // For now, relying on Bootstrap default table cell styling.
-            row.insertCell().textContent = item.original_name || 'N/A';
-            row.insertCell().textContent = item.converted_name || 'N/A';
+            const cellOriginalName = row.insertCell();
+            cellOriginalName.textContent = item.original_name || 'N/A';
+            // Apply border style to match document conversion table if not covered by table-bordered
+            // cellOriginalName.style.border = '1px solid #ddd'; 
+
+            const cellConvertedName = row.insertCell();
+            cellConvertedName.textContent = item.converted_name || 'N/A';
+            // cellConvertedName.style.border = '1px solid #ddd';
             
             const statusCell = row.insertCell();
+            // statusCell.style.border = '1px solid #ddd';
             const statusBadge = document.createElement('span');
-            // Consistent status badge classes
-            statusBadge.classList.add('status-badge'); // General class for consistent styling if defined
+            statusBadge.classList.add('status-badge');
             if (item.status === 'success') {
-                statusBadge.classList.add('status-success'); // Specific success class
+                statusBadge.classList.add('status-success');
                 statusBadge.textContent = 'Success';
             } else if (item.status === 'error') {
-                statusBadge.classList.add('status-error');   // Specific error class
+                statusBadge.classList.add('status-error');
                 statusBadge.textContent = 'Error';
             } else {
-                statusBadge.classList.add('status-processing'); // Default/other status
+                statusBadge.classList.add('status-processing');
                 statusBadge.textContent = item.status || '未知';
             }
             statusCell.appendChild(statusBadge);
 
             const messageCell = row.insertCell();
+            // messageCell.style.border = '1px solid #ddd';
             if (item.status === 'success' && item.download_url) {
                 const downloadLink = document.createElement('a');
                 downloadLink.href = item.download_url;
