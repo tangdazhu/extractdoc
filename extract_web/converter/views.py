@@ -1054,8 +1054,8 @@ def delete_all_for_date_view(request, date_str):
                         logger.info(f"User {user.username} deleted uploaded directory during mass delete: {item_path}")
                     deleted_something = True
                 except OSError as e:
-                    logger.warning(f"Error deleting uploaded file {file_path} during mass delete for user {user.username}: {e}")
-                    messages.warning(request, f"删除上传文件 '{filename}' 时出错，但会继续尝试。")
+                    logger.warning(f"Error deleting uploaded item {item_path} during mass delete for user {user.username}: {e}") 
+                    messages.warning(request, f"删除上传的文件/目录 '{item_name}' 时出错，但会继续尝试。") 
             # Attempt to remove the uploads directory if empty
             if not os.listdir(uploads_dir):
                 os.rmdir(uploads_dir)
@@ -1137,220 +1137,254 @@ def process_video_extraction_view(request):
         logger.error(f"process_video_extraction_view: Failed to save uploaded video file: {original_video_filename}. RequestID: {request_id}")
         return format_error_response(message=f'视频文件 "{original_video_filename}" 上传保存失败。', request_id=request_id)
 
-    # Path to the video extraction script
+    # Determine script path relative to settings.BASE_DIR (extract_web)
     # settings.BASE_DIR is .../extract_doc/extract_web
     # script is in .../extract_doc/
-    script_original_location = os.path.abspath(os.path.join(settings.BASE_DIR, '..', 'extract_video_snapshots.py'))
-    if not os.path.exists(script_original_location):
-        logger.error(f"process_video_extraction_view: Snapshot script not found at {script_original_location}. RequestID: {request_id}")
-        cleanup_temp_files([temp_video_path], request_id)
+    script_base_dir = os.path.abspath(os.path.join(settings.BASE_DIR, '..'))
+    script_path = os.path.join(script_base_dir, 'extract_video_snapshots.py')
+
+
+    if not os.path.exists(script_path):
+        logger.error(f"process_video_extraction_view: Snapshot script not found at {script_path}. RequestID: {request_id}")
+        # Use the 'type' key for cleanup_temp_files if passing a list of dicts
+        cleanup_temp_files([{'path': temp_video_path, 'type': 'file'}], request_id)
         return format_error_response(message='服务器配置错误：找不到视频处理脚本。', request_id=request_id)
 
-    # Create a temporary directory for script execution to manage its outputs
+    # Create a temporary directory for script execution
     exec_temp_dir = os.path.join(user_upload_dir, f"video_exec_{request_id}")
     os.makedirs(exec_temp_dir, exist_ok=True)
-    script_in_temp_dir_path = os.path.join(exec_temp_dir, os.path.basename(script_original_location))
-    shutil.copy2(script_original_location, script_in_temp_dir_path)
     
-    # These are the directories where the script, when run from exec_temp_dir, will output its results
-    # based on its internal hardcoded relative paths like "test/test_data/video-snapshot"
-    script_output_base_in_temp = os.path.join(exec_temp_dir, "test", "test_data")
-    source_raw_dir_in_temp = os.path.join(script_output_base_in_temp, "video-snapshot")
-    source_dedup_dir_in_temp = os.path.join(script_output_base_in_temp, "video-snapshot-duplicate")
+    # Define final target directories for snapshots in user's history
+    # These names now include safe_video_filename and request_id for better uniqueness
+    target_raw_snapshots_dir = os.path.join(user_converted_dir, f"video-snapshot_raw_{safe_video_filename}_{request_id}")
+    target_dedup_snapshots_dir = os.path.join(user_converted_dir, f"video-snapshot_dedup_{safe_video_filename}_{request_id}")
+    # These directories will be created by shutil.copytree later if source exists.
 
-    # These are the final target directories in the user's history
-    target_raw_snapshots_dir = os.path.join(user_converted_dir, "video-snapshot")
-    target_dedup_snapshots_dir = os.path.join(user_converted_dir, "video-snapshot-duplicate")
-    os.makedirs(target_raw_snapshots_dir, exist_ok=True)
-    os.makedirs(target_dedup_snapshots_dir, exist_ok=True)
-
-    processed_files_final = [] # This will be populated at the end by the generator
-    # temp_files_to_delete_final is managed by the generator now
-
-    def stream_video_processing_response():
-        temp_files_to_clean = [temp_video_path, exec_temp_dir]
-        process_completed_successfully = False
-        final_result_payload = None
+    def stream_video_processing_response(
+            _script_path_arg, 
+            _temp_video_path_arg, 
+            _exec_temp_dir_arg, 
+            _scene_threshold_arg, 
+            _group_size_arg,
+            _original_video_filename_arg, 
+            _safe_video_filename_arg, 
+            _user_converted_dir_arg, 
+            _today_date_str_arg,
+            _target_raw_snapshots_dir_arg,
+            _target_dedup_snapshots_dir_arg,
+            _request_user_username_arg,
+            _request_id_arg 
+        ):
+        
+        # Files and dirs to clean up at the end of this specific stream
+        _temp_files_to_clean_stream_arg = [{'path': _temp_video_path_arg, 'type': 'file'}, {'path': _exec_temp_dir_arg, 'type': 'dir'}]
+        process_stream = None 
+        final_result_payload_stream_var = {} 
 
         try:
-            cmd = [
-                sys.executable,
-                script_in_temp_dir_path,
-                "--video_file", temp_video_path,
-                "--output_base_dir", exec_temp_dir,
-                "--threshold", str(scene_threshold),
-                "--group_size", str(group_size)
+            command_list_stream = [
+                sys.executable, _script_path_arg,
+                '--video_file', _temp_video_path_arg, # MODIFIED: Changed from --video_file_path
+                '--output_base_dir', _exec_temp_dir_arg,
+                '--threshold', str(_scene_threshold_arg), # MODIFIED: Changed from --scene_detection_thresh
+                '--group_size', str(_group_size_arg) # MODIFIED: Changed from --deduplication_group_size
             ]
-            logger.info(f"process_video_extraction_view (stream): Executing command: {' '.join(cmd)}. RequestID: {request_id}")
+            logger.info(f"stream_video_processing_response: Executing video script for {_original_video_filename_arg} (RequestID: {_request_id_arg}): {' '.join(command_list_stream)}")
             
-            process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding='utf-8', errors='replace', bufsize=1)
+            yield f"data: {json.dumps({'type': 'info', 'message': '视频处理脚本已启动，请稍候...'})}\n\n"
 
-            # Yield initial message
-            yield f"data: {json.dumps({'type': 'info', 'message': '视频处理脚本已启动...'})}\n\n"
-
-            # Read stderr for progress (assuming PySceneDetect outputs progress there)
-            if process.stderr:
-                for line_from_stderr in iter(process.stderr.readline, ''):
-                    original_line = line_from_stderr.strip() # Original line from stderr (with if initial decoding failed)
-                    if not original_line: continue
-                    logger.debug(f"Script STDERR line: {original_line}. RequestID: {request_id}")
-
-                    # Clean the line for display by removing non-ASCII characters that became or were other symbols
-                    # This should strip out the progress bar visual elements that are causing garbling
-                    cleaned_display_line = original_line.encode('ascii', 'ignore').decode('utf-8', 'ignore')
-                    # Further ensure the specific unicode replacement character is removed if it somehow persists
-                    cleaned_display_line = cleaned_display_line.replace('\ufffd', '').strip()
-
-
-                    progress_match = re.search(r"(\d+)/(\d+)\s*\((.*?)%\)", original_line) # Regex on original_line for robust parsing
-                    if progress_match:
-                        current_frame, total_frames, percent_str = progress_match.groups()
-                        try:
-                            percent = float(percent_str)
-                            yield f"data: {json.dumps({'type': 'progress', 'percent': percent, 'text': cleaned_display_line})}\n\n"
-                        except ValueError:
-                            yield f"data: {json.dumps({'type': 'info', 'message': cleaned_display_line})}\n\n" # Send as info if percent parse fails
-                    else:
-                        yield f"data: {json.dumps({'type': 'info', 'message': cleaned_display_line})}\n\n" # Send non-progress lines as info
-                    # Ensure buffer is flushed to client periodically if needed by frontend/browser
+            process_stream = subprocess.Popen(
+                command_list_stream,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                encoding='utf-8',
+                errors='replace', 
+                bufsize=1,  
+                universal_newlines=True,
+                env=os.environ.copy() # ADDED: Pass a copy of the current environment
+            )
             
-            stdout_data, stderr_data_remaining = process.communicate() # Get remaining stderr and all stdout
-            return_code = process.returncode
-
-            if stdout_data:
-                logger.info(f"Script STDOUT (final) for {request_id}:\n{stdout_data}")
-            if stderr_data_remaining: # Log any stderr not caught by the loop (e.g. if it didn't end with newline)
-                logger.error(f"Script STDERR (final) for {request_id}:\n{stderr_data_remaining}")
-
-            if return_code == 0:
-                logger.info(f"Script executed successfully for {original_video_filename}. RequestID: {request_id}")
-                
-                # Parse counts from stdout_data early, so both messages can use them
-                raw_count = 0
-                dedup_count = 0
-                if stdout_data:
-                    raw_match = re.search(r"Raw snapshots count: (\d+)", stdout_data)
-                    if raw_match:
-                        try:
-                            raw_count = int(raw_match.group(1))
-                        except ValueError:
-                            logger.warning(f"Could not parse raw_count from script output: {raw_match.group(1)}. RequestID: {request_id}")
-                    dedup_match = re.search(r"Deduplicated snapshots count: (\d+)", stdout_data)
-                    if dedup_match:
-                        try:
-                            dedup_count = int(dedup_match.group(1))
-                        except ValueError:
-                            logger.warning(f"Could not parse dedup_count from script output: {dedup_match.group(1)}. RequestID: {request_id}")
-
-                source_raw_dir_in_temp = os.path.join(exec_temp_dir, "video-snapshot")
-                source_dedup_dir_in_temp = os.path.join(exec_temp_dir, "video-snapshot-duplicate")
-
-                # File copying and ZIP creation logic (moved from outer try block)
-                current_results_list = [] # Temporary list for this block
-                if os.path.exists(source_raw_dir_in_temp) and os.path.isdir(source_raw_dir_in_temp):
-                    shutil.copytree(source_raw_dir_in_temp, target_raw_snapshots_dir, dirs_exist_ok=True)
-                    logger.info(f"Copied raw snapshots to {target_raw_snapshots_dir}. RequestID: {request_id}")
-
-                    # Create ZIP for raw snapshots
-                    raw_zip_base_name = os.path.join(user_converted_dir, f"raw_frames_{safe_video_filename}_{request_id}")
-                    raw_zip_file_path = shutil.make_archive(raw_zip_base_name, 'zip', target_raw_snapshots_dir)
-                    raw_zip_filename = os.path.basename(raw_zip_file_path)
+            if process_stream and process_stream.poll() is None:
+                if process_stream.stderr:
+                    for line_from_stderr_stream in iter(process_stream.stderr.readline, ''):
+                        original_line_stream = line_from_stderr_stream.strip()
+                        if not original_line_stream: continue
+                        
+                        # Prepare for logging to console (e.g., GBK) - Stricter ASCII enforcement for logging
+                        ascii_safe_log_line = original_line_stream.encode('ascii', 'ignore').decode('ascii')
+                        logger.debug(f"Script STDERR line (ASCII for console): {ascii_safe_log_line}. RequestID: {_request_id_arg}")
+                        
+                        cleaned_display_line_stream = original_line_stream.encode('ascii', 'ignore').decode('utf-8', 'ignore').replace('\\\\ufffd', '').strip()
+                        progress_match_stream = re.search(r"(\d+)/(\d+)\\s*\\((.*?)%\\)", original_line_stream) # Regex on original_line_stream for robustness
+                        if progress_match_stream:
+                            _, _, percent_str_stream = progress_match_stream.groups()
+                            try:
+                                percent_stream = float(percent_str_stream)
+                                yield f"data: {json.dumps({'type': 'progress', 'percent': percent_stream, 'text': cleaned_display_line_stream})}\n\n"
+                            except ValueError:
+                                yield f"data: {json.dumps({'type': 'info', 'message': cleaned_display_line_stream})}\n\n"
+                        else:
+                            yield f"data: {json.dumps({'type': 'info', 'message': cleaned_display_line_stream})}\n\n"
+            
+            stdout_data_collected_stream = ""
+            stderr_data_remaining_collected_stream = ""
+            return_code_collected_stream = None
+            
+            try:
+                if process_stream:
+                    if process_stream.poll() is None: # Check if it hasn't finished
+                        logger.info(f"Waiting for script process to complete using communicate(). PID: {process_stream.pid}. RequestID: {_request_id_arg}")
+                        # Timeout for communicate should be for script's finalization (stdout, exit),
+                        # as stderr progress loop is done. 10 minutes for finalization.
+                        stdout_data, stderr_data = process_stream.communicate(timeout=600) 
+                        stdout_data_collected_stream = stdout_data
+                        # The loop consumed most/all stderr for progress. This captures any remaining.
+                        stderr_data_remaining_collected_stream = stderr_data
                     
-                    # Create .meta file for raw_zip_filename
-                    raw_meta_file_path = f"{raw_zip_file_path}.meta"
+                    return_code_collected_stream = process_stream.returncode
+                    logger.info(f"Script process (after communicate) ended with return code: {return_code_collected_stream}. PID: {process_stream.pid if process_stream else 'N/A'}. RequestID: {_request_id_arg}")
+                else: 
+                    logger.error(f"Process was not started (is None) for {_request_id_arg} in stream. Cannot wait or get outputs.")
+                    return_code_collected_stream = -10 # Special code for Popen failure
+            except subprocess.TimeoutExpired:
+                logger.error(f"Script process communicate() TIMED OUT after 600s. Killing process. PID: {process_stream.pid if process_stream else 'N/A'}. RequestID: {_request_id_arg}")
+                if process_stream:
+                    process_stream.kill() 
                     try:
-                        with open(raw_meta_file_path, 'w', encoding='utf-8') as mf_raw:
-                            mf_raw.write(original_video_filename)
-                        logger.info(f"Created .meta file for raw ZIP: {raw_meta_file_path}. RequestID: {request_id}")
-                    except Exception as e_meta_raw:
-                        logger.error(f"Failed to create .meta file for raw ZIP {raw_meta_file_path}: {e_meta_raw}. RequestID: {request_id}")
+                        # Attempt to get any final output after kill
+                        stdout_after_kill_stream, stderr_after_kill_stream = process_stream.communicate(timeout=10) 
+                        # Append to existing rather than replace, in case some data was already present before timeout logic
+                        if stdout_after_kill_stream: stdout_data_collected_stream += stdout_after_kill_stream 
+                        if stderr_after_kill_stream: stderr_data_remaining_collected_stream += stderr_after_kill_stream
+                        logger.info(f"Script output after kill (PID: {process_stream.pid}): STDOUT='{stdout_data_collected_stream[:200]}...', STDERR='{stderr_data_remaining_collected_stream[:200]}...'. RequestID: {_request_id_arg}")
+                    except subprocess.TimeoutExpired: logger.warning(f"Communicate timed out after killing process (PID: {process_stream.pid}). RequestID: {_request_id_arg}")
+                    except Exception as e_comm_kill_stream: logger.error(f"Exception during communicate after kill (PID: {process_stream.pid}): {e_comm_kill_stream}. RequestID: {_request_id_arg}")
+                return_code_collected_stream = -9 # Special return code for timeout
+                final_result_payload_stream_var = {"type": "error", "message": "视频处理脚本执行最终化步骤超时（超过10分钟限制）。", "request_id": _request_id_arg}
+                yield f"data: {json.dumps(final_result_payload_stream_var)}\n\n"
 
-                    current_results_list.append({
-                        'original_name': f"{original_video_filename} (原始截图)",
-                        'converted_name': raw_zip_filename,
-                        'download_url': reverse('converter:download_converted_file', args=[request.user.username, today_date_str, raw_zip_filename]),
-                        'status': 'success',
-                        'message': f'包含所有原始提取的截图 ({raw_count} 张)。'
-                    })
-                else:
-                    logger.warning(f"Raw snapshot output directory not found after script run: {source_raw_dir_in_temp}. RequestID: {request_id}")
+            if stdout_data_collected_stream:
+                console_safe_stdout = stdout_data_collected_stream.encode(sys.stdout.encoding or 'gbk', 'replace').decode(sys.stdout.encoding or 'gbk', 'ignore')
+                logger.info(f"Script STDOUT (final accumulated for {_request_id_arg}):\\n{console_safe_stdout}")
+            if stderr_data_remaining_collected_stream:
+                # Stricter ASCII enforcement for final stderr log as well
+                ascii_safe_remaining_stderr = stderr_data_remaining_collected_stream.encode('ascii', 'ignore').decode('ascii')
+                logger.error(f"Script STDERR (final accumulated, ASCII for console for {_request_id_arg}):\\n{ascii_safe_remaining_stderr}")
 
-                if os.path.exists(source_dedup_dir_in_temp) and os.path.isdir(source_dedup_dir_in_temp):
-                    shutil.copytree(source_dedup_dir_in_temp, target_dedup_snapshots_dir, dirs_exist_ok=True)
-                    logger.info(f"Copied deduplicated snapshots to {target_dedup_snapshots_dir}. RequestID: {request_id}")
+            if return_code_collected_stream != -9 and return_code_collected_stream != -10: # Not a timeout and not a Popen failure
+                if return_code_collected_stream == 0: # Script success
+                    logger.info(f"Script executed successfully for {_original_video_filename_arg}. RequestID: {_request_id_arg}")
+                    raw_count_from_stdout = 0; dedup_count_from_stdout = 0
+                    if stdout_data_collected_stream:
+                        raw_match_stdout = re.search(r"Raw snapshots count: (\d+)", stdout_data_collected_stream)
+                        if raw_match_stdout: 
+                            try: raw_count_from_stdout = int(raw_match_stdout.group(1))
+                            except ValueError: logger.warning(f"Could not parse raw_count from stdout. RID: {_request_id_arg}")
+                        dedup_match_stdout = re.search(r"Deduplicated snapshots count: (\d+)", stdout_data_collected_stream)
+                        if dedup_match_stdout: 
+                            try: dedup_count_from_stdout = int(dedup_match_stdout.group(1))
+                            except ValueError: logger.warning(f"Could not parse dedup_count from stdout. RID: {_request_id_arg}")
                     
-                    dedup_zip_base_name = os.path.join(user_converted_dir, f"deduplicated_frames_{safe_video_filename}_{request_id}")
-                    dedup_zip_file_path = shutil.make_archive(dedup_zip_base_name, 'zip', target_dedup_snapshots_dir)
-                    dedup_zip_filename = os.path.basename(dedup_zip_file_path)
+                    source_raw_dir_script_output = os.path.join(_exec_temp_dir_arg, "video-snapshot")
+                    source_dedup_dir_script_output = os.path.join(_exec_temp_dir_arg, "video-snapshot-duplicate")
                     
-                    # Create .meta file for dedup_zip_filename
-                    dedup_meta_file_path = f"{dedup_zip_file_path}.meta"
-                    try:
-                        with open(dedup_meta_file_path, 'w', encoding='utf-8') as mf_dedup:
-                            mf_dedup.write(original_video_filename) # Use the same original_video_filename
-                        logger.info(f"Created .meta file for deduplicated ZIP: {dedup_meta_file_path}. RequestID: {request_id}")
-                    except Exception as e_meta_dedup:
-                        logger.error(f"Failed to create .meta file for deduplicated ZIP {dedup_meta_file_path}: {e_meta_dedup}. RequestID: {request_id}")
-                    
-                    success_message_dedup = (
-                        f'视频帧去重完成。'
-                        f'原始截图: {raw_count} 张，去重后截图: {dedup_count} 张。'
-                        f'ZIP压缩包包含去重后的截图。'
-                    )
+                    current_results_list_for_payload = []
 
-                    current_results_list.append({
-                        'original_name': f"{original_video_filename} (去重截图)",
-                        'converted_name': dedup_zip_filename,
-                        'download_url': reverse('converter:download_converted_file', args=[request.user.username, today_date_str, dedup_zip_filename]),
-                        'status': 'success',
-                        'message': success_message_dedup
-                    })
-                    process_completed_successfully = True 
-                else:
-                    logger.warning(f"Deduplicated snapshot output directory not found: {source_dedup_dir_in_temp}. RequestID: {request_id}")
-                    current_results_list.append({
-                        'original_name': original_video_filename, 'status': 'error',
-                        'message': '视频处理脚本执行成功，但未找到去重后的截图输出。'
-                    })
+                    if os.path.exists(source_raw_dir_script_output) and os.path.isdir(source_raw_dir_script_output):
+                        if os.path.exists(_target_raw_snapshots_dir_arg): shutil.rmtree(_target_raw_snapshots_dir_arg)
+                        shutil.copytree(source_raw_dir_script_output, _target_raw_snapshots_dir_arg, dirs_exist_ok=False)
+                        logger.info(f"Copied raw snapshots to {_target_raw_snapshots_dir_arg}. RequestID: {_request_id_arg}")
+
+                        raw_zip_base_name_for_payload = os.path.join(_user_converted_dir_arg, f"raw_frames_{_safe_video_filename_arg}_{_request_id_arg}")
+                        raw_zip_file_path_for_payload = shutil.make_archive(raw_zip_base_name_for_payload, 'zip', _target_raw_snapshots_dir_arg)
+                        raw_zip_filename_for_payload = os.path.basename(raw_zip_file_path_for_payload)
+                        raw_meta_file_path_for_payload = f"{raw_zip_file_path_for_payload}.meta"
+                        try:
+                            with open(raw_meta_file_path_for_payload, 'w', encoding='utf-8') as mf_raw_stream: mf_raw_stream.write(_original_video_filename_arg)
+                            logger.info(f"Created .meta for raw ZIP: {raw_meta_file_path_for_payload}. RequestID: {_request_id_arg}")
+                        except Exception as e_meta_raw_stream: logger.error(f"Failed .meta for raw ZIP {raw_meta_file_path_for_payload}: {e_meta_raw_stream}. RequestID: {_request_id_arg}")
+                        current_results_list_for_payload.append({
+                            'original_name': f"{_original_video_filename_arg} (原始截图)", 'converted_name': raw_zip_filename_for_payload,
+                            'download_url': reverse('converter:download_converted_file', args=[_request_user_username_arg, _today_date_str_arg, raw_zip_filename_for_payload]),
+                            'status': 'success', 'message': f'包含所有原始提取的截图 ({raw_count_from_stdout} 张)。'
+                        })
+                    else: logger.warning(f"Raw snapshot output directory not found: {source_raw_dir_script_output}. RequestID: {_request_id_arg}")
+
+                    if os.path.exists(source_dedup_dir_script_output) and os.path.isdir(source_dedup_dir_script_output):
+                        if os.path.exists(_target_dedup_snapshots_dir_arg): shutil.rmtree(_target_dedup_snapshots_dir_arg)
+                        shutil.copytree(source_dedup_dir_script_output, _target_dedup_snapshots_dir_arg, dirs_exist_ok=False)
+                        logger.info(f"Copied deduplicated snapshots to {_target_dedup_snapshots_dir_arg}. RequestID: {_request_id_arg}")
+                        
+                        dedup_zip_base_name_for_payload = os.path.join(_user_converted_dir_arg, f"deduplicated_frames_{_safe_video_filename_arg}_{_request_id_arg}")
+                        dedup_zip_file_path_for_payload = shutil.make_archive(dedup_zip_base_name_for_payload, 'zip', _target_dedup_snapshots_dir_arg)
+                        dedup_zip_filename_for_payload = os.path.basename(dedup_zip_file_path_for_payload)
+                        dedup_meta_file_path_for_payload = f"{dedup_zip_file_path_for_payload}.meta"
+                        try:
+                            with open(dedup_meta_file_path_for_payload, 'w', encoding='utf-8') as mf_dedup_stream: mf_dedup_stream.write(_original_video_filename_arg)
+                            logger.info(f"Created .meta for deduplicated ZIP: {dedup_meta_file_path_for_payload}. RequestID: {_request_id_arg}")
+                        except Exception as e_meta_dedup_stream: logger.error(f"Failed .meta for dedup ZIP {dedup_meta_file_path_for_payload}: {e_meta_dedup_stream}. RequestID: {_request_id_arg}")
+                        current_results_list_for_payload.append({
+                            'original_name': f"{_original_video_filename_arg} (去重截图)", 'converted_name': dedup_zip_filename_for_payload,
+                            'download_url': reverse('converter:download_converted_file', args=[_request_user_username_arg, _today_date_str_arg, dedup_zip_filename_for_payload]),
+                            'status': 'success', 'message': f'视频帧去重完成。原始截图: {raw_count_from_stdout} 张，去重后截图: {dedup_count_from_stdout} 张。'
+                        })
+                    else: 
+                        logger.warning(f"Deduplicated snapshot output directory not found: {source_dedup_dir_script_output}. RequestID: {_request_id_arg}")
+                        if not any(r['status'] == 'success' and '原始截图' in r['original_name'] for r in current_results_list_for_payload):
+                            current_results_list_for_payload.append({'original_name': _original_video_filename_arg, 'status': 'error', 'message': '脚本成功但未找到去重截图。'})
+                    
+                    if not current_results_list_for_payload: # Both raw and dedup dirs were not found
+                        logger.error(f"Neither raw nor dedup output found. RawSrc: {source_raw_dir_script_output}, DedupSrc: {source_dedup_dir_script_output}. RID: {_request_id_arg}")
+                        current_results_list_for_payload.append({'original_name': _original_video_filename_arg, 'status': 'error', 'message': '脚本成功但未找到任何截图输出目录。'})
+                    final_result_payload_stream_var = {"type": "result", "results": current_results_list_for_payload, "request_id": _request_id_arg, "merge_output": False}
                 
-                if not current_results_list and (not os.path.exists(source_raw_dir_in_temp) and not os.path.exists(source_dedup_dir_in_temp)):
-                    current_results_list.append({
-                        'original_name': original_video_filename,
-                        'status': 'error',
-                        'message': f'视频处理脚本运行成功，但未能找到任何截图输出目录。' # Removed STDOUT from here too
-                    })
-                final_result_payload = {"type": "result", "results": current_results_list, "request_id": request_id, "merge_output": False}
-            else: # Script execution failed
-                logger.error(f"process_video_extraction_view (stream): Script failed with code {return_code}. Input: {original_video_filename}. RequestID: {request_id}")
-                error_message = f'视频处理脚本执行失败: {stderr_data_remaining[:500] if stderr_data_remaining else "(无详细错误信息)"}'
-                final_result_payload = {"type": "error", "message": error_message, "request_id": request_id}
+                elif return_code_collected_stream is not None: # Script failed (not 0, not -9, not -10)
+                    logger.error(f"stream_video_processing_response: Script failed with code {return_code_collected_stream}. Input: {_original_video_filename_arg}. RID: {_request_id_arg}")
+                    error_detail = stderr_data_remaining_collected_stream[:500] if stderr_data_remaining_collected_stream else "(无详细错误信息)"
+                    if not stderr_data_remaining_collected_stream and stdout_data_collected_stream: error_detail += f" STDOUT: {stdout_data_collected_stream[:300]}"
+                    final_result_payload_stream_var = {"type": "error", "message": f'视频处理脚本执行失败: {error_detail}', "request_id": _request_id_arg}
+            
+            elif return_code_collected_stream == -10: # Popen failure
+                logger.error(f"stream_video_processing_response: Popen failed. Input: {_original_video_filename_arg}. RID: {_request_id_arg}")
+                final_result_payload_stream_var = {"type": "error", "message": "无法启动视频处理脚本。", "request_id": _request_id_arg}
+            
+            # Yield final result/error only if it hasn't been yielded due to timeout
+            if not (final_result_payload_stream_var.get("type") == "error" and return_code_collected_stream == -9) and final_result_payload_stream_var:
+                 yield f"data: {json.dumps(final_result_payload_stream_var)}\n\n"
 
-        except Exception as e_main:
-            logger.error(f"process_video_extraction_view (stream): Exception during video processing for {original_video_filename}: {e_main}. RequestID: {request_id}", exc_info=True)
-            final_result_payload = {"type": "error", "message": f'视频处理时发生意外服务器错误: {str(e_main)}', "request_id": request_id}
+        except Exception as e_main_stream_exc: 
+            logger.error(f"stream_video_processing_response: Main exception for {_original_video_filename_arg}: {e_main_stream_exc}. RID: {_request_id_arg}", exc_info=True)
+            # Avoid double-sending error if one (like timeout) was already sent
+            if not (final_result_payload_stream_var and final_result_payload_stream_var.get("type") == "error" and final_result_payload_stream_var.get("request_id") == _request_id_arg):
+                final_result_payload_stream_var = {"type": "error", "message": f'视频处理时发生意外服务器错误。 (请求ID: {_request_id_arg})', "request_id": _request_id_arg}
+                yield f"data: {json.dumps(final_result_payload_stream_var)}\n\n"
         
         finally:
-            # Ensure the subprocess is terminated and waited for before cleanup
-            if 'process' in locals() and process.poll() is None: # Check if process was started and is still running
+            if process_stream and process_stream.poll() is None: 
+                logger.warning(f"Subprocess still running in finally (PID: {process_stream.pid}). Terminating/killing. RID: {_request_id_arg}")
                 try:
-                    process.terminate() # Try to terminate gracefully
-                    process.wait(timeout=5) # Wait for a few seconds
+                    process_stream.terminate(); process_stream.wait(timeout=5)
+                    logger.info(f"Process terminated. PID: {process_stream.pid}. RID: {_request_id_arg}")
                 except subprocess.TimeoutExpired:
-                    logger.warning(f"Subprocess did not terminate gracefully, attempting to kill. PID: {process.pid}. RequestID: {request_id}")
-                    process.kill() # Force kill if terminate fails
-                    process.wait() # Wait for kill
-                except Exception as e_term:
-                    logger.error(f"Error during subprocess termination: {e_term}. RequestID: {request_id}")
+                    logger.warning(f"Terminate timed out. Killing. PID: {process_stream.pid}. RID: {_request_id_arg}")
+                    process_stream.kill(); process_stream.wait(timeout=5)
+                    logger.info(f"Process killed. PID: {process_stream.pid}. RID: {_request_id_arg}")
+                except ProcessLookupError: logger.info(f"Process (PID: {process_stream.pid}) already ended. RID: {_request_id_arg}")
+                except Exception as e_term_fin: logger.error(f"Error in finally termination: {e_term_fin}. PID: {process_stream.pid if process_stream else 'N/A'}. RID: {_request_id_arg}")
             
-            cleanup_temp_files(temp_files_to_clean, request_id, remove_dirs=True)
-            logger.info(f"process_video_extraction_view (stream): Cleanup of temp files executed for {exec_temp_dir}. RequestID: {request_id}")
-            if final_result_payload: # Send final result or error
-                 yield f"data: {json.dumps(final_result_payload)}\n\n"
-            # Signal end of stream explicitly (optional, depends on client handling)
-            yield f"event: stream_end\ndata: End of stream for {request_id}\n\n"
+            cleanup_temp_files(_temp_files_to_clean_stream_arg, _request_id_arg, remove_dirs=True)
+            logger.info(f"stream_video_processing_response: Cleanup executed for {_exec_temp_dir_arg}. RID: {_request_id_arg}")
+            yield f"event: stream_end\ndata: {json.dumps({'message': f'End of stream for {_request_id_arg}', 'request_id': _request_id_arg})}\n\n"
 
-    response = StreamingHttpResponse(stream_video_processing_response(), content_type='text/event-stream')
-    response['Cache-Control'] = 'no-cache' # Important for SSE
+    stream_generator_instance = stream_video_processing_response(
+        script_path, temp_video_path, exec_temp_dir, scene_threshold, group_size,
+        original_video_filename, safe_video_filename, user_converted_dir, today_date_str,
+        target_raw_snapshots_dir, target_dedup_snapshots_dir,
+        request.user.username, request_id
+    )
+    response = StreamingHttpResponse(stream_generator_instance, content_type='text/event-stream')
+    response['Cache-Control'] = 'no-cache'
     return response
 
 # Celery task status check view (if you integrate Celery later)
