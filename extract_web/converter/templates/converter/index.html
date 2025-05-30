@@ -307,24 +307,29 @@
     }
     /* Using table for converted files now, see general table styles */
     #convertedFilesTableContainer table th,
-    #convertedFilesTableContainer table td {
+    #convertedFilesTableContainer table td,
+    #videoProcessingResultsTableContainer table th,
+    #videoProcessingResultsTableContainer table td {
         font-size: 0.9em; /* Match other table font sizes */
         vertical-align: middle; /* Vertically align content in cells */
         border: 1px solid #ddd; /* Gray border for cells */
         padding: 8px; /* Add some padding inside cells */
         text-align: left; /* Align text to left for better readability, can be adjusted */
     }
-    #convertedFilesTableContainer table {
+    #convertedFilesTableContainer table,
+    #videoProcessingResultsTableContainer table {
         table-layout: auto; /* Allow table to adjust column widths based on content */
         width: 100%; /* Ensure table uses full container width */
         border-collapse: collapse; /* Important for single borders */
         border: 1px solid #ddd; /* Optional: Outer border for the table itself */
     }
-    #convertedFilesTableContainer table th {
+    #convertedFilesTableContainer table th,
+    #videoProcessingResultsTableContainer table th {
         background-color: #f8f9fa; /* Light background for headers */
         font-weight: 600; /* Make header text bold */
     }
-    #convertedFilesTableContainer .download-link {
+    #convertedFilesTableContainer .download-link,
+    #videoProcessingResultsTableContainer .download-link {
         display: inline-block;
         padding: 6px 12px;
         background-color: #28a745; 
@@ -336,7 +341,8 @@
         cursor: pointer;
         transition: background-color 0.2s;
     }
-    #convertedFilesTableContainer .download-link:hover {
+    #convertedFilesTableContainer .download-link:hover,
+    #videoProcessingResultsTableContainer .download-link:hover {
         background-color: #218838;
     }
     .status-badge {
@@ -647,8 +653,12 @@
                 <p>正在处理视频，请稍候...</p>
             </div>
 
-            <div id="videoProcessingResults" style="margin-top: 20px; padding: 10px; border-radius: 4px;">
-                <!-- Results of video processing will be displayed here -->
+            <!-- Ensure this structure matches the document conversion results section -->
+            <div class="converted-files-container" style="margin-top: 30px;"> 
+                <h3>转换结果</h3> 
+                <div id="videoProcessingResultsTableContainer"> <!-- Changed ID for clarity & potential specific styling -->
+                    <!-- Table for video results will be inserted here by JavaScript -->
+                </div>
             </div>
         </div>
 
@@ -1223,7 +1233,8 @@
         const videoFileElement = document.getElementById('videoFileForAnalysisInput');
         const sceneThresholdElement = document.getElementById('sceneDetectionThreshold');
         const groupSizeElement = document.getElementById('deduplicationGroupSize');
-        const resultsDiv = document.getElementById('videoProcessingResults');
+        // Adjusted to target the new container for video results table
+        const resultsDiv = document.getElementById('videoProcessingResultsTableContainer'); 
         const spinner = document.getElementById('videoProcessingSpinner');
         const progressBarContainer = document.getElementById('videoProgressBarContainer');
         const progressBar = document.getElementById('videoProgressBar');
@@ -1411,7 +1422,8 @@
     }
 
     function displayVideoExtractionResults(data) {
-        const resultsDiv = document.getElementById('videoProcessingResults');
+        // Adjusted to target the new container ID for video results table
+        const resultsDiv = document.getElementById('videoProcessingResultsTableContainer'); 
         if (!resultsDiv) return;
 
         resultsDiv.innerHTML = ''; // Clear previous results
