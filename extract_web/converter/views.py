@@ -6,8 +6,11 @@ from django.contrib.auth.models import User
 from django.conf import settings
 import os
 import subprocess # For running the script
+import sys # <--- ADDED IMPORT FOR SYS
+import json # <--- ADDED IMPORT FOR JSON
+import re # <--- ADDED IMPORT FOR RE
 from django.contrib import messages # 新增导入
-from django.http import JsonResponse, FileResponse, Http404
+from django.http import JsonResponse, FileResponse, Http404, StreamingHttpResponse
 from django.views.decorators.http import require_POST # To restrict to POST requests
 from django.views.decorators.csrf import csrf_exempt # <<< Import csrf_exempt
 import random
@@ -804,7 +807,8 @@ def pdf_to_file_view(request):
         except Exception as e_conv_pdf_ind:
             logger.error(f"pdf_to_file_view: {sub_tab} for {original_name} EXCEPTION: {e_conv_pdf_ind}. RID: {request_id}", exc_info=True)
             processed_files_final.append({'original_name': original_name, 'status': 'error', 'message': f"关键错误: {str(e_conv_pdf_ind)}"})
-            if actual_output_path_from_converter and os.path.exists(actual_output_path_from_converter): temp_files_to_delete_final.append(actual_output_path_from_converter)
+            if actual_output_path_from_converter and os.path.exists(actual_output_path_from_converter):
+                temp_files_to_delete_final.append(actual_output_path_from_converter)
         finally:
             if source_file_path and os.path.exists(source_file_path):
                 temp_files_to_delete_final.append(source_file_path)
@@ -1093,47 +1097,203 @@ def download_converted_file_view(request, username, date_str, filename):
 
 @csrf_exempt # Ensure CSRF exemption if you test directly without a form including {% csrf_token %}
 @require_POST
-def process_video_view(request):
-    request_id = request.META.get('HTTP_X_REQUEST_ID')
-    logger.info(f"Received request for video processing. Request ID: {request_id}")
+def process_video_extraction_view(request):
+    request_id = ''.join(random.choices(string.ascii_lowercase + string.digits, k=10)) # Unique ID for this request
+    today_date_str = datetime.now().strftime("%Y%m%d")
+    logger.info(f"process_video_extraction_view: Received request. RequestID: {request_id}")
+
+    user_upload_dir, user_converted_dir = "", ""
     try:
-        video_url = request.POST.get('video_url')
-        video_file = request.FILES.get('video_file')
-        # action = request.POST.get('action') # e.g., 'analyze_video_to_ppt'
-
-        logger.info(f"Video processing parameters for Request ID {request_id}: URL='{video_url}', File='{video_file.name if video_file else None}'")
-
-        # Simulate processing delay and success
-        # In a real scenario, this would trigger a Celery task for video analysis
-        time.sleep(5) # Simulate work being done
-
-        # Simulate a successful outcome with a dummy file
-        # This file won't actually exist, but it mimics the expected response structure
-        output_file_name = f"extracted_video_presentation_{request_id[:6]}.pptx"
-        # IMPORTANT: For actual file serving, you'd save this to a user-specific, date-specific, or request-specific temporary folder
-        # and provide a secure download link similar to download_converted_file_view or download_file_view.
-        # For this simulation, we just provide a conceptual URL.
-        dummy_output_folder = os.path.join(settings.MEDIA_ROOT, 'temp_files') # Ensure MEDIA_ROOT is configured
-        os.makedirs(dummy_output_folder, exist_ok=True)
-        # Create a placeholder file to make the download link somewhat functional if MEDIA_URL is set up
-        with open(os.path.join(dummy_output_folder, output_file_name), 'w') as f:
-            f.write("This is a simulated PPTX file.")
-        
-        output_file_url = os.path.join(settings.MEDIA_URL, 'temp_files', output_file_name) 
-
-        logger.info(f"Video processing simulation complete for Request ID {request_id}. Output: {output_file_name}")
-
-        return JsonResponse({
-            "success": True,
-            "message": "视频PPT提取成功 (模拟)",
-            "output_file_url": output_file_url,
-            "output_file_name": output_file_name,
-            "request_id": request_id
-        })
-
+        user_upload_dir, user_converted_dir = ensure_user_directories(request.user.username, today_date_str)
     except Exception as e:
-        logger.error(f"Error in process_video_view (Request ID: {request_id}): {e}", exc_info=True)
-        return JsonResponse({"success": False, "error": str(e), "request_id": request_id}, status=500)
+        logger.critical(f"process_video_extraction_view: Failed to create user directories for {request.user.username}. Error: {e}. RequestID: {request_id}", exc_info=True)
+        return format_error_response(message='服务器错误：无法创建用户目录。', request_id=request_id)
+
+    video_file_obj = request.FILES.get('videoFile') # Ensure frontend name matches
+    scene_threshold_str = request.POST.get('sceneDetectionThreshold', '10.0')
+    group_size_str = request.POST.get('deduplicationGroupSize', '5')
+
+    if not video_file_obj:
+        logger.warning(f"process_video_extraction_view: No video file uploaded. RequestID: {request_id}")
+        return format_error_response(message='没有上传视频文件。', request_id=request_id)
+
+    try:
+        scene_threshold = float(scene_threshold_str)
+        group_size = int(group_size_str)
+    except ValueError:
+        logger.warning(f"process_video_extraction_view: Invalid threshold or group size. T: {scene_threshold_str}, G: {group_size_str}. RequestID: {request_id}")
+        return format_error_response(message='场景阈值或分组大小参数无效。', request_id=request_id)
+
+    temp_video_path, original_video_filename, safe_video_filename = save_uploaded_file(video_file_obj, user_upload_dir, request_id)
+    if not temp_video_path:
+        logger.error(f"process_video_extraction_view: Failed to save uploaded video file: {original_video_filename}. RequestID: {request_id}")
+        return format_error_response(message=f'视频文件 "{original_video_filename}" 上传保存失败。', request_id=request_id)
+
+    # Path to the video extraction script
+    # settings.BASE_DIR is .../extract_doc/extract_web
+    # script is in .../extract_doc/
+    script_original_location = os.path.abspath(os.path.join(settings.BASE_DIR, '..', 'extract_video_snapshots.py'))
+    if not os.path.exists(script_original_location):
+        logger.error(f"process_video_extraction_view: Snapshot script not found at {script_original_location}. RequestID: {request_id}")
+        cleanup_temp_files([temp_video_path], request_id)
+        return format_error_response(message='服务器配置错误：找不到视频处理脚本。', request_id=request_id)
+
+    # Create a temporary directory for script execution to manage its outputs
+    exec_temp_dir = os.path.join(user_upload_dir, f"video_exec_{request_id}")
+    os.makedirs(exec_temp_dir, exist_ok=True)
+    script_in_temp_dir_path = os.path.join(exec_temp_dir, os.path.basename(script_original_location))
+    shutil.copy2(script_original_location, script_in_temp_dir_path)
+    
+    # These are the directories where the script, when run from exec_temp_dir, will output its results
+    # based on its internal hardcoded relative paths like "test/test_data/video-snapshot"
+    script_output_base_in_temp = os.path.join(exec_temp_dir, "test", "test_data")
+    source_raw_dir_in_temp = os.path.join(script_output_base_in_temp, "video-snapshot")
+    source_dedup_dir_in_temp = os.path.join(script_output_base_in_temp, "video-snapshot-duplicate")
+
+    # These are the final target directories in the user's history
+    target_raw_snapshots_dir = os.path.join(user_converted_dir, "video-snapshot")
+    target_dedup_snapshots_dir = os.path.join(user_converted_dir, "video-snapshot-duplicate")
+    os.makedirs(target_raw_snapshots_dir, exist_ok=True)
+    os.makedirs(target_dedup_snapshots_dir, exist_ok=True)
+
+    processed_files_final = [] # This will be populated at the end by the generator
+    # temp_files_to_delete_final is managed by the generator now
+
+    def stream_video_processing_response():
+        temp_files_to_clean = [temp_video_path, exec_temp_dir]
+        process_completed_successfully = False
+        final_result_payload = None
+
+        try:
+            cmd = [
+                sys.executable,
+                script_in_temp_dir_path,
+                "--video_file", temp_video_path,
+                "--output_base_dir", exec_temp_dir,
+                "--threshold", str(scene_threshold),
+                "--group_size", str(group_size)
+            ]
+            logger.info(f"process_video_extraction_view (stream): Executing command: {' '.join(cmd)}. RequestID: {request_id}")
+            
+            process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding='utf-8', errors='replace', bufsize=1)
+
+            # Yield initial message
+            yield f"data: {json.dumps({'type': 'info', 'message': '视频处理脚本已启动...'})}\n\n"
+
+            # Read stderr for progress (assuming PySceneDetect outputs progress there)
+            if process.stderr:
+                for line_from_stderr in iter(process.stderr.readline, ''):
+                    original_line = line_from_stderr.strip() # Original line from stderr (with if initial decoding failed)
+                    if not original_line: continue
+                    logger.debug(f"Script STDERR line: {original_line}. RequestID: {request_id}")
+
+                    # Clean the line for display by removing non-ASCII characters that became or were other symbols
+                    # This should strip out the progress bar visual elements that are causing garbling
+                    cleaned_display_line = original_line.encode('ascii', 'ignore').decode('utf-8', 'ignore')
+                    # Further ensure the specific unicode replacement character is removed if it somehow persists
+                    cleaned_display_line = cleaned_display_line.replace('\ufffd', '').strip()
+
+
+                    progress_match = re.search(r"(\d+)/(\d+)\s*\((.*?)%\)", original_line) # Regex on original_line for robust parsing
+                    if progress_match:
+                        current_frame, total_frames, percent_str = progress_match.groups()
+                        try:
+                            percent = float(percent_str)
+                            yield f"data: {json.dumps({'type': 'progress', 'percent': percent, 'text': cleaned_display_line})}\n\n"
+                        except ValueError:
+                            yield f"data: {json.dumps({'type': 'info', 'message': cleaned_display_line})}\n\n" # Send as info if percent parse fails
+                    else:
+                        yield f"data: {json.dumps({'type': 'info', 'message': cleaned_display_line})}\n\n" # Send non-progress lines as info
+                    # Ensure buffer is flushed to client periodically if needed by frontend/browser
+            
+            stdout_data, stderr_data_remaining = process.communicate() # Get remaining stderr and all stdout
+            return_code = process.returncode
+
+            if stdout_data:
+                logger.info(f"Script STDOUT (final) for {request_id}:\n{stdout_data}")
+            if stderr_data_remaining: # Log any stderr not caught by the loop (e.g. if it didn't end with newline)
+                logger.error(f"Script STDERR (final) for {request_id}:\n{stderr_data_remaining}")
+
+            if return_code == 0:
+                logger.info(f"Script executed successfully for {original_video_filename}. RequestID: {request_id}")
+                
+                source_raw_dir_in_temp = os.path.join(exec_temp_dir, "video-snapshot")
+                source_dedup_dir_in_temp = os.path.join(exec_temp_dir, "video-snapshot-duplicate")
+
+                # File copying and ZIP creation logic (moved from outer try block)
+                current_results_list = [] # Temporary list for this block
+                if os.path.exists(source_raw_dir_in_temp) and os.path.isdir(source_raw_dir_in_temp):
+                    shutil.copytree(source_raw_dir_in_temp, target_raw_snapshots_dir, dirs_exist_ok=True)
+                    logger.info(f"Copied raw snapshots to {target_raw_snapshots_dir}. RequestID: {request_id}")
+                else:
+                    logger.warning(f"Raw snapshot output directory not found after script run: {source_raw_dir_in_temp}. RequestID: {request_id}")
+
+                if os.path.exists(source_dedup_dir_in_temp) and os.path.isdir(source_dedup_dir_in_temp):
+                    shutil.copytree(source_dedup_dir_in_temp, target_dedup_snapshots_dir, dirs_exist_ok=True)
+                    logger.info(f"Copied deduplicated snapshots to {target_dedup_snapshots_dir}. RequestID: {request_id}")
+                    
+                    zip_base_name = os.path.join(user_converted_dir, f"deduplicated_frames_{safe_video_filename}_{request_id}")
+                    zip_file_path = shutil.make_archive(zip_base_name, 'zip', target_dedup_snapshots_dir)
+                    zip_filename = os.path.basename(zip_file_path)
+                    
+                    current_results_list.append({
+                        'original_name': original_video_filename,
+                        'converted_name': zip_filename,
+                        'download_url': reverse('converter:download_converted_file', args=[request.user.username, today_date_str, zip_filename]),
+                        'status': 'success',
+                        'message': (
+                            f'视频帧提取和去重成功。原始截图位于 "video-snapshot" 目录， '
+                            f'去重后截图位于 "video-snapshot-duplicate" 目录。'
+                            f'ZIP压缩包包含去重后的截图。脚本STDOUT: {stdout_data[:200] if stdout_data else "(无)"}'
+                        )
+                    })
+                    process_completed_successfully = True 
+                else:
+                    logger.warning(f"Deduplicated snapshot output directory not found: {source_dedup_dir_in_temp}. RequestID: {request_id}")
+                    current_results_list.append({
+                        'original_name': original_video_filename, 'status': 'error',
+                        'message': '视频处理脚本执行成功，但未找到去重后的截图输出。'
+                    })
+                
+                if not current_results_list and (not os.path.exists(source_raw_dir_in_temp) and not os.path.exists(source_dedup_dir_in_temp)):
+                    current_results_list.append({
+                        'original_name': original_video_filename,
+                        'status': 'error',
+                        'message': f'视频处理脚本运行成功，但未能找到任何截图输出目录。脚本STDOUT: {stdout_data[:200] if stdout_data else "(无)"}'
+                    })
+                final_result_payload = {"type": "result", "results": current_results_list, "request_id": request_id, "merge_output": False}
+            else: # Script execution failed
+                logger.error(f"process_video_extraction_view (stream): Script failed with code {return_code}. Input: {original_video_filename}. RequestID: {request_id}")
+                error_message = f'视频处理脚本执行失败: {stderr_data_remaining[:500] if stderr_data_remaining else "(无详细错误信息)"}'
+                final_result_payload = {"type": "error", "message": error_message, "request_id": request_id}
+
+        except Exception as e_main:
+            logger.error(f"process_video_extraction_view (stream): Exception during video processing for {original_video_filename}: {e_main}. RequestID: {request_id}", exc_info=True)
+            final_result_payload = {"type": "error", "message": f'视频处理时发生意外服务器错误: {str(e_main)}', "request_id": request_id}
+        
+        finally:
+            # Ensure the subprocess is terminated and waited for before cleanup
+            if 'process' in locals() and process.poll() is None: # Check if process was started and is still running
+                try:
+                    process.terminate() # Try to terminate gracefully
+                    process.wait(timeout=5) # Wait for a few seconds
+                except subprocess.TimeoutExpired:
+                    logger.warning(f"Subprocess did not terminate gracefully, attempting to kill. PID: {process.pid}. RequestID: {request_id}")
+                    process.kill() # Force kill if terminate fails
+                    process.wait() # Wait for kill
+                except Exception as e_term:
+                    logger.error(f"Error during subprocess termination: {e_term}. RequestID: {request_id}")
+            
+            cleanup_temp_files(temp_files_to_clean, request_id, remove_dirs=True)
+            logger.info(f"process_video_extraction_view (stream): Cleanup of temp files executed for {exec_temp_dir}. RequestID: {request_id}")
+            if final_result_payload: # Send final result or error
+                 yield f"data: {json.dumps(final_result_payload)}\n\n"
+            # Signal end of stream explicitly (optional, depends on client handling)
+            yield f"event: stream_end\ndata: End of stream for {request_id}\n\n"
+
+    response = StreamingHttpResponse(stream_video_processing_response(), content_type='text/event-stream')
+    response['Cache-Control'] = 'no-cache' # Important for SSE
+    return response
 
 # Celery task status check view (if you integrate Celery later)
 @login_required

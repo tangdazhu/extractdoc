@@ -102,24 +102,35 @@ def delete_user_data_folder(username: str) -> tuple[bool, str]:
         logger.warning(message)
         return False, message
 
-def cleanup_temp_files(file_paths_to_delete: list[str], request_id: str):
+def cleanup_temp_files(file_paths_to_delete: list[str], request_id: str, remove_dirs: bool = False):
     """
-    Safely deletes a list of temporary files, logging any errors.
+    Safely deletes a list of temporary files or directories, logging any errors.
 
     Args:
-        file_paths_to_delete: A list of absolute file paths to delete.
+        file_paths_to_delete: A list of absolute file/directory paths to delete.
         request_id: The unique request ID for logging context.
+        remove_dirs: If True, allows deletion of directories using shutil.rmtree. 
+                     Otherwise, only files will be deleted.
     """
     if not file_paths_to_delete:
         return
 
-    logger.debug(f"Attempting to cleanup {len(file_paths_to_delete)} temporary files. RequestID: {request_id}")
-    for file_path in file_paths_to_delete:
-        if file_path and os.path.exists(file_path):
+    logger.debug(f"Attempting to cleanup {len(file_paths_to_delete)} temporary items. RequestID: {request_id}. Remove Dirs: {remove_dirs}")
+    for item_path in file_paths_to_delete:
+        if item_path and os.path.exists(item_path):
             try:
-                os.remove(file_path)
-                logger.info(f"Successfully cleaned up temporary file: {file_path}. RequestID: {request_id}")
+                if os.path.isdir(item_path):
+                    if remove_dirs:
+                        shutil.rmtree(item_path)
+                        logger.info(f"Successfully cleaned up temporary directory (and its contents): {item_path}. RequestID: {request_id}")
+                    else:
+                        logger.warning(f"Skipping directory {item_path} because remove_dirs is False. RequestID: {request_id}")
+                elif os.path.isfile(item_path):
+                    os.remove(item_path)
+                    logger.info(f"Successfully cleaned up temporary file: {item_path}. RequestID: {request_id}")
+                else:
+                    logger.warning(f"Item {item_path} is neither a file nor a directory. Skipping. RequestID: {request_id}")
             except OSError as e:
-                logger.warning(f"Failed to delete temporary file {file_path}: {e}. RequestID: {request_id}")
-        elif file_path:
-            logger.debug(f"Temporary file path {file_path} does not exist, skipping cleanup. RequestID: {request_id}") 
+                logger.warning(f"Failed to delete temporary item {item_path}: {e}. RequestID: {request_id}")
+        elif item_path:
+            logger.debug(f"Temporary item path {item_path} does not exist, skipping cleanup. RequestID: {request_id}") 

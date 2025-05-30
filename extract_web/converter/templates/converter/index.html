@@ -440,6 +440,25 @@
         font-size: 0.7em; /* Small percentage text */
     }
 
+    /* Styling for the scrollable progress list */
+    #videoProgressListContainer {
+        max-height: 200px; /* Adjust as needed */
+        overflow-y: auto;
+        border: 1px solid #ccc;
+        padding: 10px;
+        margin-top: 10px;
+        background-color: #f9f9f9;
+    }
+    #videoProgressList {
+        list-style-type: none;
+        padding: 0;
+        margin: 0;
+    }
+    #videoProgressList li {
+        padding: 2px 0;
+        font-size: 0.9em;
+    }
+
 </style>
 {% endblock %}
 
@@ -568,34 +587,68 @@
                  <h1 class="page-title">视频分析</h1>
             </div>
             
-            <div class="form-group">
-                <label for="videoUrl">视频URL:</label>
-                <input type="text" id="videoUrl" name="videoUrl" placeholder="例如: https://www.youtube.com/watch?v=...">
+            <div class="form-group" style="margin-top: 10px;">
+                <label for="videoFileForAnalysisInput" style="font-weight: 500;">选择视频文件 (Select Video File):</label>
+                <input type="file" id="videoFileForAnalysisInput" name="videoFileForAnalysisInput" class="form-control-file" accept="video/*" style="margin-top: 5px;">
+                <small class="form-text text-muted" style="font-size: 0.85em;">支持常见的视频格式 (e.g., MP4, MOV, AVI)。</small>
             </div>
 
-            <p style="text-align: center; margin: 15px 0; font-weight: 500;">或者</p>
-
-            <div id="videoFileDropArea" class="video-drop-area">
-                <input type="file" id="videoFileUpload" accept="video/*" hidden>
-                <p>点击或拖拽视频文件到此区域</p>
-            </div>
             <ul id="videoFileList" style="list-style-type: none; padding: 0; margin-bottom: 15px;">
-                <!-- Uploaded video file will be listed here -->
+                <!-- Uploaded video file (for analysis tab) will be listed here by JavaScript -->
             </ul>
             
-            <div class="action-buttons">
-                <button onclick="startVideoAnalysis()">提取PPT</button>
+            <div class="form-group" style="margin-top: 20px;">
+                <label for="sceneDetectionThreshold" style="font-weight: 500;">场景检测阈值 (推荐 5-30):</label>
+                <input type="number" id="sceneDetectionThreshold" name="sceneDetectionThreshold" value="10.0" step="0.1" class="form-control" style="width: 150px; padding: 8px; margin-top: 5px; display: inline-block;">
+                <small class="form-text text-muted" style="display: block; margin-top: 5px; font-size: 0.85em;">较低值更敏感，检测更多初始场景。</small>
             </div>
+
+            <div class="form-group" style="margin-top: 15px;">
+                <label for="deduplicationGroupSize" style="font-weight: 500;">去重分组大小 (推荐 2-10):</label>
+                <input type="number" id="deduplicationGroupSize" name="deduplicationGroupSize" value="5" step="1" class="form-control" style="width: 150px; padding: 8px; margin-top: 5px; display: inline-block;">
+                <small class="form-text text-muted" style="display: block; margin-top: 5px; font-size: 0.85em;">连续多少个检测出的小场景视为一组进行去重。</small>
+            </div>
+
+            <button type="button" class="btn btn-primary" onclick="processVideo()" style="margin-top: 15px; padding: 10px 20px; font-size: 1em;">提取帧截图</button>
 
             <!-- Progress Bar for video analysis (optional) -->
             <div class="progress-bar-container" id="videoProgressBarContainer">
                 <div class="progress-bar" id="videoProgressBar">0%</div>
             </div>
 
-            <!-- Results for video analysis -->
-            <div id="videoConversionResults" style="margin-top: 20px;">
-                <h4>分析结果:</h4>
-                <ul id="videoResultList"></ul>
+            <!-- Styling for the scrollable progress list -->
+            <style>
+                #videoProgressListContainer {
+                    max-height: 200px; /* Adjust as needed */
+                    overflow-y: auto;
+                    border: 1px solid #ccc;
+                    padding: 10px;
+                    margin-top: 10px;
+                    background-color: #f9f9f9;
+                }
+                #videoProgressList {
+                    list-style-type: none;
+                    padding: 0;
+                    margin: 0;
+                }
+                #videoProgressList li {
+                    padding: 2px 0;
+                    font-size: 0.9em;
+                }
+            </style>
+            <div id="videoProgressListContainer" style="display: none;">
+                <ul id="videoProgressList"></ul>
+            </div>
+
+            <div id="videoProcessingSpinner" style="display: none; margin-top: 15px;" class="text-center">
+                <div class="spinner-border text-primary" role="status">
+                    <span class="sr-only">处理中...</span>
+                </div>
+                <p>正在处理视频，请稍候...</p>
+            </div>
+
+            <div id="videoProcessingResults" style="margin-top: 20px; padding: 10px; border-radius: 4px;">
+                <!-- Results of video processing will be displayed here -->
             </div>
         </div>
 
@@ -1142,171 +1195,326 @@
     });
 
     // Video Analysis Section JS
-    document.getElementById('videoFileDropArea').addEventListener('click', () => {
-        document.getElementById('videoFileUpload').click();
-    });
+    document.addEventListener('DOMContentLoaded', function () {
+        const videoFileForAnalysisInput = document.getElementById('videoFileForAnalysisInput');
+        const videoFileListDiv = document.getElementById('videoFileList'); // Ensure this ID exists for this tab
 
-    document.getElementById('videoFileDropArea').addEventListener('dragover', (event) => {
-        event.preventDefault();
-        event.stopPropagation();
-        event.currentTarget.style.backgroundColor = '#eaf5ff';
-    });
-
-    document.getElementById('videoFileDropArea').addEventListener('dragleave', (event) => {
-        event.preventDefault();
-        event.stopPropagation();
-        event.currentTarget.style.backgroundColor = '#f8f9faff';
-    });
-
-    document.getElementById('videoFileDropArea').addEventListener('drop', (event) => {
-        event.preventDefault();
-        event.stopPropagation();
-        event.currentTarget.style.backgroundColor = '#f8f9faff';
-        const files = event.dataTransfer.files;
-        if (files.length > 0) {
-            handleVideoFile(files[0]); // Handle only the first file for video
+        if (videoFileForAnalysisInput && videoFileListDiv) {
+            videoFileForAnalysisInput.addEventListener('change', function () {
+                videoFileListDiv.innerHTML = ''; // Clear previous list
+                if (this.files.length > 0) {
+                    const file = this.files[0];
+                    const listItem = document.createElement('div');
+                    listItem.textContent = `已选视频: ${file.name} (${(file.size / 1024 / 1024).toFixed(2)} MB)`;
+                    listItem.style.padding = "5px";
+                    listItem.style.backgroundColor = "#f0f0f0";
+                    listItem.style.borderRadius = "3px";
+                    videoFileListDiv.appendChild(listItem);
+                }
+            });
         }
     });
 
-    document.getElementById('videoFileUpload').addEventListener('change', (event) => {
-        const files = event.target.files;
-        if (files.length > 0) {
-            handleVideoFile(files[0]);
-        }
-        event.target.value = ''; // Reset file input
-    });
+    function processVideo() {
+        console.log("processVideo function called for extraction.");
 
-    function handleVideoFile(file) {
-        const videoFileList = document.getElementById('videoFileList');
-        const maxSizeMB = 100; // Example: Max 100MB for video, adjust as needed
-        const maxSizeBytes = maxSizeMB * 1024 * 1024;
+        const videoFileElement = document.getElementById('videoFileForAnalysisInput');
+        const sceneThresholdElement = document.getElementById('sceneDetectionThreshold');
+        const groupSizeElement = document.getElementById('deduplicationGroupSize');
+        const resultsDiv = document.getElementById('videoProcessingResults');
+        const spinner = document.getElementById('videoProcessingSpinner');
+        const progressBarContainer = document.getElementById('videoProgressBarContainer');
+        const progressBar = document.getElementById('videoProgressBar');
+        const extractButton = document.querySelector('#videoAnalysisContent button[onclick="processVideo()"]');
+        const progressListContainer = document.getElementById('videoProgressListContainer'); // Get the new container
 
-        if (!file.type.startsWith('video/')) {
-            showVideoErrorMessage(`请上传有效的视频文件。`);
+        if (!videoFileElement || !videoFileElement.files || videoFileElement.files.length === 0) {
+            console.warn("processVideo called without a file selected.");
+            resultsDiv.innerHTML = '<p class="text-danger">错误：未选择视频文件。请先选择一个视频文件再点击提取。</p>';
             return;
         }
 
-        if (file.size > maxSizeBytes) {
-            showVideoErrorMessage(`视频文件 "${file.name}" 大小不能超过 ${maxSizeMB}MB。`);
+        if (!sceneThresholdElement || !groupSizeElement) {
+            alert("页面配置错误：找不到阈值或分组大小的输入控件。");
+            resultsDiv.innerHTML = '<p class="text-danger">错误：页面参数控件缺失。</p>';
             return;
         }
 
-        uploadedVideoFile = file;
-        videoFileList.innerHTML = ''; // Clear previous, only one video
-        const listItem = document.createElement('li');
-        listItem.style.backgroundColor = "#e9ecef";
-        listItem.style.padding = "8px 12px";
-        listItem.style.borderRadius = "4px";
-        listItem.textContent = `已选视频: ${file.name}`;
-        videoFileList.appendChild(listItem);
-        showVideoErrorMessage(''); // Clear any previous error
-    }
+        const videoFile = videoFileElement.files[0];
+        const sceneThreshold = sceneThresholdElement.value;
+        const groupSize = groupSizeElement.value;
 
-    function startVideoAnalysis() {
-        const videoUrl = document.getElementById('videoUrl').value.trim();
-        
-        if (!videoUrl && !uploadedVideoFile) {
-            showVideoErrorMessage('请输入视频URL或上传一个视频文件。');
-            return;
+        resultsDiv.innerHTML = ''; // Clear previous results
+        if(spinner) spinner.style.display = 'block'; // Show spinner
+        if(progressBarContainer) progressBarContainer.style.display = 'block';
+        if(progressBar) {
+            progressBar.style.width = '0%';
+            progressBar.textContent = '0%';
+            progressBar.classList.remove('bg-success', 'bg-danger');
+            progressBar.classList.add('bg-primary'); // Default progress bar color
         }
-        if (videoUrl && uploadedVideoFile) {
-            showVideoErrorMessage('请只提供视频URL或上传文件，不要同时提供两者。');
-            return;
-        }
-
-        showVideoErrorMessage(''); // Clear previous errors
-        document.getElementById('videoResultList').innerHTML = ''; // Clear previous results
-        showVideoProgressBar();
+        if(extractButton) extractButton.disabled = true;
+        if(progressListContainer) progressListContainer.style.display = 'block'; // Show the container
 
         const formData = new FormData();
-        if (videoUrl) {
-            formData.append('video_url', videoUrl);
-        }
-        if (uploadedVideoFile) {
-            formData.append('video_file', uploadedVideoFile);
-        }
-        // Add CSRF token if not already handled globally or by middleware
-        const csrfToken = document.querySelector('[name=csrfmiddlewaretoken]') ? document.querySelector('[name=csrfmiddlewaretoken]').value : '{{ csrf_token }}';
-        if (csrfToken) {
-             formData.append('csrfmiddlewaretoken', csrfToken);
-        } else {
-            console.warn("CSRF token not found. Ensure it is available in the template as {{ csrf_token }} or in a meta tag.");
-            // Depending on server setup, requests might fail without CSRF token
-        }
-       
-        // Add a unique request ID for tracking (optional, backend might generate its own)
-        const clientRequestId = 'vid-' + Date.now() + '-' + Math.random().toString(36).substring(2, 8);
-        formData.append('client_request_id', clientRequestId);
+        formData.append('videoFile', videoFile);
+        formData.append('sceneDetectionThreshold', sceneThreshold);
+        formData.append('deduplicationGroupSize', groupSize);
 
-        fetch("{% url 'converter:process_video' %}", { 
+        console.log("FormData prepared for video extraction. Starting EventSource.");
+
+        resultsDiv.innerHTML = '<ul id="videoProgressList" class="list-group"></ul>';
+        const progressList = document.getElementById('videoProgressList');
+
+        function addProgressItem(text, type = 'info') {
+            if (!progressList) return;
+            const item = document.createElement('li');
+            item.classList.add('list-group-item');
+            if (type === 'progress') item.classList.add('list-group-item-info');
+            else if (type === 'error') item.classList.add('list-group-item-danger');
+            else if (type === 'success') item.classList.add('list-group-item-success');
+            item.textContent = text;
+            progressList.insertBefore(item, progressList.firstChild); // Add to top
+        }
+
+        fetch("{% url 'converter:api_video_to_extraction' %}", {
             method: 'POST',
             body: formData,
             headers: {
-                'X-Requested-With': 'XMLHttpRequest', // Standard header for AJAX requests
-                'X-Request-ID': clientRequestId // Send client-generated request ID
+                'X-CSRFToken': getCsrfToken(),
+                'X-Requested-With': 'XMLHttpRequest'
             }
         })
         .then(response => {
             if (!response.ok) {
-                // Try to parse error from JSON if possible
-                return response.json().then(errData => {
-                    throw new Error(errData.error || `服务器错误: ${response.status}`);
-                }).catch(() => {
-                    // Fallback if error response is not JSON
-                    throw new Error(`服务器响应错误: ${response.status} ${response.statusText}`);
+                // Try to get error message from backend if it sends a structured JSON error
+                return response.text().then(text => { // Use text() first to see raw error
+                    console.error("Server error response text:", text);
+                    try {
+                        const errData = JSON.parse(text); // Try to parse as JSON
+                        throw new Error(errData.message || `服务器错误: ${response.status} ${response.statusText}`);
+                    } catch (e) {
+                        // If not JSON or no message field, use the raw text or generic error
+                        throw new Error(text || `服务器请求失败: ${response.status} ${response.statusText}`);
+                    }
                 });
             }
-            return response.json();
-        })
-        .then(data => {
-            updateVideoProgressBar(100); // Mark as 100% on receiving response
-            if (data.success && data.output_file_url) {
-                document.getElementById('videoResultList').innerHTML = 
-                    `<li>${data.message || '视频处理成功'}: <a href="${data.output_file_url}" download="${data.output_file_name}">${data.output_file_name}</a> (请求ID: ${data.request_id || clientRequestId})</li>`;
-                const progressBar = document.getElementById('videoProgressBar');
-                progressBar.style.backgroundColor = '#28a745';
-                progressBar.textContent = '完成!';
-            } else {
-                throw new Error(data.error || '视频处理失败，但未收到明确错误信息。');
+            if (!response.body) {
+                throw new Error('Response body is null. Streaming not possible.');
             }
+
+            // Handle the stream
+            const reader = response.body.getReader();
+            const decoder = new TextDecoder();
+            let buffer = '';
+
+            function processText(text) {
+                buffer += text;
+                let eolIndex;
+                while ((eolIndex = buffer.indexOf('\n\n')) >= 0) { // SSE messages end with double newline
+                    const message = buffer.slice(0, eolIndex).trim();
+                    buffer = buffer.slice(eolIndex + 2);
+
+                    if (message.startsWith("event: stream_end")) {
+                        console.log("Stream ended by server event.");
+                        if(extractButton) extractButton.disabled = false;
+                        if(spinner) spinner.style.display = 'none';
+                        // Do not hide progress bar, it should show final state
+                        return; // Stop processing further
+                    }
+
+                    if (message.startsWith("data:")) {
+                        const jsonData = message.substring(5).trim();
+                        try {
+                            const data = JSON.parse(jsonData);
+                            console.log("SSE Data:", data);
+
+                            if (data.type === 'progress') {
+                                if(progressBar) {
+                                    progressBar.style.width = data.percent + '%';
+                                    progressBar.textContent = data.percent.toFixed(2) + '%';
+                                }
+                                addProgressItem(`进度: ${data.percent.toFixed(2)}% - ${data.text || ''}`, 'progress');
+                            } else if (data.type === 'info') {
+                                addProgressItem(data.message, 'info');
+                            } else if (data.type === 'result') {
+                                if(spinner) spinner.style.display = 'none';
+                                if(extractButton) extractButton.disabled = false;
+                                if(progressBar) {
+                                     progressBar.style.width = '100%';
+                                     progressBar.textContent = '完成';
+                                     progressBar.classList.remove('bg-primary');
+                                     progressBar.classList.add('bg-success');
+                                }
+                                displayVideoExtractionResults(data); // New function to handle final result display
+                                return; // Stop processing stream further
+                            } else if (data.type === 'error') {
+                                if(spinner) spinner.style.display = 'none';
+                                if(extractButton) extractButton.disabled = false;
+                                if(progressBar) {
+                                    progressBar.style.width = '100%';
+                                    progressBar.textContent = '错误';
+                                    progressBar.classList.remove('bg-primary');
+                                    progressBar.classList.add('bg-danger');
+                                }
+                                addProgressItem(`错误: ${data.message}`, 'error');
+                                resultsDiv.innerHTML = `<p class="text-danger">处理失败: ${escapeHtml(data.message)}</p>`;
+                                return; // Stop processing stream further
+                            }
+                        } catch (e) {
+                            console.error('Error parsing SSE JSON:', e, "JSON Data:", jsonData);
+                            addProgressItem(`无法解析的流数据: ${jsonData}`, 'error');
+                        }
+                    }
+                }
+            }
+
+            function readStream() {
+                reader.read().then(({ done, value }) => {
+                    if (done) {
+                        console.log('Stream complete from reader.done');
+                        if(extractButton) extractButton.disabled = false;
+                        if(spinner) spinner.style.display = 'none';
+                         // If stream ends without a specific result message, treat as uncertain completion
+                        if (progressBar && progressBar.textContent !== '完成' && progressBar.textContent !== '错误') {
+                            progressBar.textContent = '已结束';
+                        }
+                        // Do not hide progressListContainer on reader.done
+                        return;
+                    }
+                    processText(decoder.decode(value, { stream: true }));
+                    readStream();
+                }).catch(error => {
+                    console.error('Error reading stream:', error);
+                    if(spinner) spinner.style.display = 'none';
+                    if(extractButton) extractButton.disabled = false;
+                    if(progressBar) {
+                        progressBar.style.width = '100%';
+                        progressBar.textContent = '读取错误';
+                        progressBar.classList.remove('bg-primary');
+                        progressBar.classList.add('bg-danger');
+                    }
+                    resultsDiv.innerHTML = `<p class="text-danger">读取处理流时发生错误: ${escapeHtml(error.message)}</p>`;
+                });
+            }
+            readStream();
         })
         .catch(error => {
-            console.error('Video analysis error:', error);
-            showVideoErrorMessage('视频分析请求失败: ' + error.message);
-            const progressBar = document.getElementById('videoProgressBar');
-            progressBar.style.width = '100%';
-            progressBar.style.backgroundColor = '#dc3545';
-            progressBar.textContent = '错误';
+            if(spinner) spinner.style.display = 'none';
+            if(progressBarContainer) progressBarContainer.style.display = 'none';
+            if(extractButton) extractButton.disabled = false;
+            resultsDiv.innerHTML = `<p class="text-danger">请求视频处理时发生错误: ${escapeHtml(error.message)}</p>`;
+            console.error('Error during video extraction fetch setup:', error);
         });
     }
 
-    function showVideoErrorMessage(message) {
-        // For simplicity, reusing existing error display or create a new one for video
-        // For now, let's use an alert for quick feedback
-        if (message) alert(`视频分析错误: ${message}`);
-        // Or, target a specific div:
-        // const errorDiv = document.getElementById('videoErrorMessages');
-        // if (errorDiv) errorDiv.textContent = message;
-    }
-    
-    function showVideoProgressBar() {
-        const progressBar = document.getElementById('videoProgressBar');
-        const progressBarContainer = document.getElementById('videoProgressBarContainer');
-        progressBarContainer.style.display = 'block';
-        progressBar.style.width = '0%';
-        progressBar.textContent = '0%';
-        progressBar.style.backgroundColor = '#007bff';
+    function displayVideoExtractionResults(data) {
+        const resultsDiv = document.getElementById('videoProcessingResults');
+        if (!resultsDiv) return;
+
+        resultsDiv.innerHTML = ''; // Clear previous results
+
+        if (!data || (!data.results && !data.message)) {
+            resultsDiv.innerHTML = '<p class="text-warning mt-2">没有收到有效的处理结果。</p>';
+            return;
+        }
+
+        const table = document.createElement('table');
+        table.className = 'table table-striped mt-3'; // Added mt-3 for spacing
+        const thead = document.createElement('thead');
+        thead.innerHTML = '<tr>' +
+                            '<th>原始文件名</th>' +
+                            '<th>输出文件 (ZIP)</th>' +
+                            '<th>状态</th>' +
+                            '<th>信息/下载</th>' +
+                        '</tr>';
+        table.appendChild(thead);
+
+        const tbody = document.createElement('tbody');
+
+        if (data.results && Array.isArray(data.results) && data.results.length > 0) {
+            data.results.forEach(resultItem => {
+                const row = tbody.insertRow();
+                row.insertCell().textContent = resultItem.original_name || '未知视频';
+                row.insertCell().textContent = resultItem.converted_name || 'N/A';
+
+                const statusCell = row.insertCell();
+                const statusBadge = document.createElement('span');
+                statusBadge.classList.add('status-badge');
+                statusBadge.textContent = resultItem.status;
+                if (resultItem.status === 'success') {
+                    statusBadge.classList.add('status-success');
+                } else if (resultItem.status === 'error') {
+                    statusBadge.classList.add('status-error');
+                } else {
+                    statusBadge.classList.add('status-processing'); // Or a default style
+                }
+                statusCell.appendChild(statusBadge);
+
+                const actionCell = row.insertCell();
+                if (resultItem.status === 'success') {
+                    if (resultItem.download_url && resultItem.converted_name) {
+                        const downloadLink = document.createElement('a');
+                        downloadLink.href = resultItem.download_url;
+                        downloadLink.textContent = '下载ZIP';
+                        downloadLink.className = 'download-link'; 
+                        downloadLink.target = '_blank';
+                        downloadLink.setAttribute('download', resultItem.converted_name);
+                        actionCell.appendChild(downloadLink);
+                        
+                        // Add message if present and distinct
+                        if (resultItem.message) {
+                            const messageSpan = document.createElement('div');
+                            messageSpan.style.marginTop = '5px';
+                            messageSpan.style.fontSize = '0.9em';
+                            messageSpan.textContent = resultItem.message;
+                            actionCell.appendChild(messageSpan);
+                        }
+                    } else {
+                        actionCell.textContent = resultItem.message || '处理成功，但无下载链接。';
+                    }
+                } else { // Error status
+                    actionCell.textContent = resultItem.message || '发生未知错误。';
+                }
+            });
+        } else if (data.message && data.type === 'error') {
+            // Handle a general error message from the SSE stream if no specific results
+            const row = tbody.insertRow();
+            row.insertCell().textContent = '视频处理';
+            row.insertCell().textContent = 'N/A';
+            
+            const statusCell = row.insertCell();
+            const statusBadge = document.createElement('span');
+            statusBadge.classList.add('status-badge', 'status-error');
+            statusBadge.textContent = 'error';
+            statusCell.appendChild(statusBadge);
+
+            row.insertCell().textContent = data.message;
+        } else {
+             const row = tbody.insertRow();
+             const cell = row.insertCell();
+             cell.colSpan = 4;
+             cell.textContent = '处理完成，但未收到有效的处理结果详情或发生未知错误。';
+             cell.className = 'text-warning';
+        }
+
+        table.appendChild(tbody);
+        resultsDiv.appendChild(table);
     }
 
-    function updateVideoProgressBar(percentage) {
-        const progressBar = document.getElementById('videoProgressBar');
-        progressBar.style.width = percentage + '%';
-        progressBar.textContent = percentage + '%';
+    // Ensure escapeHtml function is available if not already defined
+    function escapeHtml(unsafe) {
+       return unsafe
+            .replace(/&/g, "&amp;")
+            .replace(/</g, "&lt;")
+            .replace(/>/g, "&gt;")
+            .replace(/"/g, "&quot;")
+            .replace(/'/g, "&#039;");
     }
 
-    function hideVideoProgressBar() {
-        const progressBarContainer = document.getElementById('videoProgressBarContainer');
-        // progressBarContainer.style.display = 'none'; // Keep it visible with "Done!" or "Error"
+    // Ensure getCsrfToken function is available (it should be from previous work)
+    function getCsrfToken() {
+        return document.querySelector('input[name="csrfmiddlewaretoken"]').value;
     }
 
     // Sidebar Navigation
