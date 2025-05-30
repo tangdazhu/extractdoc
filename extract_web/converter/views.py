@@ -1023,27 +1023,35 @@ def delete_all_for_date_view(request, date_str):
     try:
         # Delete files in converted_files directory
         if os.path.exists(converted_files_dir):
-            for filename in os.listdir(converted_files_dir):
-                file_path = os.path.join(converted_files_dir, filename)
+            for item_name in os.listdir(converted_files_dir):
+                item_path = os.path.join(converted_files_dir, item_name)
                 try:
-                    os.remove(file_path)
-                    logger.info(f"User {user.username} deleted file during mass delete: {file_path}")
+                    if os.path.isfile(item_path) or os.path.islink(item_path):
+                        os.remove(item_path)
+                        logger.info(f"User {user.username} deleted file/link during mass delete: {item_path}")
+                    elif os.path.isdir(item_path):
+                        shutil.rmtree(item_path)
+                        logger.info(f"User {user.username} deleted directory during mass delete: {item_path}")
                     deleted_something = True
                 except OSError as e:
-                    logger.warning(f"Error deleting file {file_path} during mass delete for user {user.username}: {e}")
-                    messages.warning(request, f"删除文件 '{filename}' 时出错，但会继续尝试。")
+                    logger.warning(f"Error deleting item {item_path} during mass delete for user {user.username}: {e}")
+                    messages.warning(request, f"删除 '{item_name}' 时出错，但会继续尝试。")
             # Attempt to remove the converted_files directory if empty
-            if not os.listdir(converted_files_dir):
+            if not os.listdir(converted_files_dir): # Should be empty if all items were deleted
                 os.rmdir(converted_files_dir)
                 logger.info(f"Removed empty directory: {converted_files_dir}")
 
         # Delete files in uploads directory
         if os.path.exists(uploads_dir):
-            for filename in os.listdir(uploads_dir):
-                file_path = os.path.join(uploads_dir, filename)
+            for item_name in os.listdir(uploads_dir):
+                item_path = os.path.join(uploads_dir, item_name)
                 try:
-                    os.remove(file_path)
-                    logger.info(f"User {user.username} deleted uploaded file during mass delete: {file_path}")
+                    if os.path.isfile(item_path) or os.path.islink(item_path):
+                        os.remove(item_path)
+                        logger.info(f"User {user.username} deleted uploaded file/link during mass delete: {item_path}")
+                    elif os.path.isdir(item_path):
+                        shutil.rmtree(item_path)
+                        logger.info(f"User {user.username} deleted uploaded directory during mass delete: {item_path}")
                     deleted_something = True
                 except OSError as e:
                     logger.warning(f"Error deleting uploaded file {file_path} during mass delete for user {user.username}: {e}")
@@ -1217,6 +1225,23 @@ def process_video_extraction_view(request):
             if return_code == 0:
                 logger.info(f"Script executed successfully for {original_video_filename}. RequestID: {request_id}")
                 
+                # Parse counts from stdout_data early, so both messages can use them
+                raw_count = 0
+                dedup_count = 0
+                if stdout_data:
+                    raw_match = re.search(r"Raw snapshots count: (\d+)", stdout_data)
+                    if raw_match:
+                        try:
+                            raw_count = int(raw_match.group(1))
+                        except ValueError:
+                            logger.warning(f"Could not parse raw_count from script output: {raw_match.group(1)}. RequestID: {request_id}")
+                    dedup_match = re.search(r"Deduplicated snapshots count: (\d+)", stdout_data)
+                    if dedup_match:
+                        try:
+                            dedup_count = int(dedup_match.group(1))
+                        except ValueError:
+                            logger.warning(f"Could not parse dedup_count from script output: {dedup_match.group(1)}. RequestID: {request_id}")
+
                 source_raw_dir_in_temp = os.path.join(exec_temp_dir, "video-snapshot")
                 source_dedup_dir_in_temp = os.path.join(exec_temp_dir, "video-snapshot-duplicate")
 
@@ -1225,6 +1250,28 @@ def process_video_extraction_view(request):
                 if os.path.exists(source_raw_dir_in_temp) and os.path.isdir(source_raw_dir_in_temp):
                     shutil.copytree(source_raw_dir_in_temp, target_raw_snapshots_dir, dirs_exist_ok=True)
                     logger.info(f"Copied raw snapshots to {target_raw_snapshots_dir}. RequestID: {request_id}")
+
+                    # Create ZIP for raw snapshots
+                    raw_zip_base_name = os.path.join(user_converted_dir, f"raw_frames_{safe_video_filename}_{request_id}")
+                    raw_zip_file_path = shutil.make_archive(raw_zip_base_name, 'zip', target_raw_snapshots_dir)
+                    raw_zip_filename = os.path.basename(raw_zip_file_path)
+                    
+                    # Create .meta file for raw_zip_filename
+                    raw_meta_file_path = f"{raw_zip_file_path}.meta"
+                    try:
+                        with open(raw_meta_file_path, 'w', encoding='utf-8') as mf_raw:
+                            mf_raw.write(original_video_filename)
+                        logger.info(f"Created .meta file for raw ZIP: {raw_meta_file_path}. RequestID: {request_id}")
+                    except Exception as e_meta_raw:
+                        logger.error(f"Failed to create .meta file for raw ZIP {raw_meta_file_path}: {e_meta_raw}. RequestID: {request_id}")
+
+                    current_results_list.append({
+                        'original_name': f"{original_video_filename} (原始截图)",
+                        'converted_name': raw_zip_filename,
+                        'download_url': reverse('converter:download_converted_file', args=[request.user.username, today_date_str, raw_zip_filename]),
+                        'status': 'success',
+                        'message': f'包含所有原始提取的截图 ({raw_count} 张)。'
+                    })
                 else:
                     logger.warning(f"Raw snapshot output directory not found after script run: {source_raw_dir_in_temp}. RequestID: {request_id}")
 
@@ -1232,34 +1279,31 @@ def process_video_extraction_view(request):
                     shutil.copytree(source_dedup_dir_in_temp, target_dedup_snapshots_dir, dirs_exist_ok=True)
                     logger.info(f"Copied deduplicated snapshots to {target_dedup_snapshots_dir}. RequestID: {request_id}")
                     
-                    zip_base_name = os.path.join(user_converted_dir, f"deduplicated_frames_{safe_video_filename}_{request_id}")
-                    zip_file_path = shutil.make_archive(zip_base_name, 'zip', target_dedup_snapshots_dir)
-                    zip_filename = os.path.basename(zip_file_path)
+                    dedup_zip_base_name = os.path.join(user_converted_dir, f"deduplicated_frames_{safe_video_filename}_{request_id}")
+                    dedup_zip_file_path = shutil.make_archive(dedup_zip_base_name, 'zip', target_dedup_snapshots_dir)
+                    dedup_zip_filename = os.path.basename(dedup_zip_file_path)
                     
-                    # Parse counts from stdout_data
-                    raw_count = 0
-                    dedup_count = 0
-                    if stdout_data:
-                        raw_match = re.search(r"Raw snapshots count: (\d+)", stdout_data)
-                        if raw_match:
-                            raw_count = int(raw_match.group(1))
-                        dedup_match = re.search(r"Deduplicated snapshots count: (\d+)", stdout_data)
-                        if dedup_match:
-                            dedup_count = int(dedup_match.group(1))
-
-                    success_message = (
-                        f'视频帧提取和去重成功。'
+                    # Create .meta file for dedup_zip_filename
+                    dedup_meta_file_path = f"{dedup_zip_file_path}.meta"
+                    try:
+                        with open(dedup_meta_file_path, 'w', encoding='utf-8') as mf_dedup:
+                            mf_dedup.write(original_video_filename) # Use the same original_video_filename
+                        logger.info(f"Created .meta file for deduplicated ZIP: {dedup_meta_file_path}. RequestID: {request_id}")
+                    except Exception as e_meta_dedup:
+                        logger.error(f"Failed to create .meta file for deduplicated ZIP {dedup_meta_file_path}: {e_meta_dedup}. RequestID: {request_id}")
+                    
+                    success_message_dedup = (
+                        f'视频帧去重完成。'
                         f'原始截图: {raw_count} 张，去重后截图: {dedup_count} 张。'
-                        f'原始截图位于 "video-snapshot" 目录，去重后截图位于 "video-snapshot-duplicate" 目录。'
                         f'ZIP压缩包包含去重后的截图。'
                     )
 
                     current_results_list.append({
-                        'original_name': original_video_filename,
-                        'converted_name': zip_filename,
-                        'download_url': reverse('converter:download_converted_file', args=[request.user.username, today_date_str, zip_filename]),
+                        'original_name': f"{original_video_filename} (去重截图)",
+                        'converted_name': dedup_zip_filename,
+                        'download_url': reverse('converter:download_converted_file', args=[request.user.username, today_date_str, dedup_zip_filename]),
                         'status': 'success',
-                        'message': success_message
+                        'message': success_message_dedup
                     })
                     process_completed_successfully = True 
                 else:

@@ -609,7 +609,7 @@
                 <small class="form-text text-muted" style="display: block; margin-top: 5px; font-size: 0.85em;">连续多少个检测出的小场景视为一组进行去重。</small>
             </div>
 
-            <button type="button" class="btn btn-primary" onclick="processVideo()" style="margin-top: 15px; padding: 10px 20px; font-size: 1em;">提取帧截图</button>
+            <button type="button" class="btn btn-primary" onclick="processVideo()" style="margin-top: 15px; padding: 10px 20px; font-size: 1em;">提取视频截图</button>
 
             <!-- Progress Bar for video analysis (optional) -->
             <div class="progress-bar-container" id="videoProgressBarContainer">
@@ -1414,95 +1414,71 @@
 
         resultsDiv.innerHTML = ''; // Clear previous results
 
-        if (!data || (!data.results && !data.message)) {
-            resultsDiv.innerHTML = '<p class="text-warning mt-2">没有收到有效的处理结果。</p>';
+        if (!data || !data.results || data.results.length === 0) {
+            let message = '<p class="text-warning mt-2">没有收到有效的处理结果。</p>';
+            if (data && data.message && !data.results) { 
+                message = `<p class="text-danger mt-2">处理失败: ${escapeHtml(data.message)}</p>`;
+            }
+            resultsDiv.innerHTML = message;
             return;
         }
 
         const table = document.createElement('table');
-        table.className = 'table table-striped mt-3'; // Added mt-3 for spacing
+        // Ensure same Bootstrap classes as displayConvertedFiles for consistency
+        table.className = 'table table-striped table-bordered'; 
         const thead = document.createElement('thead');
         thead.innerHTML = '<tr>' +
-                            '<th>原始文件名</th>' +
-                            '<th>输出文件 (ZIP)</th>' +
-                            '<th>状态</th>' +
-                            '<th>信息/下载</th>' +
-                        '</tr>';
+                            '<th scope="col">原始文件名</th>' + // Matched from displayConvertedFiles
+                            '<th scope="col">输出文件 (ZIP)</th>' + // Matched
+                            '<th scope="col">状态</th>' +         // Matched
+                            '<th scope="col">信息/下载</th>' +   // Matched
+                          '</tr>';
         table.appendChild(thead);
 
         const tbody = document.createElement('tbody');
-
-        if (data.results && Array.isArray(data.results) && data.results.length > 0) {
-            data.results.forEach(resultItem => {
-                const row = tbody.insertRow();
-                row.insertCell().textContent = resultItem.original_name || '未知视频';
-                row.insertCell().textContent = resultItem.converted_name || 'N/A';
-
-                const statusCell = row.insertCell();
-                const statusBadge = document.createElement('span');
-                statusBadge.classList.add('status-badge');
-                statusBadge.textContent = resultItem.status;
-                if (resultItem.status === 'success') {
-                    statusBadge.classList.add('status-success');
-                } else if (resultItem.status === 'error') {
-                    statusBadge.classList.add('status-error');
-                } else {
-                    statusBadge.classList.add('status-processing'); // Or a default style
-                }
-                statusCell.appendChild(statusBadge);
-
-                const actionCell = row.insertCell();
-                if (resultItem.status === 'success') {
-                    if (resultItem.download_url && resultItem.converted_name) {
-                        const downloadLink = document.createElement('a');
-                        downloadLink.href = resultItem.download_url;
-                        downloadLink.textContent = '下载ZIP';
-                        downloadLink.className = 'download-link'; 
-                        downloadLink.target = '_blank';
-                        downloadLink.setAttribute('download', resultItem.converted_name);
-                        actionCell.appendChild(downloadLink);
-                        
-                        // Add message if present and distinct
-                        if (resultItem.message) {
-                            const messageSpan = document.createElement('div');
-                            messageSpan.style.marginTop = '5px';
-                            messageSpan.style.fontSize = '0.9em';
-                            messageSpan.textContent = resultItem.message;
-                            actionCell.appendChild(messageSpan);
-                        }
-                    } else {
-                        actionCell.textContent = resultItem.message || '处理成功，但无下载链接。';
-                    }
-                } else { // Error status
-                    actionCell.textContent = resultItem.message || '发生未知错误。';
-                }
-            });
-        } else if (data.message && data.type === 'error') {
-            // Handle a general error message from the SSE stream if no specific results
+        data.results.forEach(item => {
             const row = tbody.insertRow();
-            row.insertCell().textContent = '视频处理';
-            row.insertCell().textContent = 'N/A';
+            
+            // Style table cells similarly to displayConvertedFiles if specific styling was used there
+            // For now, relying on Bootstrap default table cell styling.
+            row.insertCell().textContent = item.original_name || 'N/A';
+            row.insertCell().textContent = item.converted_name || 'N/A';
             
             const statusCell = row.insertCell();
             const statusBadge = document.createElement('span');
-            statusBadge.classList.add('status-badge', 'status-error');
-            statusBadge.textContent = 'error';
+            // Consistent status badge classes
+            statusBadge.classList.add('status-badge'); // General class for consistent styling if defined
+            if (item.status === 'success') {
+                statusBadge.classList.add('status-success'); // Specific success class
+                statusBadge.textContent = 'Success';
+            } else if (item.status === 'error') {
+                statusBadge.classList.add('status-error');   // Specific error class
+                statusBadge.textContent = 'Error';
+            } else {
+                statusBadge.classList.add('status-processing'); // Default/other status
+                statusBadge.textContent = item.status || '未知';
+            }
             statusCell.appendChild(statusBadge);
 
-            row.insertCell().textContent = data.message;
-        } else {
-             const row = tbody.insertRow();
-             const cell = row.insertCell();
-             cell.colSpan = 4;
-             cell.textContent = '处理完成，但未收到有效的处理结果详情或发生未知错误。';
-             cell.className = 'text-warning';
-        }
-
+            const messageCell = row.insertCell();
+            if (item.status === 'success' && item.download_url) {
+                const downloadLink = document.createElement('a');
+                downloadLink.href = item.download_url;
+                downloadLink.textContent = '下载ZIP';
+                // Consistent download link class
+                downloadLink.className = 'download-link'; 
+                downloadLink.style.marginRight = '10px'; // Add some spacing if multiple elements
+                messageCell.appendChild(downloadLink);
+            }
+            const messageSpan = document.createElement('span');
+            messageSpan.innerHTML = escapeHtml(item.message || '');
+            messageCell.appendChild(messageSpan);
+        });
         table.appendChild(tbody);
         resultsDiv.appendChild(table);
     }
 
-    // Ensure escapeHtml function is available if not already defined
+    // Helper function to prevent XSS, if not already defined
     function escapeHtml(unsafe) {
        return unsafe
             .replace(/&/g, "&amp;")
