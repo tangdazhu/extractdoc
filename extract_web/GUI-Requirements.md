@@ -1,20 +1,21 @@
-# 文档转换GUI 需求文档：文本转换器 Web 应用
+# GUI 需求文档：OmniAI Transform Studio - 智能文档转换工作室
 
-**版本**: v2.0.0  
-**更新日期**: 2025-01-27  
-**状态**: 所有核心功能已完成实现
+**版本**: v2.1.0 
+**更新日期**: 2025-05-31 
+**状态**: 核心文档转换功能已完成，视频处理功能初步集成
 
 ## 一、 整体页面布局与风格
 
-应用主标题为"文本转换器"。页面设计简洁、现代，注重用户体验，采用响应式设计支持多种设备访问。
+应用主标题为"OmniAI Transform Studio"。页面设计简洁、现代，注重用户体验，采用响应式设计支持多种设备访问。
 
 ### 1.1 主导航区
 
-位于"文本转换器"标题的右侧，包含以下第一级标签页切换按钮：
+位于应用主标题的右侧，包含以下第一级标签页切换按钮：
 
 -   **图片转文件** ✅ (已完成实现)
--   **文件转PDF** ✅ (已完成实现)  
+-   **文件转PDF** ✅ (已完成实现)
 -   **PDF转文件** ✅ (已完成实现)
+-   **视频处理** (新增功能)
 
 ### 1.2 子导航区与内容区
 
@@ -33,6 +34,8 @@
     -   PDF转Excel ✅ (已完成实现，专业表格提取)
     -   PDF转PPT ✅ (已完成实现，支持截图和Office方式)
     -   PDF转TXT ✅ (已完成实现，快速文本提取)
+-   **当选中"视频处理"时 (新增)：**
+    -   视频帧提取 (处理为图片序列或PDF)
 
 ### 1.3 文件操作区
 
@@ -53,16 +56,20 @@
 
 ### 1.4 转换结果区 (主转换页面实时列表)
 
-位于"开始转换"按钮下方，用于展示当前批次转换完成后生成的文件列表。
+位于"开始转换"按钮下方，用于展示当前批次转换完成后生成的文件列表或视频处理结果。
 
--   标题："转换结果" (根据实际UI调整)
+-   标题："处理结果" (根据实际UI调整)
+-   **处理时长显示** ✅ (新增/已实现): 在结果区域顶部显示 "总处理时长: X.XX 秒"。
 -   **实时状态反馈** ✅ (已实现)：转换过程中按钮显示"等待转换中..."，完成后恢复正常
--   列表项（表格形式）：
+-   列表项（表格形式，适用于文件转换）：
     -   **原始文件名**：显示用户上传时的原始文件名。如果是多个文件合并，则显示逗号分隔的原始文件名列表 (例如：`1.jpg,2.jpg`)。
     -   **转换后文件名**：显示服务器生成的最终文件名。
     -   **转换方法** ✅ (新增显示)：显示使用的转换方法 (如 "pdf2docx", "pdfplumber", "截图方式" 等)
     -   **操作**：提供"下载"链接。
     -   **状态**：显示转换状态 (例如：`success`, `error`, `success_with_issue`)。
+-   **视频处理结果区 (新增)**:
+    -   显示提取的帧数、关键帧信息（如果适用）、生成的图片列表或PDF的下载链接。
+    -   实时流式显示处理日志和进度。
 
 ### 1.5 用户状态区 (导航栏)
 
@@ -169,9 +176,9 @@
     -   "等待转换中..."按钮恢复为"开始转换"，主、子标签页恢复可切换。
     -   下方的"转换结果"表格更新，显示本次转换的结果。
 
-#### 4.1.2 后端处理逻辑 (`process_images_view` for `main_tab == 'imgToFile'`)
+#### 4.1.2 后端处理逻辑 (`img_to_file_view` or general file processing view)
 
-1.  接收前端传来的图片文件、`merge_output` 和 `output_format` 参数，生成`request_id`。
+1.  接收前端传来的图片文件、`merge_output` 和 `output_format` 参数，生成`request_id`，记录`start_time`。
 2.  为当前用户和当前日期（`YYYYMMDD`）创建或确认目标存储路径（`uploads` 和 `converted_files`）。
 3.  保存上传的图片到 `uploads` 目录。
 4.  **核心处理（两阶段）**：
@@ -187,7 +194,7 @@
                 -   **如果目标 `output_format` 是 `pdf`**：调用 `word_to_pdf_converter.convert_word_to_pdf` 将其转换为 `.pdf`。成功则删除临时 `.docx`；失败则保留临时 `.docx`。
                 -   **如果目标 `output_format` 是 `docx`**：将临时 `.docx` 文件移动/重命名为最终文件名。
                 -   为每个最终生成的单文件（`.docx` 或 `.pdf`）创建一个 `.meta` 文件，存储其对应的原始上传文件名。
-5.  返回包含所有已处理文件信息（原始文件名、转换后文件名、下载URL、状态）的JSON响应给前端。清理所有带`request_id`的临时文件。
+5.  计算`duration_seconds`。返回包含所有已处理文件信息（原始文件名、转换后文件名、下载URL、状态、`duration_seconds`）的JSON响应给前端。清理所有带`request_id`的临时文件。
 
 #### 4.1.3 外部脚本 (`extract_text_from_images.py`)
 
@@ -200,8 +207,8 @@
 #### 4.2.1 用户界面交互
 (与图片转文件类似，用户选择对应子标签页如"Word转PDF"，上传相应文件类型)
 
-#### 4.2.2 后端处理逻辑 (`process_images_view` for `main_tab == 'fileToPdf'`)
-1. 接收前端文件、`merge_output` (`true`时合并为单一PDF) 和 `sub_tab` (如 `wordToPdf`)。
+#### 4.2.2 后端处理逻辑 (`file_to_pdf_view` or general file processing view)
+1. 接收前端文件、`merge_output` (`true`时合并为单一PDF) 和 `sub_tab` (如 `wordToPdf`)，记录`start_time`。
 2. 文件被复制到 `converted_files` 目录，命名含 `_prePdf_<request_id>.<ext>`。
 3. **若 `merge_output` 为真**:
     - 对每个上传文件（如 `.docx`），调用相应的转换器 (如 `word_to_pdf_converter.convert_word_to_pdf`) 生成临时的单个PDF文件（文件名含 `_merged_temp_<request_id>.pdf`）。
@@ -212,7 +219,7 @@
     - 对每个上传文件，调用相应的转换器 (如 `word_to_pdf_converter.convert_word_to_pdf` for DOCX, `excel_pdf_converter.convert_excel_to_pdf` for XLSX, `ppt_pdf_converter.convert_pptx_to_pdf` for PPTX, `txt_to_pdf_converter.convert_txt_to_pdf` for TXT) 直接生成最终PDF。
     - 清理原始上传文件的副本。
     - 创建 `.meta` 文件。
-5. 返回JSON结果。所有转换器（Word, Excel, PPT）优先使用基于LibreOffice的通用转换逻辑。
+5. 计算`duration_seconds`。返回JSON结果（包含`duration_seconds`）。所有转换器（Word, Excel, PPT）优先使用基于LibreOffice的通用转换逻辑。
 
 ### 4.3 PDF转文件 (Word/Excel/PPT/TXT) - PdfToFile ✅ (v2.0.0 重大更新)
 
@@ -229,8 +236,8 @@
    - **PDF转TXT**: 默认使用PyMuPDF方法 (快速文本提取)
 3. 支持批量上传和合并选项 (Word/TXT支持合并，Excel/PPT暂不支持)
 
-#### 4.3.2 后端处理逻辑 (`process_images_view` for `main_tab == 'pdfToFile'`)
-1. 接收前端PDF文件、`merge_output`、`sub_tab` (如 `pdfToWord`) 和 **转换方法选择** (`conversion_method`)。
+#### 4.3.2 后端处理逻辑 (`pdf_to_file_view` or general file processing view)
+1. 接收前端PDF文件、`merge_output`、`sub_tab` (如 `pdfToWord`) 和 **转换方法选择** (`conversion_method`)，记录`start_time`。
 2. PDF文件被复制到 `converted_files` 目录，命名含 `_preFinal_<request_id>.pdf`。
 3. **智能转换器选择** ✅ (新增逻辑)：
    - **PDF转Word**: 根据用户选择调用不同转换器
@@ -255,29 +262,60 @@
 6. **错误处理和降级** ✅ (新增功能)：
     - 如果LibreOffice方法失败，自动降级到默认方法
     - 提供详细的错误信息和建议
-7. 返回JSON结果，包含转换方法信息。
+7. 计算`duration_seconds`。返回JSON结果（包含`duration_seconds`和转换方法信息）。
 
----
+### 4.4 视频处理 (视频帧提取) - VideoProcessing (新增模块)
 
-## 五、v2.0.0 新特性总结
+#### 4.4.1 用户界面交互
+1.  用户在"视频处理"主标签页下，选择"视频帧提取"子标签页。
+2.  用户通过文件上传区域添加一个视频文件 (如 .mp4, .avi, .mov)。
+    -   前端应进行基本的文件类型校验。
+    -   显示已选视频文件名。
+3.  用户可配置参数：
+    -   **提取频率**: 例如，每隔 X 秒提取一帧，或总共提取 Y 帧。
+    -   **输出格式**: 图片序列 (JPG/PNG) 或 合并为一个PDF。
+    -   **(可选) 图像去重阈值**: 用于减少相似帧。
+4.  点击"开始处理"按钮：
+    -   按钮文字变为"处理中..."，背景色变为黄色，主、子标签页不可切换。
+    -   向后端发起处理请求，包含视频文件和配置参数。
+    -   前端实时流式显示后端返回的日志/进度信息。
+5.  处理完成后：
+    -   按钮恢复为"开始处理"，主、子标签页恢复可切换。
+    -   下方的"处理结果"区域更新，显示提取的帧数、下载链接 (图片压缩包或PDF)，以及总处理时长。
 
-### 5.1 功能完善 ✅
-- **PDF转文件功能全面完成**: 所有PDF转换功能已完全实现并优化
-- **智能转换策略**: 每种转换提供多种方法，用户可根据需求选择
-- **专业表格提取**: PDF转Excel使用pdfplumber专门优化表格数据提取
-- **批量合并支持**: Word/TXT格式支持多文件合并为单个输出
+#### 4.4.2 后端处理逻辑 (`process_video_extraction_view`)
+1.  接收前端传来的视频文件和处理参数 (`extract_frequency`, `output_format`, `deduplication_threshold`等)，生成`request_id`，记录`start_time`。
+2.  为当前用户和当前日期创建或确认目标存储路径 (`uploads` 和 `converted_files/video_extractions/<request_id>/`)。
+3.  保存上传的视频到 `uploads` 目录。
+4.  调用 `extract_video_snapshots.py` 脚本执行视频帧提取：
+    -   传递输入视频路径、输出目录、提取频率、去重阈值等参数。
+    -   脚本将提取的帧保存到 `converted_files/video_extractions/<request_id>/frames/` 目录。
+    -   脚本通过 `stdout` 流式输出处理进度和日志信息。
+5.  后端捕获脚本的输出并通过 `StreamingHttpResponse` 实时转发给前端。
+6.  脚本执行完毕后：
+    -   **如果输出格式为图片序列**: 将 `frames/` 目录压缩为一个ZIP文件。
+    -   **如果输出格式为PDF**: 将 `frames/` 目录下的图片合成为一个PDF文件。
+    -   记录最终生成的文件名和路径。
+7.  计算`duration_seconds`。
+8.  在流式响应的最后，发送一个包含最终结果（如提取帧数、下载链接、`duration_seconds`）的JSON对象。
+9.  清理临时视频文件和未打包的帧图片（如果适用）。
 
-### 5.2 用户体验提升 ✅
-- **转换方法可选**: 用户界面提供转换方法选择，满足不同场景需求
-- **实时状态反馈**: 转换过程中提供清晰的状态提示和进度反馈
-- **错误处理优化**: 改进错误提示信息，提供具体的解决建议
-- **界面优化**: 移除不稳定选项，简化用户操作流程
+## 五、v2.1.0 新特性与更新 (基于v2.0.0)
 
-### 5.3 技术架构改进 ✅
-- **模块化转换器**: 每种转换方法独立实现，便于维护和扩展
-- **智能降级机制**: LibreOffice不可用时自动使用备用方法
-- **依赖管理优化**: 重新组织requirements.txt，按功能分类管理
-- **一键部署**: 提供install_dependencies.py自动化安装脚本
+### 5.1 新增功能
+-   **视频处理模块**:
+    -   视频帧提取功能：可提取视频关键帧为图片序列或PDF。
+    -   支持配置提取频率、输出格式、图像去重。
+    -   流式处理反馈，实时显示进度和日志。
+-   **处理时长显示**: 所有文件转换和视频处理任务均在结果中显示总处理时长。
+
+### 5.2 用户体验提升
+-   **时长反馈**: 用户可以明确知道每次操作的耗时。
+-   **视频处理界面**: 专用的视频处理模块，提供参数配置。
+
+### 5.3 技术架构改进
+-   **通用时长计算**: 在各视图函数中统一实现处理时长的计算与返回。
+-   **流式响应**: 视频处理采用流式响应，提升用户体验。
 
 ### 5.4 稳定性和可靠性 ✅
 - **多重转换方案**: 每种转换都有主要方法和备用方法
