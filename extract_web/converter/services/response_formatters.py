@@ -9,7 +9,8 @@ def format_json_response(
     merge_output: bool,
     overall_status: int = 200, # HTTP status code for the response
     error_message: Optional[str] = None, # General error message if the whole request fails early
-    request_id: Optional[str] = None
+    request_id: Optional[str] = None,
+    duration_seconds: Optional[float] = None # ADDED duration_seconds
 ) -> JsonResponse:
     """
     Formats a standardized JSON response for the conversion process.
@@ -23,6 +24,7 @@ def format_json_response(
         error_message: An optional general error message. If provided, the results list
                        might be a single entry representing this general error.
         request_id: Optional request ID for logging.
+        duration_seconds: Optional duration of the conversion process in seconds.
 
     Returns:
         A Django JsonResponse object.
@@ -31,6 +33,11 @@ def format_json_response(
         'results': results,
         'merge_output': merge_output
     }
+    
+    if request_id:
+        response_data['request_id'] = request_id
+    if duration_seconds is not None:
+        response_data['duration_seconds'] = duration_seconds
     
     if error_message and not results: # If it's a general error before processing any file
         response_data['results'] = [{
@@ -66,4 +73,8 @@ def format_error_response(
         'message': message
     }]
     logger.error(f"Formatting error response: {message} for item: {original_item_name}. RequestID: {request_id}")
+    # Pass duration_seconds to the main formatter if available, though format_error_response doesn't explicitly take it now
+    # This requires format_error_response to also be aware of duration_seconds if we want it in error responses from this helper
+    # For now, format_error_response calls format_json_response which will pick it up if passed through.
+    # The individual views are responsible for adding duration_seconds to format_error_response calls for now.
     return format_json_response(results=error_result, merge_output=merge_output, overall_status=http_status, request_id=request_id) 

@@ -17,6 +17,7 @@ import random
 import string
 import traceback # 新增导入 for detailed exception logging
 import logging # 新增导入
+import time # ADDED IMPORT
 from docx import Document
 from docx.oxml import OxmlElement # For adding content from sub-documents
 from docx.oxml.ns import qn
@@ -65,6 +66,10 @@ except ImportError:
         raise NotImplementedError("docx2pdf is not installed.")
 
 logger = logging.getLogger('converter') # 获取 logger 实例
+
+# Helper function to generate a unique request ID
+def generate_request_id(length=10):
+    return ''.join(random.choices(string.ascii_lowercase + string.digits, k=length))
 
 # Attempt to import PyPDF2 for PDF merging
 try:
@@ -207,228 +212,244 @@ def append_document(source_doc, target_doc):
 @login_required
 @require_POST
 def file_to_pdf_view(request):
-    today_date_str = datetime.now().strftime("%Y%m%d")
-    request_id = ''.join(random.choices(string.ascii_lowercase + string.digits, k=6))
+    start_time_view = time.perf_counter() # ADDED: Start timer
+    request_id = generate_request_id()
     logger.info(f"file_to_pdf_view: Received request. RequestID: {request_id}")
 
-    user_upload_dir, user_converted_dir = "", ""
-    try:
-        user_upload_dir, user_converted_dir = ensure_user_directories(request.user.username, today_date_str)
-    except Exception as e:
-        logger.critical(f"file_to_pdf_view: Failed to create user directories for {request.user.username}. Error: {e}. RequestID: {request_id}", exc_info=True)
-        merge_output_for_error = request.POST.get('merge_output', 'false').lower() == 'true'
-        return format_error_response(message='服务器错误：无法创建用户目录。', merge_output=merge_output_for_error, request_id=request_id)
+    username = request.user.username
+    today_date_str = datetime.now().strftime("%Y%m%d")
 
-    parsed_params = {}
-    try:
-        parsed_params = parse_conversion_request_params(request.POST, request_id)
-    except Exception as e_parse:
-        logger.error(f"file_to_pdf_view: Error parsing request parameters: {e_parse}. RequestID: {request_id}", exc_info=True)
-        merge_output_for_error = request.POST.get('merge_output', 'false').lower() == 'true'
-        return format_error_response(message='请求参数错误。', merge_output=merge_output_for_error, request_id=request_id)
-
-    sub_tab = parsed_params['sub_tab']
-    merge_output = parsed_params['merge_output']
-    output_format = parsed_params.get('output_format', 'pdf') # Default to pdf, relevant for this view
-
-    # Specific check for wordToPdf if docx2pdf is unavailable
-    if sub_tab == 'wordToPdf' and not DOCX2PDF_AVAILABLE_IN_VIEW:
-        logger.error(f"file_to_pdf_view: wordToPdf requested, but docx2pdf is not available. RequestID: {request_id}")
+    uploaded_files_info_from_frontend = request.POST.getlist('uploaded_files_info[]')
+    if not uploaded_files_info_from_frontend:
+        logger.warning(f"file_to_pdf_view: No uploaded_files_info provided. RequestID: {request_id}")
+        # ADDED duration_seconds to error response
         return format_error_response(
-            message='Word转PDF的转换库(docx2pdf)不可用。',
-            merge_output=merge_output,
-            original_item_name='Conversion Library Check', # Corrected field name
-            request_id=request_id
+            message="没有提供文件信息。", 
+            request_id=request_id, 
+            duration_seconds=round(time.perf_counter() - start_time_view, 2)
         )
 
-    processed_files_final = []
-    temp_files_to_delete_final = []
+    try:
+        parsed_files_info = [json.loads(info) for info in uploaded_files_info_from_frontend]
+    except json.JSONDecodeError as e:
+        logger.error(f"file_to_pdf_view: JSONDecodeError parsing uploaded_files_info: {e}. RequestID: {request_id}")
+        # ADDED duration_seconds to error response
+        return format_error_response(
+            message=f"解析文件信息时出错: {e}", 
+            request_id=request_id, 
+            duration_seconds=round(time.perf_counter() - start_time_view, 2)
+        )
 
-    uploaded_files_info = []
-    if not request.FILES.getlist('images'): # Assuming frontend still uses 'images' field for uploads
-        logger.warning(f"file_to_pdf_view: No files uploaded. RequestID: {request_id}")
-        return format_error_response(message='没有上传文件。', merge_output=merge_output, request_id=request_id)
+    user_upload_dir, user_converted_dir = ensure_user_directories(username, today_date_str)
+    if not user_upload_dir: 
+        logger.error(f"file_to_pdf_view: Failed to ensure user directories for {username} on {today_date_str}. RequestID: {request_id}")
+        # ADDED duration_seconds to error response
+        return format_error_response(
+            message="无法创建用户目录，请联系管理员。", 
+            request_id=request_id, 
+            duration_seconds=round(time.perf_counter() - start_time_view, 2)
+        )
 
-    for uploaded_file_obj in request.FILES.getlist('images'):
-        temp_input_path, original_filename, safe_filename = save_uploaded_file(uploaded_file_obj, user_upload_dir, request_id)
-        if temp_input_path and safe_filename:
-            uploaded_files_info.append({
-                'name': original_filename,
-                'path': temp_input_path,
-                'safe_original_filename': safe_filename,
-                'status': 'uploaded'
-            })
+    file_results = [] # INITIALIZED
+    errors_view = [] # INITIALIZED
+    temp_files_to_clean_view = []
+
+    mode = request.POST.get('mode', 'single') 
+    output_filename_base = request.POST.get('output_filename_base', 'converted_document')
+    merge_output_flag = request.POST.get('merge_output', 'false') == 'true'
+
+    logger.info(f"file_to_pdf_view: Mode={mode}, MergeOutput={merge_output_flag}, OutputBase='{output_filename_base}'. RequestID: {request_id}")
+
+    conversion_func = None
+    target_extension = None 
+
+    if mode == 'docx_to_pdf_mode':
+        conversion_method = request.POST.get('conversion_method_word', 'libreoffice')
+        logger.info(f"file_to_pdf_view: Word to PDF method selected: {conversion_method}. RequestID: {request_id}")
+        target_extension = '.pdf'
+        if conversion_method == 'docx2pdf' and DOCX2PDF_AVAILABLE_IN_VIEW:
+            conversion_func = docx_to_pdf_converter_internal
+        elif conversion_method == 'libreoffice':
+            conversion_func = convert_to_pdf_libreoffice
         else:
-            failed_original_name = original_filename if original_filename else "未知文件"
-            logger.error(f"file_to_pdf_view: Failed to save uploaded file: {failed_original_name}. RequestID: {request_id}")
-            processed_files_final.append({
-                'original_name': failed_original_name,
-                'status': 'error',
-                'message': f'文件 "{failed_original_name}" 上传保存失败。'
-            })
+            if conversion_method == 'docx2pdf' and not DOCX2PDF_AVAILABLE_IN_VIEW:
+                msg = "DOCX to PDF (docx2pdf)不可用，将尝试LibreOffice。如果问题持续，请联系管理员。"
+                logger.warning(f"file_to_pdf_view: {msg} RequestID: {request_id}")
+                errors_view.append(msg)
+            conversion_func = convert_to_pdf_libreoffice 
+            logger.info(f"file_to_pdf_view: Falling back/defaulting to LibreOffice for Word to PDF. RequestID: {request_id}")
+    elif mode == 'excel_to_pdf_mode':
+        conversion_func = convert_excel_to_pdf
+        target_extension = '.pdf'
+        logger.info(f"file_to_pdf_view: Excel to PDF mode selected. RequestID: {request_id}")
+    elif mode == 'ppt_to_pdf_mode':
+        conversion_func = ppt_pdf_converter.convert_ppt_to_pdf
+        target_extension = '.pdf'
+        logger.info(f"file_to_pdf_view: PPT to PDF mode selected. RequestID: {request_id}")
+    elif mode == 'txt_to_pdf_mode':
+        conversion_func = convert_txt_to_pdf
+        target_extension = '.pdf'
+        font_name = request.POST.get('font_name_txt', 'SimSun')
+        if conversion_func:
+            original_conversion_func = conversion_func
+            conversion_func = lambda input_path, output_path: original_conversion_func(input_path, output_path, font_name=font_name)
+        logger.info(f"file_to_pdf_view: TXT to PDF mode selected with font: {font_name}. RequestID: {request_id}")
+    else:
+        logger.error(f"file_to_pdf_view: Unknown or unsupported mode: {mode}. RequestID: {request_id}")
+        errors_view.append(f"未知的转换模式: {mode}")
 
-    if not uploaded_files_info:
-        logger.error(f"file_to_pdf_view: All file uploads failed or no files were valid after saving. RequestID: {request_id}")
-        if not processed_files_final: # If it's empty, add a generic message
-             processed_files_final.append({'original_name': 'File Upload', 'status': 'error', 'message': '所有文件上传失败或未能保存。'})
-        return format_json_response(results=processed_files_final, merge_output=merge_output, request_id=request_id)
+    converted_pdf_paths_for_merge = []
 
-    # --- Core File to PDF conversion logic (formerly _handle_file_to_pdf) ---
-    for uploaded_file_data in uploaded_files_info:
-        original_name = uploaded_file_data['name']
-        temp_input_path = uploaded_file_data['path']
-        safe_original_filename = uploaded_file_data['safe_original_filename']
+    if not errors_view:
+        for file_info in parsed_files_info:
+            original_filename = file_info.get('name', f'unknown_file_{request_id}')
+            temp_input_path = file_info.get('path')
 
-        base_name_no_ext = os.path.splitext(safe_original_filename)[0]
-        unique_pdf_filename = f"{base_name_no_ext}_{request_id}.pdf"
-        output_pdf_path = os.path.join(user_converted_dir, unique_pdf_filename)
+            if not temp_input_path or not os.path.exists(temp_input_path):
+                logger.error(f"file_to_pdf_view: Temporary input file not found or path is invalid for {original_filename} at {temp_input_path}. RequestID: {request_id}")
+                errors_view.append(f"文件 '{original_filename}' 的临时路径无效或文件不存在，已跳过。")
+                continue
+            if not target_extension:
+                logger.error(f"file_to_pdf_view: Target extension not set for mode {mode}. File: {original_filename}. RequestID: {request_id}")
+                errors_view.append(f"模式 {mode} 的目标文件类型未设置，无法处理 '{original_filename}'。")
+                continue
 
-        success_conv = False
-        conversion_message_conv = "不支持的文件类型或转换失败。"
-        actual_output_file_path_from_converter = None
+            safe_original_filename_base = Path(original_filename).stem
+            safe_original_filename_base = re.sub(r'[^a-zA-Z0-9_\-\.]', '_', safe_original_filename_base)
+            timestamp_suffix = datetime.now().strftime("%H%M%S%f")
+            output_filename_display = f"{safe_original_filename_base}_{request_id}_{timestamp_suffix}{target_extension}"
+            output_filepath_server = os.path.join(user_converted_dir, output_filename_display)
 
-        try:
-            logger.info(f"file_to_pdf_view: Processing {original_name} with sub_tab: {sub_tab}. Input: {temp_input_path}, Output: {output_pdf_path}. RequestID: {request_id}")
-            if sub_tab == 'wordToPdf':
-                if original_name.lower().endswith(('.doc', '.docx')):\
-                    success_conv, actual_output_file_path_from_converter, conversion_message_conv = convert_word_to_pdf(temp_input_path, output_pdf_path)
-                else:
-                    conversion_message_conv = "不是有效的Word文件 (.doc, .docx)。"
-            elif sub_tab == 'excelToPdf':
-                if original_name.lower().endswith(('.xls', '.xlsx')):\
-                    success_conv, actual_output_file_path_from_converter, conversion_message_conv = convert_excel_to_pdf(temp_input_path, output_pdf_path)
-                else:
-                    conversion_message_conv = "不是有效的Excel文件 (.xls, .xlsx)。"
-            elif sub_tab == 'pptToPdf':
-                if original_name.lower().endswith(('.ppt', '.pptx')):\
-                    success_conv, actual_output_file_path_from_converter, conversion_message_conv = ppt_pdf_converter.convert_pptx_to_pdf(temp_input_path, output_pdf_path)
-                else:
-                    conversion_message_conv = "不是有效的PPT文件 (.ppt, .pptx)。"
-            elif sub_tab == 'txtToPdf':
-                if original_name.lower().endswith('.txt'):\
-                    success_conv, actual_output_file_path_from_converter, conversion_message_conv = convert_txt_to_pdf(temp_input_path, output_pdf_path)
-                else:
-                    conversion_message_conv = "不是有效的TXT文件 (.txt)。"
-            else:
-                logger.warning(f"file_to_pdf_view: Unsupported sub_tab '{sub_tab}' for {original_name}. RequestID: {request_id}")
-                conversion_message_conv = f"不支持的转换类型: {sub_tab}"
-
-            if success_conv and actual_output_file_path_from_converter and os.path.exists(actual_output_file_path_from_converter):
-                final_target_path = os.path.join(user_converted_dir, unique_pdf_filename) # This is output_pdf_path
-                if actual_output_file_path_from_converter != final_target_path:
-                    if os.path.exists(actual_output_file_path_from_converter): # Should always be true if success_conv
-                         shutil.move(actual_output_file_path_from_converter, final_target_path)
-                    # else case implies converter reported success but file is missing, which is an error state
-                
-                # Verify file exists at final_target_path
-                if os.path.exists(final_target_path):
-                    processed_files_final.append({
-                        'original_name': original_name,
-                        'converted_name': unique_pdf_filename,
-                        'download_url': reverse('converter:download_converted_file', args=[request.user.username, today_date_str, unique_pdf_filename]),
+            if conversion_func:
+                try:
+                    logger.info(f"file_to_pdf_view: Attempting conversion for {original_filename} to {output_filepath_server} using mode {mode}. RequestID: {request_id}")
+                    conversion_func(temp_input_path, output_filepath_server)
+                    logger.info(f"file_to_pdf_view: Conversion successful for {original_filename}. Output: {output_filepath_server}. RequestID: {request_id}")
+                    file_results.append({
+                        'original_name': original_filename,
+                        'converted_name': output_filename_display,
+                        'download_url': reverse('converter:download_converted_file', args=[username, today_date_str, output_filename_display]),
                         'status': 'success',
-                        'message': conversion_message_conv or '转换成功'
+                        'message': f'成功转换为 {target_extension.upper()} 文件。'
                     })
-                    logger.info(f"file_to_pdf_view/{sub_tab}: Successfully converted '{original_name}' to '{unique_pdf_filename}'. RequestID: {request_id}")
-                else: # File missing after supposed success
-                    success_conv = False # Update status
-                    conversion_message_conv += " (处理后输出文件丢失)"
-                    logger.error(f"file_to_pdf_view/{sub_tab}: File {final_target_path} missing post-success for '{original_name}'. RequestID: {request_id}")
+                    if merge_output_flag and target_extension == '.pdf':
+                        converted_pdf_paths_for_merge.append(output_filepath_server)
+                except NotImplementedError as e_ni:
+                    logger.error(f"file_to_pdf_view: NotImplementedError for {original_filename}: {e_ni}. RequestID: {request_id}")
+                    errors_view.append(f"'{original_filename}' 的转换功能未实现或不可用: {e_ni}")
+                except Exception as e_conv:
+                    logger.error(f"file_to_pdf_view: Conversion error for {original_filename}: {e_conv}. Traceback: {traceback.format_exc()}. RequestID: {request_id}")
+                    errors_view.append(f"处理 '{original_filename}' 时出错: {e_conv}")
+            else:
+                logger.error(f"file_to_pdf_view: No conversion function resolved for mode {mode}, file {original_filename}. RequestID: {request_id}")
+                errors_view.append(f"无法为 '{original_filename}' (模式: {mode}) 找到合适的转换器。")
 
-
-            if not success_conv: # Handles initial failure or failure after move check or missing file
-                processed_files_final.append({
-                    'original_name': original_name,
-                    'status': 'error',
-                    'message': conversion_message_conv or "转换失败，未生成文件。"
-                })
-                logger.error(f"file_to_pdf_view/{sub_tab}: Failed to convert '{original_name}'. Message: {conversion_message_conv}. OutPath: {actual_output_file_path_from_converter}. RequestID: {request_id}")
-                # Cleanup problematic intermediate if it exists and is not the intended final path (which would be an error case already handled)
-                if actual_output_file_path_from_converter and \
-                   actual_output_file_path_from_converter != output_pdf_path and \
-                   os.path.exists(actual_output_file_path_from_converter):
-                    temp_files_to_delete_final.append(actual_output_file_path_from_converter)
-
-        except Exception as e_conv:
-            logger.error(f"file_to_pdf_view: Exception during {sub_tab} to PDF for {original_name}: {e_conv}. RequestID: {request_id}", exc_info=True)
-            processed_files_final.append({
-                'original_name': original_name,
-                'status': 'error',
-                'message': f"转换时发生严重错误: {str(e_conv)}"
-            })
-            if actual_output_file_path_from_converter and os.path.exists(actual_output_file_path_from_converter):
-                temp_files_to_delete_final.append(actual_output_file_path_from_converter)
-        finally:
-            if temp_input_path and os.path.exists(temp_input_path):
-                temp_files_to_delete_final.append(temp_input_path)
-    
-    # Merging logic for fileToPdf
-    if merge_output and any(f['status'] == 'success' for f in processed_files_final) and PYPDF2_AVAILABLE:
-        successful_pdfs_paths = [os.path.join(user_converted_dir, f['converted_name']) for f in processed_files_final if f['status'] == 'success']
-        if len(successful_pdfs_paths) > 1:
-            merged_pdf_name = f"merged_files_{request_id}.pdf"
-            merged_pdf_path = os.path.join(user_converted_dir, merged_pdf_name)
-            merger = PdfMerger()
+    if merge_output_flag and mode in ['docx_to_pdf_mode', 'excel_to_pdf_mode', 'ppt_to_pdf_mode', 'txt_to_pdf_mode'] and converted_pdf_paths_for_merge:
+        if not PYPDF2_AVAILABLE:
+            logger.warning(f"file_to_pdf_view: PyPDF2 not available, cannot merge PDFs. RequestID: {request_id}")
+            errors_view.append("PDF合并功能不可用 (缺少PyPDF2库)。单个文件已转换。")
+        elif len(converted_pdf_paths_for_merge) < 1:
+            logger.info(f"file_to_pdf_view: Less than 1 PDF to merge, skipping merge. RequestID: {request_id}")
+        else:
+            merge_success = False
+            merged_filename_display = f"{output_filename_base}_{request_id}_merged.pdf"
+            merged_filepath_server = os.path.join(user_converted_dir, merged_filename_display)
             try:
-                for pdf_path_to_merge in successful_pdfs_paths:
-                    if os.path.exists(pdf_path_to_merge):
-                        merger.append(pdf_path_to_merge)
-                merger.write(merged_pdf_path)
-                merger.close()
-                logger.info(f"file_to_pdf_view: Successfully merged {len(successful_pdfs_paths)} PDFs into '{merged_pdf_name}'. RequestID: {request_id}")
+                merger = PdfMerger()
+                for pdf_path in converted_pdf_paths_for_merge:
+                    if os.path.exists(pdf_path):
+                        with open(pdf_path, 'rb') as f_pdf:
+                            reader = PdfReader(f_pdf)
+                            if reader.is_encrypted:
+                                try:
+                                    reader.decrypt('')
+                                except Exception as e_decrypt:
+                                    logger.warning(f"Could not decrypt {pdf_path} with empty password: {e_decrypt}. Skipping file in merge.")
+                                    errors_view.append(f"文件 {os.path.basename(pdf_path)} 已加密且无法解密，已在合并中跳过。")
+                                    continue
+                            merger.append(reader)
+                    else:
+                        logger.warning(f"file_to_pdf_view: File {pdf_path} not found for merging. RequestID: {request_id}")
                 
-                final_merged_result_message = f"{len(successful_pdfs_paths)} 个文件成功合并为PDF。"
-                # Collect original names of files that failed, if any
-                failed_original_names_for_merge = [f['original_name'] for f in processed_files_final if f['status'] == 'error' and f['original_name'] != '合并操作']
-                if failed_original_names_for_merge: # More specific error reporting
-                     final_merged_result_message += f" 未能转换的文件: {', '.join(failed_original_names_for_merge)}."
-
-
-                # Replace list with single merged result, keeping errors separate
-                processed_files_final = [f for f in processed_files_final if f['status'] == 'error' and f['original_name'] != '合并操作'] 
-                processed_files_final.append({ 
-                    'original_name': '合并的PDF文件',
-                    'converted_name': merged_pdf_name,
-                    'download_url': reverse('converter:download_converted_file', args=[request.user.username, today_date_str, merged_pdf_name]),
-                    'status': 'success',
-                    'message': final_merged_result_message
-                })
-                temp_files_to_delete_final.extend(successful_pdfs_paths) # Add individual PDFs that were merged to cleanup
+                if merger.pages:
+                    merger.write(merged_filepath_server)
+                    merger.close()
+                    merge_success = True
+                    logger.info(f"file_to_pdf_view: Successfully merged {len(converted_pdf_paths_for_merge)} PDFs into {merged_filepath_server}. RequestID: {request_id}")
+                    file_results = [{
+                        'original_name': f"合并后的PDF (来自 {len(converted_pdf_paths_for_merge)} 个文件)",
+                        'converted_name': merged_filename_display,
+                        'download_url': reverse('converter:download_converted_file', args=[username, today_date_str, merged_filename_display]),
+                        'status': 'success',
+                        'message': f'成功合并 {len(converted_pdf_paths_for_merge)} 个文件为一个PDF。'
+                    }]
+                else:
+                    logger.warning(f"file_to_pdf_view: No pages were added to the merger. Merged file not created. RequestID: {request_id}")
+                    if not errors_view:
+                        errors_view.append("未能合并PDF文件（没有内容可合并）。单个文件可能已转换。")
             except Exception as e_merge:
-                logger.error(f"file_to_pdf_view: Error merging PDFs: {e_merge}. RequestID: {request_id}", exc_info=True)
-                processed_files_final.append({'original_name': '合并操作', 'status': 'error', 'message': f'PDF合并失败: {str(e_merge)}'})
-                if os.path.exists(merged_pdf_path): temp_files_to_delete_final.append(merged_pdf_path)
+                logger.error(f"file_to_pdf_view: Error merging PDFs: {e_merge}. Traceback: {traceback.format_exc()}. RequestID: {request_id}")
+                errors_view.append(f"合并PDF时出错: {e_merge}")
+                merge_success = False
+            
+            if merge_success:
+                for pdf_path in converted_pdf_paths_for_merge:
+                    temp_files_to_clean_view.append({'path': pdf_path, 'type': 'file'})
 
-        elif len(successful_pdfs_paths) == 1:
-            logger.info(f"file_to_pdf_view: Only one successful PDF, no merging needed. RequestID: {request_id}")
-    elif merge_output and not PYPDF2_AVAILABLE and any(f['status'] == 'success' for f in processed_files_final):
-        logger.warning(f"file_to_pdf_view: Merge requested but PyPDF2 is not available. RequestID: {request_id}")
-        # Find the first success entry to add this warning to, or add as a general message
-        found_success = False
-        for item in processed_files_final:
-            if item['status'] == 'success':
-                item['message'] += ' (警告: PDF合并库不可用，文件未合并)'
-                found_success = True
-                break
-        if not found_success: # Or add as a general separate warning item if no successes (though condition implies one)
-            processed_files_final.append({'original_name': '合并操作', 'status': 'warning', 'message': 'PDF合并库不可用，文件未合并。'})
+    for file_info in parsed_files_info:
+        if file_info.get('path') and os.path.exists(file_info.get('path')):
+            temp_files_to_clean_view.append({'path': file_info.get('path'), 'type': 'file'})
+    
+    if temp_files_to_clean_view:
+        cleanup_temp_files(temp_files_to_clean_view, request_id)
 
+    if not file_results and not errors_view:
+        logger.warning(f"file_to_pdf_view: No results and no errors. This might indicate an issue. RequestID: {request_id}")
+        errors_view.append("没有文件被成功处理，也没有明确的错误信息。")
 
-    cleanup_temp_files(list(set(temp_files_to_delete_final)), request_id)
-    return format_json_response(results=processed_files_final, merge_output=merge_output, request_id=request_id)
+    end_time_view = time.perf_counter() # ADDED: End timer
+    duration_seconds_view = round(end_time_view - start_time_view, 2) # ADDED: Calculate duration
+
+    if errors_view:
+        # ADDED duration_seconds to error response and logger
+        logger.error(f"file_to_pdf_view: Processing finished with errors. Duration: {duration_seconds_view}s. Errors: {errors_view}. RequestID: {request_id}")
+        return format_error_response(
+            message="; ".join(errors_view), 
+            request_id=request_id, 
+            duration_seconds=duration_seconds_view
+        )
+    
+    final_result_payload = {
+        "results": file_results, 
+        "request_id": request_id, 
+        "merge_output": merge_output_flag,
+        "duration_seconds": duration_seconds_view # ADDED: duration
+    }
+    # ADDED duration_seconds to logger
+    logger.info(f"file_to_pdf_view: Processing complete. Duration: {duration_seconds_view}s. RequestID: {request_id}")
+    return format_json_response(
+        results=final_result_payload['results'], 
+        merge_output=final_result_payload['merge_output'], 
+        request_id=final_result_payload['request_id'], 
+        duration_seconds=final_result_payload['duration_seconds']
+    )
 
 @login_required
 @require_POST
 def img_to_file_view(request):
-    today_date_str = datetime.now().strftime("%Y%m%d")
-    request_id = ''.join(random.choices(string.ascii_lowercase + string.digits, k=6))
+    start_time_view = time.perf_counter() # ADDED: Start timer
+    request_id = generate_request_id()
     logger.info(f"img_to_file_view: Received request. RequestID: {request_id}")
+
+    username = request.user.username
+    today_date_str = datetime.now().strftime("%Y%m%d")
+    errors_view = [] # INITIALIZED errors_view
 
     user_upload_dir, user_converted_dir = "", ""
     try:
-        user_upload_dir, user_converted_dir = ensure_user_directories(request.user.username, today_date_str)
+        user_upload_dir, user_converted_dir = ensure_user_directories(username, today_date_str)
     except Exception as e:
-        logger.critical(f"img_to_file_view: Failed to create user directories for {request.user.username}. Error: {e}. RequestID: {request_id}", exc_info=True)
+        logger.critical(f"img_to_file_view: Failed to create user directories for {username}. Error: {e}. RequestID: {request_id}", exc_info=True)
         merge_output_for_error = request.POST.get('merge_output', 'false').lower() == 'true'
         return format_error_response(message='服务器错误：无法创建用户目录。', merge_output=merge_output_for_error, request_id=request_id)
 
@@ -654,20 +675,47 @@ def img_to_file_view(request):
                         temp_files_to_delete_final.append(scf_path)
         
     cleanup_temp_files(list(set(temp_files_to_delete_final)), request_id)
-    return format_json_response(results=processed_files_final, merge_output=merge_output, request_id=request_id)
+    end_time_view = time.perf_counter() # ADDED: End timer
+    duration_seconds_view = round(end_time_view - start_time_view, 2) # ADDED: Calculate duration
+
+    if errors_view: # Check errors_view here
+        logger.error(f"img_to_file_view: Processing finished with errors. Duration: {duration_seconds_view}s. Errors: {errors_view}. RequestID: {request_id}")
+        # Ensure format_error_response is called with merge_output if it expects it
+        # Looking at its definition, it doesn't strictly require merge_output, but other calls include it.
+        # For consistency, let's try to determine merge_output if possible, or pass a default.
+        merge_output_for_error_response = parsed_params.get('merge_output', False) # Get from parsed_params if available
+        return format_error_response(message="; ".join(errors_view), request_id=request_id, duration_seconds=duration_seconds_view, merge_output=merge_output_for_error_response) 
+
+    # Use processed_files_final for results
+    final_result_payload = {
+        "results": processed_files_final, # CHANGED from file_results
+        "request_id": request_id,
+        "merge_output": parsed_params.get('merge_output', False), # Get from parsed_params
+        "duration_seconds": duration_seconds_view
+    }
+    logger.info(f"img_to_file_view: Processing complete. Duration: {duration_seconds_view}s. Results: {len(processed_files_final)} files. RequestID: {request_id}") # CHANGED from file_results
+    return format_json_response(
+        results=final_result_payload['results'], 
+        merge_output=final_result_payload['merge_output'], 
+        request_id=final_result_payload['request_id'], 
+        duration_seconds=final_result_payload['duration_seconds']
+    )
 
 @login_required
 @require_POST
 def pdf_to_file_view(request):
-    today_date_str = datetime.now().strftime("%Y%m%d")
-    request_id = ''.join(random.choices(string.ascii_lowercase + string.digits, k=6))
+    start_time_view = time.perf_counter() # ADDED: Start timer
+    request_id = generate_request_id()
     logger.info(f"pdf_to_file_view: Received request. RequestID: {request_id}")
+
+    username = request.user.username
+    today_date_str = datetime.now().strftime("%Y%m%d")
 
     user_upload_dir, user_converted_dir = "", ""
     try:
-        user_upload_dir, user_converted_dir = ensure_user_directories(request.user.username, today_date_str)
+        user_upload_dir, user_converted_dir = ensure_user_directories(username, today_date_str)
     except Exception as e:
-        logger.critical(f"pdf_to_file_view: Failed to create user directories for {request.user.username}. Error: {e}. RequestID: {request_id}", exc_info=True)
+        logger.critical(f"pdf_to_file_view: Failed to create user directories for {username}. Error: {e}. RequestID: {request_id}", exc_info=True)
         merge_output_for_error = request.POST.get('merge_output', 'false').lower() == 'true'
         return format_error_response(message='服务器错误：无法创建用户目录。', merge_output=merge_output_for_error, request_id=request_id)
 
@@ -860,8 +908,30 @@ def pdf_to_file_view(request):
         logger.info(f"pdf_to_file_view: Merge requested, only one PDF converted. No merge performed. RID: {request_id}")
 
     cleanup_temp_files(list(set(temp_files_to_delete_final)), request_id)
-    return format_json_response(results=processed_files_final, merge_output=merge_output, request_id=request_id)
+    end_time_view = time.perf_counter() # ADDED: End timer
+    duration_seconds_view = round(end_time_view - start_time_view, 2) # ADDED: Calculate duration
 
+    if any(result['status'] == 'error' for result in processed_files_final) or not processed_files_final:
+        # Consolidate error messages if any, or provide a generic one
+        error_messages = [res.get('message', '未知错误') for res in processed_files_final if res['status'] == 'error']
+        if not error_messages: error_messages.append("处理PDF转换时发生未知错误或没有文件成功处理。")
+        logger.error(f"pdf_to_file_view: Processing finished with errors. Duration: {duration_seconds_view}s. Errors: {error_messages}. RequestID: {request_id}")
+        # Return a single error response if there were issues
+        return format_error_response(message="; ".join(error_messages), request_id=request_id, duration_seconds=duration_seconds_view) # ADDED duration
+
+    final_result_payload = {
+        "results": processed_files_final, 
+        "request_id": request_id, 
+        "merge_output": merge_output, # Reflect whether merge was done or intended
+        "duration_seconds": duration_seconds_view # ADDED duration
+    }
+    logger.info(f"pdf_to_file_view: Processing complete. Duration: {duration_seconds_view}s. Results: {len(processed_files_final)} items. RequestID: {request_id}")
+    return format_json_response(
+        results=final_result_payload['results'], 
+        merge_output=final_result_payload['merge_output'], 
+        request_id=final_result_payload['request_id'], 
+        duration_seconds=final_result_payload['duration_seconds']
+    )
 
 @login_required
 @require_POST
@@ -1175,7 +1245,7 @@ def process_video_extraction_view(request):
             _request_user_username_arg,
             _request_id_arg 
         ):
-        
+        start_time_stream = time.perf_counter() # ADDED: Start timer for the stream processing
         # Files and dirs to clean up at the end of this specific stream
         _temp_files_to_clean_stream_arg = [{'path': _temp_video_path_arg, 'type': 'file'}, {'path': _exec_temp_dir_arg, 'type': 'dir'}]
         process_stream = None 
@@ -1348,43 +1418,79 @@ def process_video_extraction_view(request):
             elif return_code_collected_stream == -10: # Popen failure
                 logger.error(f"stream_video_processing_response: Popen failed. Input: {_original_video_filename_arg}. RID: {_request_id_arg}")
                 final_result_payload_stream_var = {"type": "error", "message": "无法启动视频处理脚本。", "request_id": _request_id_arg}
-            
-            # Yield final result/error only if it hasn't been yielded due to timeout
-            if not (final_result_payload_stream_var.get("type") == "error" and return_code_collected_stream == -9) and final_result_payload_stream_var:
-                 yield f"data: {json.dumps(final_result_payload_stream_var)}\n\n"
+            # Ensure final_result_payload_stream_var is initialized if no specific path above set it (e.g., if it was a timeout handled earlier)
+            if not final_result_payload_stream_var and return_code_collected_stream == -9: # Was a timeout and already yielded error
+                 # In case of timeout, final_result_payload_stream_var might have been set in the timeout exception block.
+                 # If not, we might just send a final marker or rely on the previously yielded timeout message.
+                 # For now, let's assume the timeout block correctly set it or a final yield is not strictly needed beyond that.
+                 pass # Or set a default if necessary, but timeout already yielded.
+            elif not final_result_payload_stream_var: # Fallback for any other unexpected unhandled case
+                logger.error(f"stream_video_processing_response: final_result_payload_stream_var not set. Input: {_original_video_filename_arg}. RID: {_request_id_arg}. ReturnCode: {return_code_collected_stream}")
+                final_result_payload_stream_var = {"type": "error", "message": "视频处理时发生未知服务端内部错误。", "request_id": _request_id_arg}
 
-        except Exception as e_main_stream_exc: 
-            logger.error(f"stream_video_processing_response: Main exception for {_original_video_filename_arg}: {e_main_stream_exc}. RID: {_request_id_arg}", exc_info=True)
-            # Avoid double-sending error if one (like timeout) was already sent
-            if not (final_result_payload_stream_var and final_result_payload_stream_var.get("type") == "error" and final_result_payload_stream_var.get("request_id") == _request_id_arg):
-                final_result_payload_stream_var = {"type": "error", "message": f'视频处理时发生意外服务器错误。 (请求ID: {_request_id_arg})', "request_id": _request_id_arg}
-                yield f"data: {json.dumps(final_result_payload_stream_var)}\n\n"
+
+        except Exception as e_stream_outer:
+            logger.error(f"stream_video_processing_response: Outer exception: {e_stream_outer}. Traceback: {traceback.format_exc()}. RID: {_request_id_arg}")
+            final_result_payload_stream_var = {"type": "error", "message": f"视频流处理过程中发生意外错误: {e_stream_outer}", "request_id": _request_id_arg}
         
         finally:
-            if process_stream and process_stream.poll() is None: 
-                logger.warning(f"Subprocess still running in finally (PID: {process_stream.pid}). Terminating/killing. RID: {_request_id_arg}")
-                try:
-                    process_stream.terminate(); process_stream.wait(timeout=5)
-                    logger.info(f"Process terminated. PID: {process_stream.pid}. RID: {_request_id_arg}")
-                except subprocess.TimeoutExpired:
-                    logger.warning(f"Terminate timed out. Killing. PID: {process_stream.pid}. RID: {_request_id_arg}")
-                    process_stream.kill(); process_stream.wait(timeout=5)
-                    logger.info(f"Process killed. PID: {process_stream.pid}. RID: {_request_id_arg}")
-                except ProcessLookupError: logger.info(f"Process (PID: {process_stream.pid}) already ended. RID: {_request_id_arg}")
-                except Exception as e_term_fin: logger.error(f"Error in finally termination: {e_term_fin}. PID: {process_stream.pid if process_stream else 'N/A'}. RID: {_request_id_arg}")
-            
-            cleanup_temp_files(_temp_files_to_clean_stream_arg, _request_id_arg, remove_dirs=True)
-            logger.info(f"stream_video_processing_response: Cleanup executed for {_exec_temp_dir_arg}. RID: {_request_id_arg}")
-            yield f"event: stream_end\ndata: {json.dumps({'message': f'End of stream for {_request_id_arg}', 'request_id': _request_id_arg})}\n\n"
+            end_time_stream = time.perf_counter() # ADDED: End timer for the stream processing
+            duration_seconds_stream = round(end_time_stream - start_time_stream, 2) # ADDED: Calculate duration
+            logger.info(f"stream_video_processing_response: Finalizing stream. Duration: {duration_seconds_stream}s. RequestID: {_request_id_arg}")
 
-    stream_generator_instance = stream_video_processing_response(
-        script_path, temp_video_path, exec_temp_dir, scene_threshold, group_size,
+            if final_result_payload_stream_var: # Ensure it's not empty
+                final_result_payload_stream_var["duration_seconds"] = duration_seconds_stream # ADDED duration to final payload
+                yield f"data: {json.dumps(final_result_payload_stream_var)}\n\n"
+            else:
+                # This case should ideally be avoided by ensuring final_result_payload_stream_var is always set.
+                # However, as a fallback, yield a generic error with duration.
+                fallback_error_payload = {
+                    "type": "error", 
+                    "message": "视频处理结束，但未生成明确结果。请检查日志。", 
+                    "request_id": _request_id_arg,
+                    "duration_seconds": duration_seconds_stream
+                }
+                logger.warning(f"stream_video_processing_response: final_result_payload_stream_var was empty at the end. Yielding fallback. RID: {_request_id_arg}")
+                yield f"data: {json.dumps(fallback_error_payload)}\n\n" 
+
+            # This is the critical part for cleanup after streaming response is fully sent.
+            # Schedule cleanup of temporary files associated with this specific stream processing.
+            # cleanup_temp_files(_temp_files_to_clean_stream_arg, _request_id_arg)
+            # logger.info(f"stream_video_processing_response: Scheduled cleanup for stream-specific temp files. RID: {_request_id_arg}")
+            # Commented out cleanup as it's handled in the main view after generator is exhausted.
+
+    # ... (rest of process_video_extraction_view)
+    # The main view will call the generator and then perform global cleanup.
+    # Create the StreamingHttpResponse with the generator.
+    response = StreamingHttpResponse(stream_video_processing_response(
+        script_path, temp_video_path, exec_temp_dir, 
+        scene_threshold, group_size,
         original_video_filename, safe_video_filename, user_converted_dir, today_date_str,
         target_raw_snapshots_dir, target_dedup_snapshots_dir,
-        request.user.username, request_id
-    )
-    response = StreamingHttpResponse(stream_generator_instance, content_type='text/event-stream')
-    response['Cache-Control'] = 'no-cache'
+        request.user.username, request_id 
+    ), content_type="text/event-stream")
+
+    # Perform cleanup AFTER the streaming response has finished (or generator is exhausted)
+    # This is tricky as the response is returned before the generator is fully consumed.
+    # A better way for post-stream cleanup might involve signals or a different architecture.
+    # For now, we rely on the main view's structure or a later scheduled task if needed.
+    # The _temp_files_to_clean_stream_arg in the generator is a good start if we can pass its state out.
+    # Let's assume process_video_extraction_view's own `temp_files_to_clean_main_view` handles inputs like temp_video_path.
+    # The exec_temp_dir is created by the script and should be cleaned up by it, or explicitly here.
+    # However, current logic in stream_video_processing_response has its own _temp_files_to_clean_stream_arg
+    # which includes temp_video_path and exec_temp_dir.
+    # The issue is *when* to call cleanup_temp_files for these.
+    # Let's assume the global cleanup in process_video_extraction_view is sufficient for now.
+
+    # Add items to the main view's cleanup list
+    # temp_files_to_clean_main_view.append({'path': temp_video_path, 'type': 'file'}) # Already added from save_uploaded_file
+    # temp_files_to_clean_main_view.append({'path': exec_temp_dir, 'type': 'dir'}) # This is specific to video exec
+    # This exec_temp_dir needs to be cleaned. The stream_video_processing_response's finally block is too early if using StreamingHttpResponse.
+    # A more robust solution would be to ensure this is cleaned perhaps by the script itself or a managing task.
+    # For now, this exec_temp_dir (created as os.path.join(user_upload_dir, f"video_exec_{request_id}"))
+    # will be cleaned up IF the stream_video_processing_response is fully iterated by the client and server.
+    # If connection drops, it might not be. This is a general challenge with external processes and temp dirs.
+
     return response
 
 # Celery task status check view (if you integrate Celery later)

@@ -1110,11 +1110,17 @@
         })
         .then(response => response.json())
         .then(data => {
-            displayConvertedFiles(data.results, data.merge_output);
+            displayConvertedFiles(data);
         })
         .catch(error => {
             console.error('转换出错:', error);
-            displayConvertedFiles([{ original_name: '错误', converted_name: '-', status: 'error', message: '客户端请求错误，详情请查看控制台。' }], false);
+            // Prepare a data-like object for displayConvertedFiles in case of catch
+            const errorData = {
+                results: [{ original_name: '错误', converted_name: '-', status: 'error', message: '客户端请求错误，详情请查看控制台。' }],
+                merge_output: false,
+                // duration_seconds might not be available here, so it won't be displayed
+            };
+            displayConvertedFiles(errorData);
             const btn = document.getElementById('startConversionBtn');
             btn.disabled = false;
             btn.textContent = '开始转换';
@@ -1135,12 +1141,26 @@
         });
     }
 
-    function displayConvertedFiles(results, mergeOutput) {
+    function displayConvertedFiles(data) {
         const container = document.getElementById('convertedFilesTableContainer');
         container.innerHTML = ''; // Clear previous results
 
-        if (!results || results.length === 0) {
-            container.innerHTML = '<p class="no-files">没有转换结果。</p>';
+        // ADDED: Display overall duration first if available
+        if (data.duration_seconds !== undefined) {
+            const overallDurationP = document.createElement('p');
+            overallDurationP.className = 'text-muted small mb-2'; // Consistent styling
+            overallDurationP.textContent = `总处理时长: ${data.duration_seconds} 秒`;
+            container.appendChild(overallDurationP);
+        }
+
+        if (data.error) {
+            let errorMessage = `<p class="text-danger">处理失败: ${escapeHtml(data.error)}</p>`;
+            container.innerHTML += errorMessage; // Append error message after duration
+            return;
+        }
+
+        if (!data.results || data.results.length === 0) {
+            container.innerHTML += '<p class="no-files">没有转换结果。</p>'; // Append after duration
             return;
         }
 
@@ -1158,7 +1178,7 @@
         table.appendChild(thead);
 
         const tbody = document.createElement('tbody');
-        results.forEach(result => {
+        data.results.forEach(result => {
             const row = tbody.insertRow();
             row.insertCell().textContent = result.original_name || 'N/A';
             row.insertCell().textContent = result.converted_name || 'N/A';
@@ -1422,18 +1442,27 @@
     }
 
     function displayVideoExtractionResults(data) {
-        // Adjusted to target the new container ID for video results table
         const resultsDiv = document.getElementById('videoProcessingResultsTableContainer'); 
         if (!resultsDiv) return;
 
         resultsDiv.innerHTML = ''; // Clear previous results
 
+        // MODIFICATION: Display overall duration first if available
+        if (data.duration_seconds !== undefined) {
+            const overallDurationP = document.createElement('p');
+            overallDurationP.className = 'text-muted small mb-2';
+            overallDurationP.textContent = `总处理时长: ${data.duration_seconds} 秒`;
+            resultsDiv.appendChild(overallDurationP);
+        }
+
         if (!data || !data.results || data.results.length === 0) {
             let message = '<p class="text-warning mt-2">没有收到有效的处理结果。</p>';
             if (data && data.message && !data.results) { 
+                // Error message might already include duration if backend sends it within data.message for errors
+                // But we are showing global data.duration_seconds above.
                 message = `<p class="text-danger mt-2">处理失败: ${escapeHtml(data.message)}</p>`;
             }
-            resultsDiv.innerHTML = message;
+            resultsDiv.innerHTML += message; // Append message after duration
             return;
         }
 
@@ -1542,6 +1571,90 @@
         const tipsElement = document.getElementById('fileUploadTips');
         const maxFiles = 10;
         tipsElement.textContent = `提示: 最多选择${maxFiles}个文件 (${uploadedFiles.length}/${maxFiles}已选), 单个文件不超过10MB。`;
+    }
+
+    function handleConversionResponse(data, resultsContainerId) {
+        const container = document.getElementById(resultsContainerId);
+        if (!container) {
+            console.error('Results container not found:', resultsContainerId);
+            return;
+        }
+        container.innerHTML = ''; // Clear previous results
+
+        // MODIFICATION: Display overall duration first if available
+        if (data.duration_seconds !== undefined) {
+            const overallDurationP = document.createElement('p');
+            overallDurationP.className = 'text-muted small mb-2';
+            overallDurationP.textContent = `总处理时长: ${data.duration_seconds} 秒`;
+            container.appendChild(overallDurationP);
+        }
+
+        if (data.error) {
+            let errorMessage = `<p class="text-danger">处理失败: ${escapeHtml(data.error)}</p>`;
+            // Duration is already displayed above if present in data object, 
+            // but if error object itself has it, could be more specific.
+            // For now, relying on the global data.duration_seconds shown above.
+            container.innerHTML += errorMessage; // Append error message after duration
+            return;
+        }
+
+        if (!data.results || data.results.length === 0) {
+            let noResultsMessage = '<p class="text-warning">没有生成任何文件。</p>';
+            // Duration is already displayed above.
+            container.innerHTML += noResultsMessage; // Append message after duration
+            return;
+        }
+
+        const table = document.createElement('table');
+        table.className = 'table table-striped table-bordered'; 
+        table.style.borderCollapse = 'collapse';
+
+        const thead = document.createElement('thead');
+        thead.innerHTML = '<tr>' +
+                            '<th>原始文件名</th>' +
+                            '<th>转换后文件名</th>' +
+                            '<th>状态</th>' +
+                            '<th>消息/下载</th>' +
+                        '</tr>';
+        table.appendChild(thead);
+
+        const tbody = document.createElement('tbody');
+        data.results.forEach(item => {
+            const row = tbody.insertRow();
+            row.insertCell().textContent = item.original_name || 'N/A';
+            row.insertCell().textContent = item.converted_name || 'N/A';
+            
+            const statusCell = row.insertCell();
+            const statusBadge = document.createElement('span');
+            statusBadge.classList.add('status-badge');
+            statusBadge.textContent = item.status;
+            if (item.status === 'success' || item.status === 'success_fallback') {
+                statusBadge.classList.add('status-success');
+            } else if (item.status === 'error' || item.status.includes('_error')) {
+                statusBadge.classList.add('status-error');
+            } else {
+                statusBadge.classList.add('status-processing'); // Or a default style
+            }
+            statusCell.appendChild(statusBadge);
+
+            const actionCell = row.insertCell();
+            if (item.status === 'success' || item.status === 'success_fallback') {
+                if (item.download_url) {
+                    const downloadLink = document.createElement('a');
+                    downloadLink.href = item.download_url;
+                    downloadLink.textContent = '下载';
+                    downloadLink.className = 'download-link';
+                    downloadLink.target = '_blank';
+                    actionCell.appendChild(downloadLink);
+                } else {
+                    actionCell.textContent = item.message || '-';
+                }
+            } else {
+                actionCell.textContent = item.message || '未知错误';
+            }
+        });
+        table.appendChild(tbody);
+        container.appendChild(table);
     }
 
 </script>
