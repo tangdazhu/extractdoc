@@ -11,9 +11,29 @@ https://docs.djangoproject.com/en/5.2/ref/settings/
 """
 
 from pathlib import Path
+import os
+import yaml
+import dashscope
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
+
+# --- BEGIN ADDED: Load DashScope API Key from config.yaml ---
+CONFIG_YAML_PATH = BASE_DIR / 'config.yaml'
+try:
+    with open(CONFIG_YAML_PATH, 'r') as f:
+        config_data = yaml.safe_load(f)
+        DASHSCOPE_API_KEY = config_data.get('DASHSCOPE_API_KEY')
+        if DASHSCOPE_API_KEY:
+            dashscope.api_key = DASHSCOPE_API_KEY
+            print(f"Successfully loaded DASHSCOPE_API_KEY from {CONFIG_YAML_PATH}") # For verification
+        else:
+            print(f"DASHSCOPE_API_KEY not found in {CONFIG_YAML_PATH}")
+except FileNotFoundError:
+    print(f"Warning: {CONFIG_YAML_PATH} not found. DASHSCOPE_API_KEY not loaded.")
+except Exception as e:
+    print(f"Warning: Error loading DASHSCOPE_API_KEY from {CONFIG_YAML_PATH}: {e}")
+# --- END ADDED ---
 
 
 # Quick-start development settings - unsuitable for production
@@ -117,6 +137,10 @@ USE_TZ = True
 # https://docs.djangoproject.com/en/5.2/howto/static-files/
 
 STATIC_URL = "static/"
+
+STATICFILES_DIRS = [
+    os.path.join(BASE_DIR, 'converter/static/converter'),
+]
 
 # Default primary key field type
 # https://docs.djangoproject.com/en/5.2/ref/settings/#default-auto-field

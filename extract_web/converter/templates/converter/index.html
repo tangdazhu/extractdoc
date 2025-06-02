@@ -1,4 +1,5 @@
 {% extends "converter/base.html" %}
+{% load static %}
 
 {% block title %}智能文档转换工作室主页{% endblock %}
 
@@ -465,6 +466,88 @@
         font-size: 0.9em;
     }
 
+    /* Speech Processing Section Specific Styles */
+    #speechProcessingContent .form-group {
+        margin-bottom: 20px;
+    }
+    #speechProcessingContent label {
+        display: block;
+        margin-bottom: 8px;
+        font-weight: 500;
+        color: #34495e;
+    }
+    #speechProcessingContent input[type="file"] {
+        width: 100%;
+        padding: 10px;
+        border: 1px solid #bdc3c7;
+        border-radius: 4px;
+        box-sizing: border-box;
+        padding: 7px; /* Adjust for file input */
+    }
+    #speechProcessingContent .audio-drop-area { /* Similar to video drop area */
+        border: 2px dashed #2ecc71; /* Green dashed border for audio */
+        padding: 30px;
+        text-align: center;
+        border-radius: 6px;
+        background-color: #f8f9faff;
+        margin-bottom: 20px;
+        cursor: pointer;
+        transition: background-color 0.2s ease-in-out;
+    }
+    #speechProcessingContent .audio-drop-area:hover {
+        background-color: #e8f8f0; /* Light green on hover */
+    }
+    #speechProcessingContent .audio-drop-area p {
+        margin: 0;
+        font-size: 1em;
+        color: #2ecc71; /* Green text */
+    }
+    #speechProcessingContent #audioTranscriptionResult {
+        width: 100%;
+        min-height: 150px;
+        padding: 10px;
+        border: 1px solid #bdc3c7;
+        border-radius: 4px;
+        box-sizing: border-box;
+        margin-top: 10px;
+        font-family: monospace; /* Good for displaying text results */
+        background-color: #f9f9f9;
+    }
+    #speechProcessingContent .action-buttons { /* Re-style for speech section if needed */
+        margin-top: 20px;
+        padding-top: 20px;
+        border-top: 1px solid #e9ecef;
+        display: flex;
+        justify-content: space-between; /* Align buttons */
+    }
+    #speechProcessingContent .action-buttons .left-buttons button,
+    #speechProcessingContent .action-buttons .right-buttons button {
+        padding: 12px 25px;
+        border: none;
+        border-radius: 6px;
+        cursor: pointer;
+        font-size: 16px;
+        font-weight: 500;
+    }
+    #speechProcessingContent .action-buttons .left-buttons button {
+        background-color: #e74c3c; /* Red for Clear */
+        color: white;
+    }
+    #speechProcessingContent .action-buttons .left-buttons button:hover {
+        background-color: #c0392b;
+    }
+    #speechProcessingContent .action-buttons .right-buttons button {
+        background-color: #27ae60; /* Green for "Start Recognition" */
+        color: white;
+    }
+    #speechProcessingContent .action-buttons .right-buttons button:hover {
+        background-color: #229954;
+    }
+     #speechProcessingContent .action-buttons .right-buttons button:disabled {
+        background-color: #adb5bd;
+        cursor: not-allowed;
+    }
+
 </style>
 {% endblock %}
 
@@ -476,7 +559,7 @@
                 <li><button id="navDocConversion" class="active" onclick="selectMainNavigation('docConversion')">文档转换</button></li>
                 <li><button id="navVideoAnalysis" onclick="selectMainNavigation('videoAnalysis')">视频分析</button></li>
                 <li><button id="navImageAnalysis" class="disabled" onclick="selectMainNavigation('imageAnalysis')" disabled>图像分析</button></li>
-                <li><button id="navVoiceAnalysis" class="disabled" onclick="selectMainNavigation('voiceAnalysis')" disabled>语音分析</button></li>
+                <li><button id="navSpeechProcessing" onclick="selectMainNavigation('speechProcessing')">语音处理</button></li>
             </ul>
         </nav>
     </div>
@@ -662,1000 +745,83 @@
             </div>
         </div>
 
+        <div id="speechProcessingContent" class="converter-container" style="display: none;">
+            <!-- Speech Processing Content Area -->
+            <div class="sub-tabs-container" style="margin-bottom: 20px; display: flex; flex-direction: column; align-items: flex-start; border-bottom: 1px solid #dee2e6; padding-bottom: 15px;">
+                <h4 style="margin: 0 0 10px 0; color: #2c3e50; font-size: 22px; font-weight: 600;">语音处理</h4>
+                <div class="sub-tabs"> <!-- Removed ms-auto -->
+                    <button id="speechSubTabAsr" class="sub-tab-button active" onclick="showSpeechSubTab('asrContent', this)">语音转文字</button>
+                    <button id="speechSubTabClone" class="sub-tab-button disabled" onclick="showSpeechSubTab('voiceCloningContent', this)" title="功能开发中" disabled>声音克隆</button>
+                    <button id="speechSubTabTts" class="sub-tab-button disabled" onclick="showSpeechSubTab('ttsContent', this)" title="功能开发中" disabled>文字转语音</button>
+                </div>
+            </div>
+
+            <!-- ASR (语音转文字) Sub-content -->
+            <div id="asrContent" class="speech-sub-content" style="padding-top: 15px;">
+                <div class="card shadow-sm mb-4">
+                    <div class="card-body">
+                        <h5 class="card-title mb-3" style="color: #34495e; font-weight: 500;">语音识别 (Paraformer V2 模型)</h5>
+                        <p class="card-text text-muted mb-3" style="font-size: 0.9em;">
+                            输入一个公开可访问的音频文件URL（例如，阿里云OSS链接），系统将尝试将其内容转换为文字。
+                        </p>
+                        
+                        <div class="mb-3">
+                            <label for="audioUrlInput" class="form-label" style="font-weight: 500;">音频文件URL:</label>
+                            <input type="text" class="form-control" id="audioUrlInput" placeholder="例如: https://your-bucket.oss-cn-beijing.aliyuncs.com/audio.wav">
+                            <small class="form-text text-muted" style="font-size: 0.85em; display: block; margin-top: 5px;">支持常见音频格式，如 WAV, MP3, M4A 等。</small>
+                        </div>
+                        
+                        <div class="action-buttons mt-3 mb-3" style="border-top: none; padding-top: 0; justify-content: flex-start;">
+                             <button type="button" class="btn btn-primary" id="startAsrBtn" style="padding: 10px 20px; font-size: 0.95em; margin-right: 10px;">
+                                <i class="fas fa-microphone-alt me-2"></i>开始识别
+                            </button>
+                            <button type="button" class="btn btn-outline-secondary ms-2" id="clearAsrFieldsBtn" title="清空URL和结果" style="padding: 10px 20px; font-size: 0.95em;">
+                                <i class="fas fa-eraser me-2"></i>清空
+                            </button>
+                        </div>
+
+                        <div id="asrLoadingIndicator" class="mt-3 alert alert-info" style="display:none; padding: 10px;">
+                            <div class="d-flex align-items-center">
+                                <strong style="font-size: 0.9em;">处理中，请稍候...</strong>
+                                <div class="spinner-border spinner-border-sm ms-auto text-primary" role="status" aria-hidden="true"></div>
+                            </div>
+                        </div>
+
+                        <div id="asrResultContainer" class="mt-3">
+                            <label for="asrTranscriptionOutput" class="form-label" style="font-weight: 500;">识别结果:</label>
+                            <textarea id="asrTranscriptionOutput" class="form-control bg-light" style="min-height: 150px; border: 1px solid #e9ecef; white-space: pre-wrap; word-wrap: break-word; font-family: monospace; font-size: 0.9em; width: 100%;" readonly placeholder="识别出的文本将显示在这里..."></textarea>
+                            <div id="asrErrorOutput" class="text-danger mt-2" style="font-size: 0.9em;"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Voice Cloning Sub-content (Placeholder) -->
+            <div id="voiceCloningContent" class="speech-sub-content" style="display:none; padding-top: 15px;">
+                <div class="card shadow-sm mb-4">
+                    <div class="card-body">
+                        <h5 class="card-title" style="color: #34495e; font-weight: 500;">声音克隆</h5>
+                        <p class="text-muted">此功能正在开发中，敬请期待。</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- TTS Sub-content (Placeholder) -->
+            <div id="ttsContent" class="speech-sub-content" style="display:none; padding-top: 15px;">
+                <div class="card shadow-sm mb-4">
+                    <div class="card-body">
+                        <h5 class="card-title" style="color: #34495e; font-weight: 500;">个性化语音合成</h5>
+                        <p class="text-muted">此功能（使用克隆声音将文本转换为语音）正在开发中。</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
     </div> <!-- main-content-wrapper -->
 </div> <!-- page-layout-container -->
 
 {% endblock %}
 
 {% block extra_js %}
-<script>
-    let currentSelectedMainTab = 'imgToFile'; 
-    let currentSelectedSubTab = 'imgToWord'; 
-    let isConverting = false;
-    const uploadedFiles = []; 
-    let uploadedVideoFile = null; // For single video file
-
-    // --- NEW --- Helper function to disable/enable main tab buttons
-    function updateMainTabButtonsState(disableNonActive) {
-        const mainTabButtons = document.querySelectorAll('.tabs .tab-button');
-        const subTabButtons = document.querySelectorAll('.sub-tabs .sub-tab-button'); // Get all sub-tab buttons
-
-        mainTabButtons.forEach(button => {
-            if (disableNonActive) {
-                if (!button.classList.contains('active')) {
-                    button.disabled = true;
-                    button.style.opacity = '0.5'; 
-                    button.style.cursor = 'not-allowed';
-                } else {
-                    button.style.cursor = 'not-allowed'; 
-                }
-            } else {
-                button.disabled = false;
-                button.style.opacity = '1';
-                button.style.cursor = 'pointer';
-            }
-        });
-
-        subTabButtons.forEach(button => {
-            if (disableNonActive) {
-                button.disabled = true;
-                button.style.opacity = '0.5';
-                button.style.cursor = 'not-allowed';
-            } else {
-                button.disabled = false;
-                button.style.opacity = '1';
-                button.style.cursor = 'pointer';
-            }
-        });
-    }
-    // --- END NEW ---
-
-    function getCookie(name) {
-        let cookieValue = null;
-        if (document.cookie && document.cookie !== '') {
-            const cookies = document.cookie.split(';');
-            for (let i = 0; i < cookies.length; i++) {
-                const cookie = cookies[i].trim();
-                if (cookie.substring(0, name.length + 1) === (name + '=')) {
-                    cookieValue = decodeURIComponent(cookie.substring(name.length + 1));
-                    break;
-                }
-            }
-        }
-        return cookieValue;
-    }
-
-    function updateFileUploadAcceptType() {
-        const fileUploadInput = document.getElementById('fileUpload');
-        let acceptTypes = '';
-
-        switch (currentSelectedMainTab) {
-            case 'imgToFile':
-                acceptTypes = '.jpg,.jpeg,.png,.bmp';
-                break;
-            case 'fileToPdf':
-                switch (currentSelectedSubTab) {
-                    case 'wordToPdf':
-                        acceptTypes = '.doc,.docx';
-                        break;
-                    case 'excelToPdf':
-                        acceptTypes = '.xls,.xlsx';
-                        break;
-                    case 'pptToPdf':
-                        acceptTypes = '.ppt,.pptx';
-                        break;
-                    case 'txtToPdf':
-                        acceptTypes = '.txt';
-                        break;
-                    default:
-                        acceptTypes = ''; 
-                        break;
-                }
-                break;
-            case 'pdfToFile':
-                acceptTypes = '.pdf';
-                break;
-            default:
-                acceptTypes = ''; 
-                break;
-        }
-        fileUploadInput.accept = acceptTypes;
-        console.log("File input accept types updated to: ", acceptTypes);
-    }
-
-    function showTab(tabId) {
-        if (isConverting) {
-            console.log("[showTab] Conversion in progress. Tab switch prevented.");
-            // Optionally, provide a non-alert feedback to the user here if desired,
-            // e.g., by briefly changing a status message or an icon.
-            return; // Exit the function, preventing tab switch
-        }
-
-        if (currentSelectedMainTab !== tabId) { 
-            clearFileList();
-            clearConvertedFilesList();
-        }
-
-        document.querySelectorAll('.tab-content').forEach(tab => tab.classList.add('hidden'));
-        document.getElementById(tabId + 'Content').classList.remove('hidden');
-
-        document.querySelectorAll('.tab-button').forEach(button => button.classList.remove('active'));
-        document.getElementById('btn' + tabId.charAt(0).toUpperCase() + tabId.slice(1)).classList.add('active');
-        
-        currentSelectedMainTab = tabId;
-        const firstSubTabButton = document.getElementById(tabId + 'Content').querySelector('.sub-tab-button');
-        if (firstSubTabButton) {
-            const onclickAttr = firstSubTabButton.getAttribute('onclick');
-            const match = onclickAttr.match(/selectSubTab\(this, '([^']*)'\)/);
-            if (match && match[1]) {
-                 console.log("[showTab] Auto-selecting first sub-tab: ", match[1]);
-                 selectSubTab(firstSubTabButton, match[1], false); 
-            } else {
-                console.warn("[showTab] Could not determine subTabType for default selection in main tab: ", tabId, " from onclick: ", onclickAttr);
-                currentSelectedSubTab = null;
-            }
-        } else {
-            console.warn("[showTab] No sub-tab buttons found for main tab: ", tabId);
-            currentSelectedSubTab = null;
-        }
-        updateFileUploadAcceptType(); 
-        console.log("[showTab] Current main tab: ", currentSelectedMainTab, "Current sub tab: ", currentSelectedSubTab);
-    }
-
-    function selectSubTab(buttonElement, subTabType, shouldUpdateAccept = true) {
-        console.log("[selectSubTab] Called with subTabType: ", subTabType, "Current is: ", currentSelectedSubTab);
-        console.log("[selectSubTab] Button element: ", buttonElement);
-
-        if (!buttonElement) {
-            console.error("[selectSubTab] Error: buttonElement is null or undefined.");
-            return;
-        }
-
-        // Clear file list and conversion results when switching sub tabs
-        if (currentSelectedSubTab !== subTabType) { 
-            console.log("[selectSubTab] Different sub-tab selected. Clearing lists.");
-            clearFileList();
-            clearConvertedFilesList();
-            console.log("[selectSubTab] Lists cleared.");
-        } else {
-            console.log("[selectSubTab] Same sub-tab clicked or re-selected. Lists not cleared.");
-        }
-
-        if (buttonElement.parentElement) {
-            console.log("[selectSubTab] Parent element of button: ", buttonElement.parentElement);
-            const subTabButtons = buttonElement.parentElement.querySelectorAll('.sub-tab-button');
-            console.log("[selectSubTab] Found sub-tab buttons: ", subTabButtons);
-            
-            subTabButtons.forEach(btn => {
-                // console.log("[selectSubTab] Removing 'active' from button: ", btn);
-                btn.classList.remove('active');
-            });
-            console.log("[selectSubTab] 'active' class removed from all siblings.");
-            
-            buttonElement.classList.add('active');
-            console.log("[selectSubTab] 'active' class added to clicked button: ", buttonElement);
-        } else {
-            console.error("[selectSubTab] Error: buttonElement.parentElement is null. Cannot update active classes.");
-        }
-        
-        currentSelectedSubTab = subTabType;
-        console.log("[selectSubTab] currentSelectedSubTab updated to: ", currentSelectedSubTab);
-
-        if (shouldUpdateAccept) {
-            console.log("[selectSubTab] Updating file upload accept type.");
-            updateFileUploadAcceptType();
-        } else {
-            console.log("[selectSubTab] Skipping file upload accept type update (shouldUpdateAccept=false).");
-        }
-        console.log("当前选择的转换类型 (sub-tab): ", currentSelectedSubTab);
-
-        // --- NEW: Show/Hide PDF conversion options ---
-        const pdfToWordOptionsDiv = document.getElementById('pdfToWordOptions');
-        const pdfToExcelOptionsDiv = document.getElementById('pdfToExcelOptions');
-        const pdfToTxtOptionsDiv = document.getElementById('pdfToTxtOptions');
-        const pdfToPptOptionsDiv = document.getElementById('pdfToPptOptions');
-        const pdfMergeOptionDiv = document.getElementById('pdfMergeOption');
-        
-        // Hide all PDF options first
-        [pdfToWordOptionsDiv, pdfToExcelOptionsDiv, pdfToTxtOptionsDiv, pdfToPptOptionsDiv, pdfMergeOptionDiv].forEach(div => {
-            div.classList.add('hidden');
-        });
-        
-        // Show the appropriate options based on current selection
-        if (currentSelectedMainTab === 'pdfToFile') {
-            let targetOptionsDiv = null;
-            
-            switch (currentSelectedSubTab) {
-                case 'pdfToWord':
-                    targetOptionsDiv = pdfToWordOptionsDiv;
-                    console.log("[selectSubTab] PDF to Word options SHOWN");
-                    break;
-                case 'pdfToExcel':
-                    targetOptionsDiv = pdfToExcelOptionsDiv;
-                    console.log("[selectSubTab] PDF to Excel options SHOWN");
-                    break;
-                case 'pdfToTxt':
-                    targetOptionsDiv = pdfToTxtOptionsDiv;
-                    console.log("[selectSubTab] PDF to TXT options SHOWN");
-                    break;
-                case 'pdfToPpt':
-                    targetOptionsDiv = pdfToPptOptionsDiv;
-                    console.log("[selectSubTab] PDF to PPT options SHOWN");
-                    break;
-            }
-            
-            if (targetOptionsDiv) {
-                targetOptionsDiv.classList.remove('hidden');
-                targetOptionsDiv.style.display = 'flex'; // Explicitly set display to flex
-            }
-            
-            // Always show the merge option for PDF conversions
-            pdfMergeOptionDiv.classList.remove('hidden');
-            pdfMergeOptionDiv.style.display = 'block';
-            console.log("[selectSubTab] PDF merge option SHOWN");
-        } else {
-            console.log("[selectSubTab] All PDF options HIDDEN");
-        }
-        // --- END NEW ---
-    }
-
-    // Function to add styling to the file list items dynamically
-    function renderFileList() {
-        const fileListUI = document.getElementById('fileList');
-        fileListUI.innerHTML = ''; // Clear existing list items
-        uploadedFiles.forEach((file, index) => {
-            const listItem = document.createElement('li');
-            const fileNameSpan = document.createElement('span');
-            fileNameSpan.className = 'file-name';
-            fileNameSpan.textContent = file.name + ' (' + (file.size / 1024 / 1024).toFixed(2) + ' MB)';
-            
-            const removeBtn = document.createElement('button');
-            removeBtn.className = 'remove-file-btn';
-            removeBtn.innerHTML = '&times;'; // Multiplication sign as a simple 'x'
-            removeBtn.title = '移除文件';
-            removeBtn.onclick = function() { 
-                uploadedFiles.splice(index, 1); // Remove file from array
-                renderFileList(); // Re-render the list
-            };
-            
-            listItem.appendChild(fileNameSpan);
-            listItem.appendChild(removeBtn);
-            fileListUI.appendChild(listItem);
-        });
-    }
-
-    // Modify handleFiles to use renderFileList
-    function handleFiles(incomingFiles) {
-        const fileListUI = document.getElementById('fileList');
-        const maxFiles = 10;
-        const maxFileSize = 10 * 1024 * 1024; // 10MB
-
-        for (const file of incomingFiles) {
-            if (uploadedFiles.length >= maxFiles) {
-                alert(`最多只能上传 ${maxFiles} 个文件。`);
-                break;
-            }
-            if (file.size > maxFileSize) {
-                alert(`文件 "${file.name}" (${(file.size / 1024 / 1024).toFixed(2)} MB) 超过了10MB的大小限制。`);
-                continue;
-            }
-            // Check for duplicate file names before adding
-            if (!uploadedFiles.some(f => f.name === file.name)) {
-                 uploadedFiles.push(file);
-            }
-        }
-        renderFileList(); // Call the new render function
-    }
-
-    // Modify clearFileList to use renderFileList
-    function clearFileList() {
-        uploadedFiles.length = 0; // Empty the array
-        renderFileList(); // Re-render (which will show an empty list)
-        document.getElementById('fileUpload').value = ''; // Reset file input
-    }
-
-    // Drag and Drop functionality for the content-area
-    const dropZone = document.getElementById('dropZone');
-
-    dropZone.addEventListener('dragover', (event) => {
-        event.stopPropagation();
-        event.preventDefault();
-        event.dataTransfer.dropEffect = 'copy';
-        dropZone.style.backgroundColor = '#e7f3ff'; // Highlight on drag over
-    });
-
-    dropZone.addEventListener('dragleave', (event) => {
-        event.stopPropagation();
-        event.preventDefault();
-        dropZone.style.backgroundColor = '#f8f9faff'; // Revert background
-    });
-
-    dropZone.addEventListener('drop', (event) => {
-        event.stopPropagation();
-        event.preventDefault();
-        dropZone.style.backgroundColor = '#f8f9faff'; // Revert background
-        const files = event.dataTransfer.files;
-        handleFiles(files);
-    });
-    
-    function clearConvertedFilesList() {
-        const container = document.getElementById('convertedFilesTableContainer');
-        container.innerHTML = ''; // Clear previous results
-    }
-
-    function startConversion() {
-        console.log("[startConversion] 函数开始执行。当前的 isConverting 状态:", isConverting);
-        if (uploadedFiles.length === 0) {
-            alert("请先添加要转换的文件。");
-            return;
-        }
-
-        isConverting = true;
-        updateMainTabButtonsState(true); // --- NEW --- Disable other tabs
-        console.log("[startConversion] isConverting 已被设置为 true。");
-        const conversionBtn = document.getElementById('startConversionBtn');
-        conversionBtn.disabled = true;
-        conversionBtn.textContent = '等待转换中...';
-        conversionBtn.style.backgroundColor = '#ffc107';
-        conversionBtn.style.borderColor = '#ffc107';
-        console.log("[startConversion] '开始转换'按钮状态已更新为'等待转换中...' (禁用，黄色背景)。");
-        clearConvertedFilesList(); // Clear previous results table
-
-        const formData = new FormData();
-        uploadedFiles.forEach(file => {
-            formData.append('images', file); // 'images' is the key expected by the backend
-        });
-
-        formData.append('main_tab', currentSelectedMainTab);
-        formData.append('sub_tab', currentSelectedSubTab);
-        formData.append('merge_output', document.getElementById('mergeOutputCheckbox').checked);
-        
-        let outputFormat = '';
-        if (currentSelectedMainTab === 'imgToFile') {
-            if (currentSelectedSubTab === 'imgToPdf') {
-                outputFormat = 'pdf';
-            } else if (currentSelectedSubTab === 'imgToPpt') {
-                outputFormat = 'pptx';
-            } else {
-                outputFormat = 'docx';
-            }
-        } else if (currentSelectedMainTab === 'fileToPdf') {
-            outputFormat = 'pdf'; // Always PDF for fileToPdf main tab
-        } else if (currentSelectedMainTab === 'pdfToFile') {
-            switch (currentSelectedSubTab) {
-                case 'pdfToWord': 
-                    outputFormat = 'docx'; 
-                    // --- NEW: Add pdf_to_word_mode to formData ---
-                    const selectedWordMode = document.querySelector('input[name="pdfToWordMode"]:checked');
-                    if (selectedWordMode) {
-                        formData.append('pdf_to_word_mode', selectedWordMode.value);
-                        console.log("PDF to Word Mode selected:", selectedWordMode.value);
-                    } else {
-                        formData.append('pdf_to_word_mode', 'pdf2docx'); // Default if somehow none selected
-                        console.warn("No PDF to Word Mode selected, defaulting to pdf2docx.");
-                    }
-                    break;
-                case 'pdfToExcel': 
-                    outputFormat = 'xlsx'; 
-                    // --- NEW: Add pdf_to_excel_mode to formData ---
-                    const selectedExcelMode = document.querySelector('input[name="pdfToExcelMode"]:checked');
-                    if (selectedExcelMode) {
-                        formData.append('pdf_to_excel_mode', selectedExcelMode.value);
-                        console.log("PDF to Excel Mode selected:", selectedExcelMode.value);
-                    } else {
-                        formData.append('pdf_to_excel_mode', 'pdfplumber'); // Default if somehow none selected
-                        console.warn("No PDF to Excel Mode selected, defaulting to pdfplumber.");
-                    }
-                    break;
-                case 'pdfToPpt': 
-                    outputFormat = 'pptx';
-                    // --- NEW: Add pdf_to_ppt_mode to formData ---
-                    const selectedPptMode = document.querySelector('input[name="pdfToPptMode"]:checked');
-                    if (selectedPptMode) {
-                        formData.append('pdf_to_ppt_mode', selectedPptMode.value);
-                        console.log("PDF to PPT Mode selected:", selectedPptMode.value);
-                    } else {
-                        formData.append('pdf_to_ppt_mode', 'screenshot'); // Default if somehow none selected
-                        console.warn("No PDF to PPT Mode selected, defaulting to screenshot.");
-                    }
-                    break;
-                case 'pdfToTxt': 
-                    outputFormat = 'txt'; 
-                    // --- NEW: Add pdf_to_txt_mode to formData ---
-                    const selectedTxtMode = document.querySelector('input[name="pdfToTxtMode"]:checked');
-                    if (selectedTxtMode) {
-                        formData.append('pdf_to_txt_mode', selectedTxtMode.value);
-                        console.log("PDF to TXT Mode selected:", selectedTxtMode.value);
-                    } else {
-                        formData.append('pdf_to_txt_mode', 'pymupdf'); // Default if somehow none selected
-                        console.warn("No PDF to TXT Mode selected, defaulting to pymupdf.");
-                    }
-                    break;
-            }
-        }
-        formData.append('output_format', outputFormat);
-
-        const csrfToken = getCookie('csrftoken');
-
-        // Determine the correct API endpoint based on the main tab
-        let apiUrl = '';
-        if (currentSelectedMainTab === 'fileToPdf') {
-            apiUrl = '/api/file-to-pdf/';
-        } else if (currentSelectedMainTab === 'imgToFile') {
-            apiUrl = '/api/img-to-file/';
-        } else if (currentSelectedMainTab === 'pdfToFile') {
-            apiUrl = '/api/pdf-to-file/';
-        } else {
-            console.error('Unknown main tab:', currentSelectedMainTab);
-            alert('内部错误：无法确定API端点。');
-            // Reset button and isConverting state
-            isConverting = false;
-            updateMainTabButtonsState(false);
-            const btn = document.getElementById('startConversionBtn');
-            btn.disabled = false;
-            btn.textContent = '开始转换';
-            btn.style.backgroundColor = '#007bff';
-            btn.style.borderColor = '#007bff';
-            return;
-        }
-
-        console.log(`[startConversion] Determined API URL: ${apiUrl}`);
-
-        fetch(apiUrl, {
-            method: 'POST',
-            headers: {
-                'X-CSRFToken': csrfToken
-            },
-            body: formData
-        })
-        .then(response => response.json())
-        .then(data => {
-            displayConvertedFiles(data);
-        })
-        .catch(error => {
-            console.error('转换出错:', error);
-            // Prepare a data-like object for displayConvertedFiles in case of catch
-            const errorData = {
-                results: [{ original_name: '错误', converted_name: '-', status: 'error', message: '客户端请求错误，详情请查看控制台。' }],
-                merge_output: false,
-                // duration_seconds might not be available here, so it won't be displayed
-            };
-            displayConvertedFiles(errorData);
-            const btn = document.getElementById('startConversionBtn');
-            btn.disabled = false;
-            btn.textContent = '开始转换';
-            btn.style.backgroundColor = '#007bff';
-            btn.style.borderColor = '#007bff';
-        })
-        .finally(() => {
-            console.log("[finally] finally 代码块开始执行。重置前的 isConverting 状态:", isConverting);
-            isConverting = false;
-            updateMainTabButtonsState(false); // --- NEW --- Enable all tabs
-            console.log("[finally] isConverting 已被重置为 false。");
-            const btn = document.getElementById('startConversionBtn');
-            btn.disabled = false;
-            btn.textContent = '开始转换';
-            btn.style.backgroundColor = '#007bff';
-            btn.style.borderColor = '#007bff';
-            console.log("[finally] '开始转换'按钮状态已恢复。");
-        });
-    }
-
-    function displayConvertedFiles(data) {
-        const container = document.getElementById('convertedFilesTableContainer');
-        container.innerHTML = ''; // Clear previous results
-
-        // ADDED: Display overall duration first if available
-        if (data.duration_seconds !== undefined) {
-            const overallDurationP = document.createElement('p');
-            overallDurationP.className = 'text-muted small mb-2'; // Consistent styling
-            overallDurationP.textContent = `总处理时长: ${data.duration_seconds} 秒`;
-            container.appendChild(overallDurationP);
-        }
-
-        if (data.error) {
-            let errorMessage = `<p class="text-danger">处理失败: ${escapeHtml(data.error)}</p>`;
-            container.innerHTML += errorMessage; // Append error message after duration
-            return;
-        }
-
-        if (!data.results || data.results.length === 0) {
-            container.innerHTML += '<p class="no-files">没有转换结果。</p>'; // Append after duration
-            return;
-        }
-
-        const table = document.createElement('table');
-        table.className = 'table table-striped table-bordered'; 
-        table.style.borderCollapse = 'collapse';
-
-        const thead = document.createElement('thead');
-        thead.innerHTML = '<tr>' +
-                            '<th>原始文件名</th>' +
-                            '<th>转换后文件名</th>' +
-                            '<th>状态</th>' +
-                            '<th>消息/下载</th>' +
-                        '</tr>';
-        table.appendChild(thead);
-
-        const tbody = document.createElement('tbody');
-        data.results.forEach(result => {
-            const row = tbody.insertRow();
-            row.insertCell().textContent = result.original_name || 'N/A';
-            row.insertCell().textContent = result.converted_name || 'N/A';
-            
-            const statusCell = row.insertCell();
-            const statusBadge = document.createElement('span');
-            statusBadge.classList.add('status-badge');
-            statusBadge.textContent = result.status;
-            if (result.status === 'success' || result.status === 'success_fallback') {
-                statusBadge.classList.add('status-success');
-            } else if (result.status === 'error' || result.status.includes('_error')) {
-                statusBadge.classList.add('status-error');
-            } else {
-                statusBadge.classList.add('status-processing'); // Or a default style
-            }
-            statusCell.appendChild(statusBadge);
-
-            const actionCell = row.insertCell();
-            if (result.status === 'success' || result.status === 'success_fallback') {
-                if (result.download_url) {
-                    const downloadLink = document.createElement('a');
-                    downloadLink.href = result.download_url;
-                    downloadLink.textContent = '下载';
-                    downloadLink.className = 'download-link';
-                    downloadLink.target = '_blank';
-                    actionCell.appendChild(downloadLink);
-                } else {
-                    actionCell.textContent = result.message || '-';
-                }
-            } else {
-                actionCell.textContent = result.message || '未知错误';
-            }
-        });
-        table.appendChild(tbody);
-        container.appendChild(table);
-    }
-    
-    // Initial setup: Ensure one DOMContentLoaded listener
-    document.addEventListener('DOMContentLoaded', function() {
-        showTab(currentSelectedMainTab); // This will also set the default sub-tab via its logic
-        const convertBtn = document.getElementById('startConversionBtn');
-        if(convertBtn) {
-            convertBtn.addEventListener('click', startConversion);
-        }
-        renderFileList(); // Initialize file list rendering
-    });
-
-    // Video Analysis Section JS
-    document.addEventListener('DOMContentLoaded', function () {
-        const videoFileForAnalysisInput = document.getElementById('videoFileForAnalysisInput');
-        const videoFileListDiv = document.getElementById('videoFileList'); // Ensure this ID exists for this tab
-
-        if (videoFileForAnalysisInput && videoFileListDiv) {
-            videoFileForAnalysisInput.addEventListener('change', function () {
-                videoFileListDiv.innerHTML = ''; // Clear previous list
-                if (this.files.length > 0) {
-                    const file = this.files[0];
-                    const listItem = document.createElement('div');
-                    listItem.textContent = `已选视频: ${file.name} (${(file.size / 1024 / 1024).toFixed(2)} MB)`;
-                    listItem.style.padding = "5px";
-                    listItem.style.backgroundColor = "#f0f0f0";
-                    listItem.style.borderRadius = "3px";
-                    videoFileListDiv.appendChild(listItem);
-                }
-            });
-        }
-    });
-
-    function processVideo() {
-        console.log("processVideo function called for extraction.");
-
-        const videoFileElement = document.getElementById('videoFileForAnalysisInput');
-        const sceneThresholdElement = document.getElementById('sceneDetectionThreshold');
-        const groupSizeElement = document.getElementById('deduplicationGroupSize');
-        // Adjusted to target the new container for video results table
-        const resultsDiv = document.getElementById('videoProcessingResultsTableContainer'); 
-        const spinner = document.getElementById('videoProcessingSpinner');
-        const progressBarContainer = document.getElementById('videoProgressBarContainer');
-        const progressBar = document.getElementById('videoProgressBar');
-        const extractButton = document.querySelector('#videoAnalysisContent button[onclick="processVideo()"]');
-        const progressListContainer = document.getElementById('videoProgressListContainer'); // Get the new container
-
-        if (!videoFileElement || !videoFileElement.files || videoFileElement.files.length === 0) {
-            console.warn("processVideo called without a file selected.");
-            resultsDiv.innerHTML = '<p class="text-danger">错误：未选择视频文件。请先选择一个视频文件再点击提取。</p>';
-            return;
-        }
-
-        if (!sceneThresholdElement || !groupSizeElement) {
-            alert("页面配置错误：找不到阈值或分组大小的输入控件。");
-            resultsDiv.innerHTML = '<p class="text-danger">错误：页面参数控件缺失。</p>';
-            return;
-        }
-
-        const videoFile = videoFileElement.files[0];
-        const sceneThreshold = sceneThresholdElement.value;
-        const groupSize = groupSizeElement.value;
-
-        resultsDiv.innerHTML = ''; // Clear previous results
-        if(spinner) spinner.style.display = 'block'; // Show spinner
-        if(progressBarContainer) progressBarContainer.style.display = 'block';
-        if(progressBar) {
-            progressBar.style.width = '0%';
-            progressBar.textContent = '0%';
-            progressBar.classList.remove('bg-success', 'bg-danger');
-            progressBar.classList.add('bg-primary'); // Default progress bar color
-        }
-        if(extractButton) extractButton.disabled = true;
-        if(progressListContainer) progressListContainer.style.display = 'block'; // Show the container
-
-        const formData = new FormData();
-        formData.append('videoFile', videoFile);
-        formData.append('sceneDetectionThreshold', sceneThreshold);
-        formData.append('deduplicationGroupSize', groupSize);
-
-        console.log("FormData prepared for video extraction. Starting EventSource.");
-
-        resultsDiv.innerHTML = '<ul id="videoProgressList" class="list-group"></ul>';
-        const progressList = document.getElementById('videoProgressList');
-
-        function addProgressItem(text, type = 'info') {
-            if (!progressList) return;
-            const item = document.createElement('li');
-            item.classList.add('list-group-item');
-            if (type === 'progress') item.classList.add('list-group-item-info');
-            else if (type === 'error') item.classList.add('list-group-item-danger');
-            else if (type === 'success') item.classList.add('list-group-item-success');
-            item.textContent = text;
-            progressList.insertBefore(item, progressList.firstChild); // Add to top
-        }
-
-        fetch("{% url 'converter:api_video_to_extraction' %}", {
-            method: 'POST',
-            body: formData,
-            headers: {
-                'X-CSRFToken': getCsrfToken(),
-                'X-Requested-With': 'XMLHttpRequest'
-            }
-        })
-        .then(response => {
-            if (!response.ok) {
-                // Try to get error message from backend if it sends a structured JSON error
-                return response.text().then(text => { // Use text() first to see raw error
-                    console.error("Server error response text:", text);
-                    try {
-                        const errData = JSON.parse(text); // Try to parse as JSON
-                        throw new Error(errData.message || `服务器错误: ${response.status} ${response.statusText}`);
-                    } catch (e) {
-                        // If not JSON or no message field, use the raw text or generic error
-                        throw new Error(text || `服务器请求失败: ${response.status} ${response.statusText}`);
-                    }
-                });
-            }
-            if (!response.body) {
-                throw new Error('Response body is null. Streaming not possible.');
-            }
-
-            // Handle the stream
-            const reader = response.body.getReader();
-            const decoder = new TextDecoder();
-            let buffer = '';
-
-            function processText(text) {
-                buffer += text;
-                let eolIndex;
-                while ((eolIndex = buffer.indexOf('\n\n')) >= 0) { // SSE messages end with double newline
-                    const message = buffer.slice(0, eolIndex).trim();
-                    buffer = buffer.slice(eolIndex + 2);
-
-                    if (message.startsWith("event: stream_end")) {
-                        console.log("Stream ended by server event.");
-                        if(extractButton) extractButton.disabled = false;
-                        if(spinner) spinner.style.display = 'none';
-                        // Do not hide progress bar, it should show final state
-                        return; // Stop processing further
-                    }
-
-                    if (message.startsWith("data:")) {
-                        const jsonData = message.substring(5).trim();
-                        try {
-                            const data = JSON.parse(jsonData);
-                            console.log("SSE Data:", data);
-
-                            if (data.type === 'progress') {
-                                if(progressBar) {
-                                    progressBar.style.width = data.percent + '%';
-                                    progressBar.textContent = data.percent.toFixed(2) + '%';
-                                }
-                                addProgressItem(`进度: ${data.percent.toFixed(2)}% - ${data.text || ''}`, 'progress');
-                            } else if (data.type === 'info') {
-                                addProgressItem(data.message, 'info');
-                            } else if (data.type === 'result') {
-                                if(spinner) spinner.style.display = 'none';
-                                if(extractButton) extractButton.disabled = false;
-                                if(progressBar) {
-                                     progressBar.style.width = '100%';
-                                     progressBar.textContent = '完成';
-                                     progressBar.classList.remove('bg-primary');
-                                     progressBar.classList.add('bg-success');
-                                }
-                                displayVideoExtractionResults(data); // New function to handle final result display
-                                return; // Stop processing stream further
-                            } else if (data.type === 'error') {
-                                if(spinner) spinner.style.display = 'none';
-                                if(extractButton) extractButton.disabled = false;
-                                if(progressBar) {
-                                    progressBar.style.width = '100%';
-                                    progressBar.textContent = '错误';
-                                    progressBar.classList.remove('bg-primary');
-                                    progressBar.classList.add('bg-danger');
-                                }
-                                addProgressItem(`错误: ${data.message}`, 'error');
-                                resultsDiv.innerHTML = `<p class="text-danger">处理失败: ${escapeHtml(data.message)}</p>`;
-                                return; // Stop processing stream further
-                            }
-                        } catch (e) {
-                            console.error('Error parsing SSE JSON:', e, "JSON Data:", jsonData);
-                            addProgressItem(`无法解析的流数据: ${jsonData}`, 'error');
-                        }
-                    }
-                }
-            }
-
-            function readStream() {
-                reader.read().then(({ done, value }) => {
-                    if (done) {
-                        console.log('Stream complete from reader.done');
-                        if(extractButton) extractButton.disabled = false;
-                        if(spinner) spinner.style.display = 'none';
-                         // If stream ends without a specific result message, treat as uncertain completion
-                        if (progressBar && progressBar.textContent !== '完成' && progressBar.textContent !== '错误') {
-                            progressBar.textContent = '已结束';
-                        }
-                        // Do not hide progressListContainer on reader.done
-                        return;
-                    }
-                    processText(decoder.decode(value, { stream: true }));
-                    readStream();
-                }).catch(error => {
-                    console.error('Error reading stream:', error);
-                    if(spinner) spinner.style.display = 'none';
-                    if(extractButton) extractButton.disabled = false;
-                    if(progressBar) {
-                        progressBar.style.width = '100%';
-                        progressBar.textContent = '读取错误';
-                        progressBar.classList.remove('bg-primary');
-                        progressBar.classList.add('bg-danger');
-                    }
-                    resultsDiv.innerHTML = `<p class="text-danger">读取处理流时发生错误: ${escapeHtml(error.message)}</p>`;
-                });
-            }
-            readStream();
-        })
-        .catch(error => {
-            if(spinner) spinner.style.display = 'none';
-            if(progressBarContainer) progressBarContainer.style.display = 'none';
-            if(extractButton) extractButton.disabled = false;
-            resultsDiv.innerHTML = `<p class="text-danger">请求视频处理时发生错误: ${escapeHtml(error.message)}</p>`;
-            console.error('Error during video extraction fetch setup:', error);
-        });
-    }
-
-    function displayVideoExtractionResults(data) {
-        const resultsDiv = document.getElementById('videoProcessingResultsTableContainer'); 
-        if (!resultsDiv) return;
-
-        resultsDiv.innerHTML = ''; // Clear previous results
-
-        // MODIFICATION: Display overall duration first if available
-        if (data.duration_seconds !== undefined) {
-            const overallDurationP = document.createElement('p');
-            overallDurationP.className = 'text-muted small mb-2';
-            overallDurationP.textContent = `总处理时长: ${data.duration_seconds} 秒`;
-            resultsDiv.appendChild(overallDurationP);
-        }
-
-        if (!data || !data.results || data.results.length === 0) {
-            let message = '<p class="text-warning mt-2">没有收到有效的处理结果。</p>';
-            if (data && data.message && !data.results) { 
-                // Error message might already include duration if backend sends it within data.message for errors
-                // But we are showing global data.duration_seconds above.
-                message = `<p class="text-danger mt-2">处理失败: ${escapeHtml(data.message)}</p>`;
-            }
-            resultsDiv.innerHTML += message; // Append message after duration
-            return;
-        }
-
-        const table = document.createElement('table');
-        table.className = 'table table-striped table-bordered'; 
-        table.style.borderCollapse = 'collapse';
-
-        const thead = document.createElement('thead');
-        thead.innerHTML = '<tr>' +
-                            '<th scope="col">原始文件名</th>' +
-                            '<th scope="col">输出文件 (ZIP)</th>' +
-                            '<th scope="col">状态</th>' +
-                            '<th scope="col">信息/下载</th>' +
-                          '</tr>';
-        table.appendChild(thead);
-
-        const tbody = document.createElement('tbody');
-        data.results.forEach(item => {
-            const row = tbody.insertRow();
-            
-            const cellOriginalName = row.insertCell();
-            cellOriginalName.textContent = item.original_name || 'N/A';
-            // Apply border style to match document conversion table if not covered by table-bordered
-            // cellOriginalName.style.border = '1px solid #ddd'; 
-
-            const cellConvertedName = row.insertCell();
-            cellConvertedName.textContent = item.converted_name || 'N/A';
-            // cellConvertedName.style.border = '1px solid #ddd';
-            
-            const statusCell = row.insertCell();
-            // statusCell.style.border = '1px solid #ddd';
-            const statusBadge = document.createElement('span');
-            statusBadge.classList.add('status-badge');
-            if (item.status === 'success') {
-                statusBadge.classList.add('status-success');
-                statusBadge.textContent = 'Success';
-            } else if (item.status === 'error') {
-                statusBadge.classList.add('status-error');
-                statusBadge.textContent = 'Error';
-            } else {
-                statusBadge.classList.add('status-processing');
-                statusBadge.textContent = item.status || '未知';
-            }
-            statusCell.appendChild(statusBadge);
-
-            const messageCell = row.insertCell();
-            // messageCell.style.border = '1px solid #ddd';
-            if (item.status === 'success' && item.download_url) {
-                const downloadLink = document.createElement('a');
-                downloadLink.href = item.download_url;
-                downloadLink.textContent = '下载ZIP';
-                // Consistent download link class
-                downloadLink.className = 'download-link'; 
-                downloadLink.style.marginRight = '10px'; // Add some spacing if multiple elements
-                messageCell.appendChild(downloadLink);
-            }
-            const messageSpan = document.createElement('span');
-            messageSpan.innerHTML = escapeHtml(item.message || '');
-            messageCell.appendChild(messageSpan);
-        });
-        table.appendChild(tbody);
-        resultsDiv.appendChild(table);
-    }
-
-    // Helper function to prevent XSS, if not already defined
-    function escapeHtml(unsafe) {
-       return unsafe
-            .replace(/&/g, "&amp;")
-            .replace(/</g, "&lt;")
-            .replace(/>/g, "&gt;")
-            .replace(/"/g, "&quot;")
-            .replace(/'/g, "&#039;");
-    }
-
-    // Ensure getCsrfToken function is available (it should be from previous work)
-    function getCsrfToken() {
-        return document.querySelector('input[name="csrfmiddlewaretoken"]').value;
-    }
-
-    // Sidebar Navigation
-    function selectMainNavigation(navId) {
-        // Hide all content sections
-        document.getElementById('docConversionContent').style.display = 'none';
-        document.getElementById('videoAnalysisContent').style.display = 'none';
-        // Potentially hide other future sections here
-
-        // Deactivate all nav buttons
-        document.querySelectorAll('.sidebar-nav li button').forEach(button => {
-            button.classList.remove('active');
-        });
-
-        // Activate selected nav button and show content
-        if (navId === 'docConversion') {
-            document.getElementById('docConversionContent').style.display = 'block';
-            document.getElementById('navDocConversion').classList.add('active');
-            // Default to the 'imgToFile' main tab and its first sub-tab when '文档转换' is selected
-            showTab('imgToFile'); 
-        } else if (navId === 'videoAnalysis') {
-            document.getElementById('videoAnalysisContent').style.display = 'block';
-            document.getElementById('navVideoAnalysis').classList.add('active');
-        }
-        // Add else if for 'imageAnalysis', 'voiceAnalysis' when implemented
-    }
-
-    function updateFileUploadTips() {
-        const tipsElement = document.getElementById('fileUploadTips');
-        const maxFiles = 10;
-        tipsElement.textContent = `提示: 最多选择${maxFiles}个文件 (${uploadedFiles.length}/${maxFiles}已选), 单个文件不超过10MB。`;
-    }
-
-    function handleConversionResponse(data, resultsContainerId) {
-        const container = document.getElementById(resultsContainerId);
-        if (!container) {
-            console.error('Results container not found:', resultsContainerId);
-            return;
-        }
-        container.innerHTML = ''; // Clear previous results
-
-        // MODIFICATION: Display overall duration first if available
-        if (data.duration_seconds !== undefined) {
-            const overallDurationP = document.createElement('p');
-            overallDurationP.className = 'text-muted small mb-2';
-            overallDurationP.textContent = `总处理时长: ${data.duration_seconds} 秒`;
-            container.appendChild(overallDurationP);
-        }
-
-        if (data.error) {
-            let errorMessage = `<p class="text-danger">处理失败: ${escapeHtml(data.error)}</p>`;
-            // Duration is already displayed above if present in data object, 
-            // but if error object itself has it, could be more specific.
-            // For now, relying on the global data.duration_seconds shown above.
-            container.innerHTML += errorMessage; // Append error message after duration
-            return;
-        }
-
-        if (!data.results || data.results.length === 0) {
-            let noResultsMessage = '<p class="text-warning">没有生成任何文件。</p>';
-            // Duration is already displayed above.
-            container.innerHTML += noResultsMessage; // Append message after duration
-            return;
-        }
-
-        const table = document.createElement('table');
-        table.className = 'table table-striped table-bordered'; 
-        table.style.borderCollapse = 'collapse';
-
-        const thead = document.createElement('thead');
-        thead.innerHTML = '<tr>' +
-                            '<th>原始文件名</th>' +
-                            '<th>转换后文件名</th>' +
-                            '<th>状态</th>' +
-                            '<th>消息/下载</th>' +
-                        '</tr>';
-        table.appendChild(thead);
-
-        const tbody = document.createElement('tbody');
-        data.results.forEach(item => {
-            const row = tbody.insertRow();
-            row.insertCell().textContent = item.original_name || 'N/A';
-            row.insertCell().textContent = item.converted_name || 'N/A';
-            
-            const statusCell = row.insertCell();
-            const statusBadge = document.createElement('span');
-            statusBadge.classList.add('status-badge');
-            statusBadge.textContent = item.status;
-            if (item.status === 'success' || item.status === 'success_fallback') {
-                statusBadge.classList.add('status-success');
-            } else if (item.status === 'error' || item.status.includes('_error')) {
-                statusBadge.classList.add('status-error');
-            } else {
-                statusBadge.classList.add('status-processing'); // Or a default style
-            }
-            statusCell.appendChild(statusBadge);
-
-            const actionCell = row.insertCell();
-            if (item.status === 'success' || item.status === 'success_fallback') {
-                if (item.download_url) {
-                    const downloadLink = document.createElement('a');
-                    downloadLink.href = item.download_url;
-                    downloadLink.textContent = '下载';
-                    downloadLink.className = 'download-link';
-                    downloadLink.target = '_blank';
-                    actionCell.appendChild(downloadLink);
-                } else {
-                    actionCell.textContent = item.message || '-';
-                }
-            } else {
-                actionCell.textContent = item.message || '未知错误';
-            }
-        });
-        table.appendChild(tbody);
-        container.appendChild(table);
-    }
-
-</script>
+<script src="{% static 'converter/index.js' %}" defer></script>
 {% endblock %} 

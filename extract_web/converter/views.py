@@ -10,7 +10,7 @@ import sys # <--- ADDED IMPORT FOR SYS
 import json # <--- ADDED IMPORT FOR JSON
 import re # <--- ADDED IMPORT FOR RE
 from django.contrib import messages # 新增导入
-from django.http import JsonResponse, FileResponse, Http404, StreamingHttpResponse
+from django.http import JsonResponse, FileResponse, Http404, StreamingHttpResponse, HttpResponseBadRequest
 from django.views.decorators.http import require_POST # To restrict to POST requests
 from django.views.decorators.csrf import csrf_exempt # <<< Import csrf_exempt
 import random
@@ -38,6 +38,7 @@ from .libreoffice_converter import convert_to_pdf as convert_to_pdf_libreoffice
 from .libreoffice_converter import convert_to_pptx as convert_docx_to_pptx_libreoffice # Added import for DOCX to PPTX
 from .word_to_pdf_converter import convert_word_to_pdf # ADDED: Import for the new Word to PDF converter
 from django.core.exceptions import PermissionDenied # For security checks
+from .speech_processor import transcribe_audio_dashscope # ADDED: Import for speech transcription
 
 # Import the new file handling utility
 from .utils.file_handling import (
@@ -1515,3 +1516,79 @@ def check_task_status_view(request, task_id):
         # You might want to return a 404 if the task ID is definitively not found
         logger.warning(f"Task ID {task_id} not found or status unknown (placeholder). Returning as PENDING.")
         return JsonResponse({"task_id": task_id, "status": "PENDING", "message": "Status unknown or task not found (placeholder response)."})
+
+@login_required
+@require_POST
+def speech_to_text_view(request):
+    request_id = generate_request_id() # Assuming generate_request_id is globally available or import it
+    logger.info(f"speech_to_text_view: Received request. RequestID: {request_id}")
+    logger.info(f"speech_to_text_view: Request Headers: {request.headers}. RequestID: {request_id}") # ADDED
+    logger.info(f"speech_to_text_view: Raw Request Body: {request.body[:500]}. RequestID: {request_id}") # ADDED - Log first 500 bytes
+
+    start_time_view = time.perf_counter()
+
+    try:
+        # Check if the request body is empty or not valid JSON
+        if not request.body:
+            logger.warning(f"speech_to_text_view: Empty request body. RequestID: {request_id}")
+            return HttpResponseBadRequest(json.dumps({"status": "error", "message": "Request body is empty."}), content_type="application/json")
+
+        try:
+            data = json.loads(request.body)
+        except json.JSONDecodeError:
+            logger.warning(f"speech_to_text_view: Invalid JSON in request body. RequestID: {request_id}")
+            return HttpResponseBadRequest(json.dumps({"status": "error", "message": "Invalid JSON format."}), content_type="application/json")
+        
+        audio_url = data.get('audio_url')
+
+        if not audio_url:
+            logger.warning(f"speech_to_text_view: 'audio_url' not found in request. RequestID: {request_id}")
+            return JsonResponse({
+                "status": "error", 
+                "message": "'audio_url' is required.",
+                "request_id": request_id,
+                "duration_seconds": round(time.perf_counter() - start_time_view, 2)
+            }, status=400)
+
+        logger.info(f"speech_to_text_view: Processing URL: {audio_url}. RequestID: {request_id}")
+        
+        # Call the transcription function from speech_processor.py
+        # This function is expected to use Paraformer-v2 as configured internally
+        transcription_result = transcribe_audio_dashscope(audio_url)
+
+        duration = round(time.perf_counter() - start_time_view, 2)
+
+        if transcription_result.get("status") == "success":
+            logger.info(f"speech_to_text_view: Transcription successful. RequestID: {request_id}, Duration: {duration}s")
+            return JsonResponse({
+                "status": "success",
+                "transcription": transcription_result.get("transcription"),
+                "request_id": request_id,
+                "duration_seconds": duration,
+                # "raw_model_response": transcription_result.get("raw_response") # Optionally include for debugging
+            })
+        else:
+            error_message = transcription_result.get("message", "Unknown transcription error.")
+            logger.error(f"speech_to_text_view: Transcription failed. Error: {error_message}. RequestID: {request_id}, Duration: {duration}s")
+            # Determine appropriate status code based on error if possible, default to 500 for server-side model issues
+            # For now, let's assume errors from transcribe_audio_dashscope are service-level (500)
+            # or configuration errors (also potentially 500 from our backend's perspective).
+            # If it was a client-provided bad URL that the service couldn't process, 
+            # transcribe_audio_dashscope might return a specific error we could map to 400.
+            return JsonResponse({
+                "status": "error",
+                "message": error_message,
+                "request_id": request_id,
+                "duration_seconds": duration,
+                # "raw_model_response": transcription_result.get("raw_response") # Optionally include for debugging
+            }, status=500) # Internal Server Error for failures in transcription service
+
+    except Exception as e:
+        duration = round(time.perf_counter() - start_time_view, 2)
+        logger.error(f"speech_to_text_view: Unexpected error: {str(e)}. RequestID: {request_id}, Duration: {duration}s", exc_info=True)
+        return JsonResponse({
+            "status": "error", 
+            "message": f"An unexpected error occurred: {str(e)}",
+            "request_id": request_id,
+            "duration_seconds": duration
+        }, status=500)

@@ -17,6 +17,7 @@ urlpatterns = [
     path("api/file-to-pdf/", views.file_to_pdf_view, name="api_file_to_pdf"),
     path("api/img-to-file/", views.img_to_file_view, name="api_img_to_file"),
     path("api/pdf-to-file/", views.pdf_to_file_view, name="api_pdf_to_file"),
+    path("api/speech-to-text/", views.speech_to_text_view, name="api_speech_to_text"),
 
     # 旧的 process_images 端点 - 现在指向一个废弃提示视图
     # 客户端应更新为使用上述新的API端点。

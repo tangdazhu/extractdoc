@@ -3,16 +3,16 @@ Django==5.2.1           # Web framework
 
 # OCR and Image Processing
 paddleocr==2.7.3        # OCR for text recognition
-paddlepaddle>=2.5.1,<2.7 # Deep learning framework required by paddleocr (version adjusted for paddleocr 2.7.3 compatibility)
-pillow==10.3.0          # Image processing
+paddlepaddle==3.0.0 # Deep learning framework required by paddleocr (version adjusted for paddleocr 2.7.3 compatibility)
+pillow==10.4.0          # Image processing
 numpy==1.26.4           # Numerical computing support for paddleocr
 protobuf==3.20.3        # Protocol Buffers, dependency for paddleocr
 opencv-python-headless  # OpenCV for video and image processing (headless for server environments)
 
 # PDF Processing
-PyMuPDF>=1.23.0         # PDF text extraction and manipulation (fitz)
+PyMuPDF==1.24.6         # PDF text extraction and manipulation (fitz)
 pdfplumber>=0.10.0      # Extract text and tables from PDF files (primary method for PDF→Excel)
-pdf2docx>=0.5.0         # Convert PDF files to Word (.docx)
+pdf2docx==0.5.8         # Convert PDF files to Word (.docx)
 PyPDF2==3.0.1           # PDF manipulation (merging, splitting, etc.)
 
 # Word Document Processing
@@ -23,11 +23,11 @@ docx2pdf==0.1.8         # Convert Word documents to PDF (requires MS Office or L
 openpyxl==3.1.5         # Read and write Excel files (.xlsx)
 
 # PowerPoint Processing
-python-pptx>=0.6.21     # Create and modify PowerPoint presentations
+python-pptx==0.6.23     # Create and modify PowerPoint presentations
 comtypes==1.4.11        # Windows COM interface, for Office automation (Windows only)
 
 # PDF Generation and Reporting
-reportlab==4.4.1        # PDF generation, used for TXT→PDF and Excel→PDF conversion
+reportlab==4.2.0        # PDF generation, used for TXT→PDF and Excel→PDF conversion
 
 # Configuration and Parsing
 PyYAML==6.0.1           # YAML configuration file parsing
@@ -38,10 +38,10 @@ pytest>=7.4.0           # Testing framework
 pytest-django>=4.5.2    # Django integration for pytest
 
 # AI Large Language Model Integration
-requests>=2.32.0        # HTTP requests for AI API calls (already included in Django deps)
+requests==2.32.3        # HTTP requests for AI API calls (already included in Django deps)
 openai>=1.54.0          # OpenAI GPT models API client
 anthropic>=0.40.0       # Anthropic Claude models API client  
-dashscope>=1.20.0       # Alibaba Qwen models API client
+dashscope==1.23.3        # Alibaba Qwen models API client
 ollama>=0.4.0           # Local LLM client (Ollama)
 
 # Notes on External Dependencies:
@@ -59,3 +59,9 @@ ollama>=0.4.0           # Local LLM client (Ollama)
 # - PDF→Word: pdf2docx (primary), LibreOffice (fallback)
 # - PDF→PPT: python-pptx screenshot method (primary), LibreOffice (fallback)
 # - PDF→TXT: PyMuPDF (primary), LibreOffice (fallback, removed from UI) 
+
+# Optional: For development and testing
+# pytest
+# flake8
+# black
+# isort 

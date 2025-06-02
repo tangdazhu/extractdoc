@@ -1,3 +1,4 @@
 input_directory: his_pic
 log_file: app.log
 output_filename: extracted_text.docx
+DASHSCOPE_API_KEY: sk-0b8a4591eae44ca983e4b892e41fa98e
