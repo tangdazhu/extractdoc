@@ -729,92 +729,104 @@ function showSpeechSubTab(subTabIdToShow, clickedButton) {
 
 function initializeAsrFunctionality() {
     console.log("[initializeAsrFunctionality] Setting up ASR event listeners.");
-    const audioUrlInput = document.getElementById('audioUrlInput');
     const startAsrBtn = document.getElementById('startAsrBtn');
-    const clearAsrFieldsBtn = document.getElementById('clearAsrFieldsBtn');
-    const asrLoadingIndicator = document.getElementById('asrLoadingIndicator');
-    const asrTranscriptionOutput = document.getElementById('asrTranscriptionOutput');
+    const clearAsrBtn = document.getElementById('clearAsrFieldsBtn');
+    const audioUrlInput = document.getElementById('audioUrlInput');
+    const audioHotwordsInput = document.getElementById('audioHotwordsInput');
+    const asrResultTextarea = document.getElementById('asrTranscriptionOutput');
     const asrErrorOutput = document.getElementById('asrErrorOutput');
+    const asrLoadingIndicator = document.getElementById('asrLoadingIndicator');
 
-    if (startAsrBtn) {
-        startAsrBtn.addEventListener('click', async function() {
-            const audioUrl = audioUrlInput.value.trim();
-            if (!audioUrl) {
-                asrErrorOutput.textContent = '请输入有效的音频文件URL。';
-                asrTranscriptionOutput.textContent = '';
-                audioUrlInput.focus();
-                return;
-            }
-            try {
-                new URL(audioUrl);
-            } catch (_) {
-                asrErrorOutput.textContent = '请输入一个格式正确的URL。';
-                asrTranscriptionOutput.textContent = '';
-                audioUrlInput.focus();
-                return;
-            }
-
-            asrLoadingIndicator.style.display = 'block';
-            startAsrBtn.disabled = true;
-            clearAsrFieldsBtn.disabled = true;
-            audioUrlInput.disabled = true;
-            asrTranscriptionOutput.textContent = '';
-            asrErrorOutput.textContent = '';
-            console.log("[ASR] Starting recognition for URL:", audioUrl);
-
-            try {
-                const response = await fetch("/api/speech-to-text/", {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'X-CSRFToken': getCookie('csrftoken')
-                    },
-                    body: JSON.stringify({ audio_url: audioUrl })
-                });
-
-                const result = await response.json();
-                console.log("[ASR] Received response:", result);
-
-                if (response.ok && result.status === 'success') {
-                    asrTranscriptionOutput.textContent = result.transcription || '(未识别到文本)';
-                    if (result.duration_seconds !== undefined) {
-                         console.log(`[ASR] Request ${result.request_id} completed in ${result.duration_seconds}s.`);
-                         addNotification(`语音识别成功 (用时 ${result.duration_seconds}s)`, 'success');
-                    } else {
-                        addNotification('语音识别成功!', 'success');
-                    }
-                } else {
-                    const errorMsg = result.message || '语音识别失败，请检查URL或稍后再试。';
-                    asrErrorOutput.textContent = errorMsg;
-                    addNotification(`语音识别失败: ${errorMsg}`, 'error');
-                    if (result.duration_seconds !== undefined) {
-                        console.error(`[ASR] Request ${result.request_id} failed in ${result.duration_seconds}s. Message: ${result.message}`);
-                    }
-                }
-            } catch (error) {
-                console.error('[ASR] API call failed:', error);
-                const networkErrorMsg = '调用语音识别服务时发生网络或未知错误。请查看控制台获取详情。';
-                asrErrorOutput.textContent = networkErrorMsg;
-                addNotification(networkErrorMsg, 'error');
-            } finally {
-                asrLoadingIndicator.style.display = 'none';
-                startAsrBtn.disabled = false;
-                clearAsrFieldsBtn.disabled = false;
-                audioUrlInput.disabled = false;
-                console.log("[ASR] Recognition process finished.");
-            }
-        });
-    } else {
-        console.error("startAsrBtn not found during ASR initialization.");
+    if (!startAsrBtn || !clearAsrBtn || !audioUrlInput || !audioHotwordsInput || !asrResultTextarea || !asrErrorOutput || !asrLoadingIndicator) {
+        console.error("[ASR Init] One or more ASR UI elements not found. Recognition functionality may be impaired.");
+        return;
     }
 
-    if (clearAsrFieldsBtn) {
-        clearAsrFieldsBtn.addEventListener('click', function() {
-            if (audioUrlInput) audioUrlInput.value = '';
-            if (asrTranscriptionOutput) asrTranscriptionOutput.textContent = '';
-            if (asrErrorOutput) asrErrorOutput.textContent = '';
-            if (audioUrlInput) audioUrlInput.focus();
+    startAsrBtn.addEventListener('click', async function() {
+        const audioUrl = audioUrlInput.value.trim();
+        const hotwordsValue = audioHotwordsInput.value.trim();
+
+        if (!audioUrl) {
+            asrErrorOutput.textContent = '请输入有效的音频文件URL。';
+            addNotification('请输入有效的音频文件URL。', 'error');
+            return;
+        }
+
+        let hotwordsArray = [];
+        if (hotwordsValue) {
+            hotwordsArray = hotwordsValue.split(',').map(hw => hw.trim()).filter(hw => hw.length > 0);
+        }
+
+        asrResultTextarea.value = '';
+        asrErrorOutput.textContent = '';
+        asrLoadingIndicator.style.display = 'flex';
+        startAsrBtn.disabled = true;
+        clearAsrBtn.disabled = true;
+        audioUrlInput.disabled = true;
+        audioHotwordsInput.disabled = true;
+
+        try {
+            const payload = { audio_url: audioUrl };
+            if (hotwordsArray.length > 0) {
+                payload.hotwords = hotwordsArray;
+            }
+            console.log("[ASR] Starting recognition for URL:", audioUrl, "Hotwords:", hotwordsArray);
+
+            const response = await fetch("/api/speech-to-text/", {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRFToken': getCookie('csrftoken')
+                },
+                body: JSON.stringify(payload)
+            });
+
+            const result = await response.json();
+            console.log("[ASR] Received response:", result);
+
+            if (response.ok && result.results && result.results.length > 0 && result.results[0].status === 'success') {
+                asrResultTextarea.value = result.results[0].transcription || '(未识别到文本)';
+                if (result.duration_seconds !== undefined) {
+                     console.log(`[ASR] Request ${result.request_id} completed in ${result.duration_seconds}s.`);
+                     addNotification(`语音识别成功 (用时 ${result.duration_seconds}s)`, 'success');
+                } else {
+                    addNotification('语音识别成功!', 'success');
+                }
+            } else {
+                const errorMsg = (result.results && result.results.length > 0 && result.results[0].message) || result.message || '语音识别失败，请检查URL或稍后再试。';
+                asrErrorOutput.textContent = errorMsg;
+                addNotification(`语音识别失败: ${errorMsg}`, 'error');
+                if (result.duration_seconds !== undefined) {
+                    console.error(`[ASR] Request ${result.request_id} failed in ${result.duration_seconds}s. Message: ${result.message}`);
+                }
+            }
+        } catch (error) {
+            console.error('[ASR] API call failed:', error);
+            const networkErrorMsg = '调用语音识别服务时发生网络或未知错误。请查看控制台获取详情。';
+            asrErrorOutput.textContent = networkErrorMsg;
+            addNotification(networkErrorMsg, 'error');
+        } finally {
+            asrLoadingIndicator.style.display = 'none';
+            startAsrBtn.disabled = false;
+            clearAsrBtn.disabled = false;
+            audioUrlInput.disabled = false;
+            audioHotwordsInput.disabled = false;
+        }
+    });
+
+    if (clearAsrBtn) {
+        clearAsrBtn.addEventListener('click', function() {
+            audioUrlInput.value = '';
+            audioHotwordsInput.value = '';
+            asrResultTextarea.value = '';
+            asrErrorOutput.textContent = '';
+            asrLoadingIndicator.style.display = 'none';
+            startAsrBtn.disabled = false;
+            clearAsrBtn.disabled = false;
+            audioUrlInput.disabled = false;
+            audioHotwordsInput.disabled = false;
             console.log("[ASR] Fields cleared.");
+            addNotification('ASR输入和结果已清空。', 'info');
         });
     } else {
         console.error("clearAsrFieldsBtn not found during ASR initialization.");

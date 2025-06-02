@@ -770,6 +770,14 @@
                             <input type="text" class="form-control" id="audioUrlInput" placeholder="例如: https://your-bucket.oss-cn-beijing.aliyuncs.com/audio.wav">
                             <small class="form-text text-muted" style="font-size: 0.85em; display: block; margin-top: 5px;">支持常见音频格式，如 WAV, MP3, M4A 等。</small>
                         </div>
+
+                        <!-- ADDED: Hotwords Input -->
+                        <div class="mb-3">
+                            <label for="audioHotwordsInput" class="form-label" style="font-weight: 500;">自定义热词 (可选, 逗号分隔):</label>
+                            <input type="text" class="form-control" id="audioHotwordsInput" placeholder="例如: 阿里巴巴,通义千问,杭州">
+                            <small class="form-text text-muted" style="font-size: 0.85em; display: block; margin-top: 5px;">输入特定词汇提高识别准确率。</small>
+                        </div>
+                        <!-- END ADDED: Hotwords Input -->
                         
                         <div class="action-buttons mt-3 mb-3" style="border-top: none; padding-top: 0; justify-content: flex-start;">
                              <button type="button" class="btn btn-primary" id="startAsrBtn" style="padding: 10px 20px; font-size: 0.95em; margin-right: 10px;">

@@ -1522,73 +1522,105 @@ def check_task_status_view(request, task_id):
 def speech_to_text_view(request):
     request_id = generate_request_id() # Assuming generate_request_id is globally available or import it
     logger.info(f"speech_to_text_view: Received request. RequestID: {request_id}")
-    logger.info(f"speech_to_text_view: Request Headers: {request.headers}. RequestID: {request_id}") # ADDED
-    logger.info(f"speech_to_text_view: Raw Request Body: {request.body[:500]}. RequestID: {request_id}") # ADDED - Log first 500 bytes
+    logger.info(f"speech_to_text_view: Request Headers: {request.headers}. RequestID: {request_id}") 
+    logger.info(f"speech_to_text_view: Raw Request Body: {request.body[:500]}. RequestID: {request_id}") 
 
     start_time_view = time.perf_counter()
 
     try:
-        # Check if the request body is empty or not valid JSON
         if not request.body:
             logger.warning(f"speech_to_text_view: Empty request body. RequestID: {request_id}")
-            return HttpResponseBadRequest(json.dumps({"status": "error", "message": "Request body is empty."}), content_type="application/json")
-
-        try:
-            data = json.loads(request.body)
-        except json.JSONDecodeError:
-            logger.warning(f"speech_to_text_view: Invalid JSON in request body. RequestID: {request_id}")
-            return HttpResponseBadRequest(json.dumps({"status": "error", "message": "Invalid JSON format."}), content_type="application/json")
+            # CORRECTED format_error_response call
+            return format_error_response(
+                message="Request body is empty.",
+                merge_output=False, # Not applicable here, but required by formatter
+                http_status=400, 
+                request_id=request_id
+                # duration_seconds handled by format_error_response indirectly or needs explicit pass-through if desired for all errors
+            )
         
+        data = json.loads(request.body.decode('utf-8'))
         audio_url = data.get('audio_url')
+        hotwords = data.get('hotwords')
 
         if not audio_url:
-            logger.warning(f"speech_to_text_view: 'audio_url' not found in request. RequestID: {request_id}")
-            return JsonResponse({
-                "status": "error", 
-                "message": "'audio_url' is required.",
-                "request_id": request_id,
-                "duration_seconds": round(time.perf_counter() - start_time_view, 2)
-            }, status=400)
+            logger.warning(f"speech_to_text_view: 'audio_url' not found in request. RequestID: {request_id}, Data: {data}")
+            # CORRECTED format_error_response call
+            return format_error_response(
+                message="'audio_url' is required in the request body.",
+                merge_output=False, # Not applicable
+                http_status=400, 
+                request_id=request_id
+            )
+
+        if hotwords is not None:
+            if not isinstance(hotwords, list) or not all(isinstance(item, str) for item in hotwords):
+                logger.warning(f"speech_to_text_view: 'hotwords' parameter is invalid. Must be a list of strings. RequestID: {request_id}, Received: {hotwords}")
+                # CORRECTED format_error_response call
+                return format_error_response(
+                    message="'hotwords' must be a list of strings.",
+                    merge_output=False, # Not applicable
+                    http_status=400,
+                    request_id=request_id
+                )
+            logger.info(f"speech_to_text_view: Received hotwords: {hotwords}. RequestID: {request_id}")
 
         logger.info(f"speech_to_text_view: Processing URL: {audio_url}. RequestID: {request_id}")
         
-        # Call the transcription function from speech_processor.py
-        # This function is expected to use Paraformer-v2 as configured internally
-        transcription_result = transcribe_audio_dashscope(audio_url)
+        transcription_result = transcribe_audio_dashscope(audio_url, hotwords=hotwords) 
 
-        duration = round(time.perf_counter() - start_time_view, 2)
+        duration_view = round(time.perf_counter() - start_time_view, 2)
 
         if transcription_result.get("status") == "success":
-            logger.info(f"speech_to_text_view: Transcription successful. RequestID: {request_id}, Duration: {duration}s")
-            return JsonResponse({
+            logger.info(f"speech_to_text_view: Transcription successful. RequestID: {request_id}, Duration: {duration_view}s")
+            # CORRECTED format_json_response call
+            # The 'results' field expects a list of dictionaries.
+            # For speech-to-text, we'll have one result item.
+            response_results = [{
+                "original_name": audio_url, # Or a more user-friendly name if available
                 "status": "success",
+                "message": "Speech to text conversion successful.",
                 "transcription": transcription_result.get("transcription"),
-                "request_id": request_id,
-                "duration_seconds": duration,
-                # "raw_model_response": transcription_result.get("raw_response") # Optionally include for debugging
-            })
+                "raw_response_details": transcription_result.get("raw_response") # Optional, for debugging/client use
+            }]
+            return format_json_response(
+                results=response_results,
+                merge_output=False, # Not applicable to single audio transcription
+                request_id=request_id,
+                duration_seconds=duration_view
+            )
         else:
-            error_message = transcription_result.get("message", "Unknown transcription error.")
-            logger.error(f"speech_to_text_view: Transcription failed. Error: {error_message}. RequestID: {request_id}, Duration: {duration}s")
-            # Determine appropriate status code based on error if possible, default to 500 for server-side model issues
-            # For now, let's assume errors from transcribe_audio_dashscope are service-level (500)
-            # or configuration errors (also potentially 500 from our backend's perspective).
-            # If it was a client-provided bad URL that the service couldn't process, 
-            # transcribe_audio_dashscope might return a specific error we could map to 400.
-            return JsonResponse({
-                "status": "error",
-                "message": error_message,
-                "request_id": request_id,
-                "duration_seconds": duration,
-                # "raw_model_response": transcription_result.get("raw_response") # Optionally include for debugging
-            }, status=500) # Internal Server Error for failures in transcription service
+            error_msg = transcription_result.get('message', "Unknown transcription error.")
+            logger.error(f"speech_to_text_view: Transcription failed. RequestID: {request_id}, Error: {error_msg}, Duration: {duration_view}s")
+            # CORRECTED format_error_response call
+            # Details from raw_response can be logged but not directly passed to format_error_response as a 'details' param.
+            # We can include some part of it in the message if needed, or log it more extensively.
+            if transcription_result.get("raw_response"):
+                logger.error(f"speech_to_text_view: Raw error response from DashScope: {transcription_result.get('raw_response')}. RequestID: {request_id}")
 
+            return format_error_response(
+                message=f"Speech to text conversion failed: {error_msg}", 
+                merge_output=False, # Not applicable
+                http_status=500, # Or a more specific error code if available
+                request_id=request_id
+                # duration_seconds handled by format_error_response indirectly or needs explicit pass-through if desired
+            )
+
+    except json.JSONDecodeError:
+        logger.error(f"speech_to_text_view: Invalid JSON in request body. RequestID: {request_id}", exc_info=True)
+        # CORRECTED format_error_response call
+        return format_error_response(
+            message="Invalid JSON format in request body.", 
+            merge_output=False, # Not applicable
+            http_status=400, 
+            request_id=request_id
+        )
     except Exception as e:
-        duration = round(time.perf_counter() - start_time_view, 2)
-        logger.error(f"speech_to_text_view: Unexpected error: {str(e)}. RequestID: {request_id}, Duration: {duration}s", exc_info=True)
-        return JsonResponse({
-            "status": "error", 
-            "message": f"An unexpected error occurred: {str(e)}",
-            "request_id": request_id,
-            "duration_seconds": duration
-        }, status=500)
+        logger.error(f"speech_to_text_view: An unexpected error occurred. RequestID: {request_id}. Error: {e}", exc_info=True)
+        # CORRECTED format_error_response call
+        return format_error_response(
+            message=f"An unexpected server error occurred: {str(e)}", 
+            merge_output=False, # Not applicable
+            http_status=500,
+            request_id=request_id
+        )
