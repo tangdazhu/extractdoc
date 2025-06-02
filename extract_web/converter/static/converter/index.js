@@ -732,19 +732,117 @@ function initializeAsrFunctionality() {
     const startAsrBtn = document.getElementById('startAsrBtn');
     const clearAsrBtn = document.getElementById('clearAsrFieldsBtn');
     const audioUrlInput = document.getElementById('audioUrlInput');
-    const audioHotwordsInput = document.getElementById('audioHotwordsInput');
     const asrResultTextarea = document.getElementById('asrTranscriptionOutput');
     const asrErrorOutput = document.getElementById('asrErrorOutput');
     const asrLoadingIndicator = document.getElementById('asrLoadingIndicator');
 
-    if (!startAsrBtn || !clearAsrBtn || !audioUrlInput || !audioHotwordsInput || !asrResultTextarea || !asrErrorOutput || !asrLoadingIndicator) {
-        console.error("[ASR Init] One or more ASR UI elements not found. Recognition functionality may be impaired.");
+    const hotwordsContainer = document.getElementById('asrHotwordsContainer');
+
+    if (!startAsrBtn || !clearAsrBtn || !audioUrlInput || 
+        !asrResultTextarea || !asrErrorOutput || !asrLoadingIndicator || 
+        !hotwordsContainer) {
+        console.error("[ASR Init] One or more ASR UI elements not found. Functionality may be impaired.");
         return;
     }
 
+    function addNewHotwordRowBelow(currentRowDiv) {
+        const newRow = createHotwordRow(); // createHotwordRow now returns the new row
+        if (currentRowDiv && currentRowDiv.parentNode) {
+            // Insert the new row after the current row
+            currentRowDiv.parentNode.insertBefore(newRow, currentRowDiv.nextSibling);
+        } else {
+            // Fallback if currentRowDiv is null (e.g., initial call or after clearing all)
+            hotwordsContainer.appendChild(newRow);
+        }
+    }
+
+    function createHotwordRow() {
+        const rowDiv = document.createElement('div');
+        rowDiv.className = 'hotword-row input-group mb-2';
+
+        // Label for Hotword Text
+        const textLabel = document.createElement('span');
+        textLabel.className = 'hotword-label';
+        textLabel.textContent = '热词：';
+        rowDiv.appendChild(textLabel);
+
+        // Input for Hotword Text
+        const textInput = document.createElement('input');
+        textInput.type = 'text';
+        textInput.className = 'form-control hotword-text';
+        textInput.placeholder = '热词文本';
+        rowDiv.appendChild(textInput);
+
+        // Label for Weight
+        const weightLabel = document.createElement('span');
+        weightLabel.className = 'hotword-label';
+        weightLabel.textContent = '权重：';
+        rowDiv.appendChild(weightLabel);
+
+        // Input for Weight
+        const weightInput = document.createElement('input');
+        weightInput.type = 'number';
+        weightInput.className = 'form-control hotword-weight';
+        weightInput.placeholder = '权重 (1-5整数)';
+        weightInput.title = '取值范围为[1, 5]之间的整数，如果效果不明显可以适当增加权重，但是当权重较大时可能会引起负面效果，导致其他词语识别不准确';
+        weightInput.min = '1';
+        weightInput.value = '4';
+        rowDiv.appendChild(weightInput);
+
+        // Label for Language
+        const langLabel = document.createElement('span');
+        langLabel.className = 'hotword-label';
+        langLabel.textContent = '语言：';
+        rowDiv.appendChild(langLabel);
+
+        // Select for Language
+        const langSelect = document.createElement('select');
+        langSelect.className = 'form-select hotword-lang';
+        const optZh = document.createElement('option');
+        optZh.value = 'zh';
+        optZh.textContent = '中文 (zh)';
+        langSelect.appendChild(optZh);
+        const optEn = document.createElement('option');
+        optEn.value = 'en';
+        optEn.textContent = '英文 (en)';
+        langSelect.appendChild(optEn);
+        langSelect.value = 'zh';
+        rowDiv.appendChild(langSelect);
+
+        const removeBtn = document.createElement('button');
+        removeBtn.type = 'button';
+        removeBtn.className = 'btn btn-danger btn-sm remove-hotword-btn'; // Bootstrap classes for styling
+        removeBtn.innerHTML = '-';
+        removeBtn.title = '移除此热词行';
+        removeBtn.onclick = function() {
+            const parentContainer = rowDiv.parentNode;
+            rowDiv.remove();
+            // If it was the last row and now container is empty, add a new initial row
+            if (parentContainer && parentContainer.children.length === 0) {
+                addNewHotwordRowBelow(null); // Adds a new row to the container
+            }
+        };
+        rowDiv.appendChild(removeBtn);
+
+        // NEW: Inline Add button for this row
+        const addInlineBtn = document.createElement('button');
+        addInlineBtn.type = 'button';
+        addInlineBtn.className = 'btn btn-success btn-sm add-hotword-inline-btn ms-1'; // Added ms-1 for a little space
+        addInlineBtn.innerHTML = '+';
+        addInlineBtn.title = '在此行下方添加新热词行';
+        addInlineBtn.onclick = function() {
+            addNewHotwordRowBelow(rowDiv); 
+        };
+        rowDiv.appendChild(addInlineBtn);
+        
+        return rowDiv; // Return the created row
+    }
+
+    // Initial setup: Add one hotword row when the ASR functionality is initialized
+    addNewHotwordRowBelow(null); // Add the first row to the container
+
     startAsrBtn.addEventListener('click', async function() {
         const audioUrl = audioUrlInput.value.trim();
-        const hotwordsValue = audioHotwordsInput.value.trim();
 
         if (!audioUrl) {
             asrErrorOutput.textContent = '请输入有效的音频文件URL。';
@@ -752,10 +850,28 @@ function initializeAsrFunctionality() {
             return;
         }
 
-        let hotwordsArray = [];
-        if (hotwordsValue) {
-            hotwordsArray = hotwordsValue.split(',').map(hw => hw.trim()).filter(hw => hw.length > 0);
-        }
+        // NEW: Collect hotwords from dynamic rows
+        const hotwordsConfig = [];
+        const hotwordRows = hotwordsContainer.querySelectorAll('.hotword-row');
+        let hotwordValidationError = false;
+        hotwordRows.forEach(row => {
+            const text = row.querySelector('.hotword-text').value.trim();
+            const weightStr = row.querySelector('.hotword-weight').value.trim();
+            const lang = row.querySelector('.hotword-lang').value;
+
+            if (text) { // Only include if text is provided
+                const weight = parseInt(weightStr, 10);
+                if (isNaN(weight) || weight < 1) {
+                    asrErrorOutput.textContent = `热词 \"${text}\" 的权重无效，请输入大于0的整数。`;
+                    addNotification(`热词 \"${text}\" 的权重无效。`, 'error');
+                    hotwordValidationError = true;
+                    return; // Stop processing this row
+                }
+                hotwordsConfig.push({ text, weight, lang });
+            }
+        });
+
+        if (hotwordValidationError) return; // Stop if validation failed
 
         asrResultTextarea.value = '';
         asrErrorOutput.textContent = '';
@@ -763,14 +879,16 @@ function initializeAsrFunctionality() {
         startAsrBtn.disabled = true;
         clearAsrBtn.disabled = true;
         audioUrlInput.disabled = true;
-        audioHotwordsInput.disabled = true;
+        hotwordRows.forEach(row => {
+            row.querySelectorAll('input, select, button').forEach(el => el.disabled = true);
+        });
 
         try {
             const payload = { audio_url: audioUrl };
-            if (hotwordsArray.length > 0) {
-                payload.hotwords = hotwordsArray;
+            if (hotwordsConfig.length > 0) {
+                payload.hotwords_config = hotwordsConfig; // Use new key
             }
-            console.log("[ASR] Starting recognition for URL:", audioUrl, "Hotwords:", hotwordsArray);
+            console.log("[ASR] Starting recognition for URL:", audioUrl, "Hotwords Config:", hotwordsConfig);
 
             const response = await fetch("/api/speech-to-text/", {
                 method: 'POST',
@@ -810,21 +928,24 @@ function initializeAsrFunctionality() {
             startAsrBtn.disabled = false;
             clearAsrBtn.disabled = false;
             audioUrlInput.disabled = false;
-            audioHotwordsInput.disabled = false;
+            hotwordRows.forEach(row => {
+                 row.querySelectorAll('input, select, button').forEach(el => el.disabled = false);
+            });
         }
     });
 
     if (clearAsrBtn) {
         clearAsrBtn.addEventListener('click', function() {
             audioUrlInput.value = '';
-            audioHotwordsInput.value = '';
+            hotwordsContainer.innerHTML = ''; // Clear all dynamic hotword rows
+            addNewHotwordRowBelow(null); // Add back one initial empty row
+
             asrResultTextarea.value = '';
             asrErrorOutput.textContent = '';
             asrLoadingIndicator.style.display = 'none';
             startAsrBtn.disabled = false;
             clearAsrBtn.disabled = false;
             audioUrlInput.disabled = false;
-            audioHotwordsInput.disabled = false;
             console.log("[ASR] Fields cleared.");
             addNotification('ASR输入和结果已清空。', 'info');
         });

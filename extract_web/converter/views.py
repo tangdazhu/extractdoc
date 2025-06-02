@@ -1530,44 +1530,57 @@ def speech_to_text_view(request):
     try:
         if not request.body:
             logger.warning(f"speech_to_text_view: Empty request body. RequestID: {request_id}")
-            # CORRECTED format_error_response call
             return format_error_response(
                 message="Request body is empty.",
-                merge_output=False, # Not applicable here, but required by formatter
+                merge_output=False, 
                 http_status=400, 
                 request_id=request_id
-                # duration_seconds handled by format_error_response indirectly or needs explicit pass-through if desired for all errors
             )
         
         data = json.loads(request.body.decode('utf-8'))
         audio_url = data.get('audio_url')
-        hotwords = data.get('hotwords')
+        # MODIFIED: Expect 'hotwords_config' instead of 'hotwords'
+        hotwords_config_from_request = data.get('hotwords_config') 
 
         if not audio_url:
             logger.warning(f"speech_to_text_view: 'audio_url' not found in request. RequestID: {request_id}, Data: {data}")
-            # CORRECTED format_error_response call
             return format_error_response(
                 message="'audio_url' is required in the request body.",
-                merge_output=False, # Not applicable
+                merge_output=False, 
                 http_status=400, 
                 request_id=request_id
             )
 
-        if hotwords is not None:
-            if not isinstance(hotwords, list) or not all(isinstance(item, str) for item in hotwords):
-                logger.warning(f"speech_to_text_view: 'hotwords' parameter is invalid. Must be a list of strings. RequestID: {request_id}, Received: {hotwords}")
-                # CORRECTED format_error_response call
+        # Validate hotwords_config_from_request if it exists
+        if hotwords_config_from_request is not None:
+            if not isinstance(hotwords_config_from_request, list):
+                logger.warning(f"speech_to_text_view: 'hotwords_config' parameter must be a list. RequestID: {request_id}, Received: {hotwords_config_from_request}")
                 return format_error_response(
-                    message="'hotwords' must be a list of strings.",
-                    merge_output=False, # Not applicable
+                    message="'hotwords_config' must be a list of hotword definitions.",
+                    merge_output=False, 
                     http_status=400,
                     request_id=request_id
                 )
-            logger.info(f"speech_to_text_view: Received hotwords: {hotwords}. RequestID: {request_id}")
+            for item in hotwords_config_from_request:
+                if not (isinstance(item, dict) and 
+                        'text' in item and isinstance(item['text'], str) and 
+                        'weight' in item and isinstance(item['weight'], int) and 
+                        'lang' in item and isinstance(item['lang'], str)):
+                    logger.warning(f"speech_to_text_view: Invalid item in 'hotwords_config': {item}. Each item must be a dict with str 'text', int 'weight', and str 'lang'. RequestID: {request_id}")
+                    return format_error_response(
+                        message="Invalid structure for item in 'hotwords_config'.",
+                        merge_output=False, 
+                        http_status=400,
+                        request_id=request_id
+                    )
+            logger.info(f"speech_to_text_view: Received hotwords_config: {hotwords_config_from_request}. RequestID: {request_id}")
+        else:
+            logger.info(f"speech_to_text_view: No hotwords_config provided. RequestID: {request_id}")
 
         logger.info(f"speech_to_text_view: Processing URL: {audio_url}. RequestID: {request_id}")
         
-        transcription_result = transcribe_audio_dashscope(audio_url, hotwords=hotwords) 
+        # Pass hotwords_config_from_request to the transcription function
+        transcription_result = transcribe_audio_dashscope(audio_url, hotwords_config=hotwords_config_from_request) 
 
         duration_view = round(time.perf_counter() - start_time_view, 2)
 

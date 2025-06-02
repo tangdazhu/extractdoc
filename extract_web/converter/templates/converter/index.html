@@ -548,6 +548,95 @@
         cursor: not-allowed;
     }
 
+    /* Custom styles for dynamic hotword rows */
+    .hotword-row.input-group {
+        display: flex; /* Ensure flex display */
+        flex-wrap: nowrap; /* Prevent wrapping to new line */
+        align-items: center; /* Align items vertically in the center */
+        width: 100%; /* Make the input group take full available width */
+        margin-bottom: 0.5rem; /* Keep consistent margin from JS (mb-2 is 0.5rem in Bootstrap 5) */
+    }
+
+    .hotword-row.input-group > * { /* Apply to all direct children of the row */
+        margin-left: 0.25rem; /* Add a small gap between elements */
+    }
+    .hotword-row.input-group > *:first-child {
+        margin-left: 0; /* No left margin for the first element */
+    }
+
+    /* Ensure all form elements in a hotword row have similar visual height */
+    .hotword-row.input-group .form-control,
+    .hotword-row.input-group .form-select,
+    .hotword-row.input-group .btn {
+        box-sizing: border-box; 
+        height: 31px; 
+        padding: 0.25rem 0.5rem; 
+        font-size: 0.875rem; 
+        line-height: 1.5; 
+        vertical-align: middle;
+        border: 1px solid #ced4da; /* Add a default border to all for consistency */
+    }
+    /* Adjust button padding specifically if needed to match height */
+    .hotword-row.input-group .btn.remove-hotword-btn {
+        line-height: 1.5; /* Match line-height for icon centering if needed */
+    }
+
+    .hotword-row.input-group .hotword-label {
+        margin-right: 0.25rem;
+        white-space: nowrap;
+        font-size: 0.875rem; 
+        line-height: 1.5; 
+        display: flex;
+        align-items: center;
+        padding-top: 0.25rem; 
+        padding-bottom: 0.25rem;
+        height: 31px; 
+        box-sizing: border-box;
+    }
+
+    .hotword-row.input-group .form-control.hotword-text {
+        flex-grow: 0;
+        flex-shrink: 0;
+        flex-basis: 180px; /* MODIFIED: Increased width by 50% from 120px */
+        width: 180px !important;   /* MODIFIED: Increased width by 50% from 120px */
+        min-width: 150px;  /* MODIFIED: Adjusted min-width accordingly */
+    }
+
+    .hotword-row.input-group .form-control.hotword-weight {
+        flex: 0 0 75px;   /* No grow, no shrink, basis (width) is 75px */
+        width: 75px;       /* Explicit width to ensure it */
+        text-align: center;
+        padding-left: 0.25rem; /* Reduced padding for compactness */
+        padding-right: 0.25rem;
+    }
+
+    .hotword-row.input-group .form-select.hotword-lang {
+        flex: 0 0 105px;  /* No grow, no shrink, basis (width) is 105px */
+        width: 105px;      /* Explicit width */
+        padding-left: 0.25rem; /* Reduced padding */
+        padding-right: 0.25rem;
+    }
+
+    .hotword-row.input-group .btn.remove-hotword-btn {
+        flex: 0 0 auto;   /* No grow, no shrink, size based on content/padding */
+        /* Using btn-sm class from Bootstrap should provide adequate padding */
+    }
+    /* END Custom styles for dynamic hotword rows */
+
+    /* Remove #asrHotwordsContainer block display style, it will be a flex container for rows */
+    #asrHotwordsContainer {
+        margin-bottom: 0.25rem; /* This can remain or be adjusted by JS if an initial add button is placed here */
+        display: flex; /* NEW: Make container flex */
+        flex-direction: column; /* NEW: Stack rows vertically */
+        align-items: flex-start; /* NEW: Align rows to the start */
+    }
+
+    /* REMOVE .hotwords-section-wrapper styles, as the static add button is gone */
+    /* .hotwords-section-wrapper { ... } */
+
+    /* REMOVE #addAsrHotwordBtn specific styles, it will be part of the row or a different initial button */
+    /* #addAsrHotwordBtn { ... } */
+
 </style>
 {% endblock %}
 
@@ -771,13 +860,18 @@
                             <small class="form-text text-muted" style="font-size: 0.85em; display: block; margin-top: 5px;">支持常见音频格式，如 WAV, MP3, M4A 等。</small>
                         </div>
 
-                        <!-- ADDED: Hotwords Input -->
-                        <div class="mb-3">
-                            <label for="audioHotwordsInput" class="form-label" style="font-weight: 500;">自定义热词 (可选, 逗号分隔):</label>
-                            <input type="text" class="form-control" id="audioHotwordsInput" placeholder="例如: 阿里巴巴,通义千问,杭州">
-                            <small class="form-text text-muted" style="font-size: 0.85em; display: block; margin-top: 5px;">输入特定词汇提高识别准确率。</small>
+                        <!-- MODIFIED: Hotwords Input Area for Dynamic Rows -->
+                        <div class="mb-3 hotwords-section-wrapper">
+                            <label class="form-label" style="font-weight: 500;">自定义热词 (可选):</label>
+                            <small class="form-text text-muted" style="font-size: 0.85em; display: block; margin-bottom: 0.5rem;">
+                                为每个热词指定文本、权重（效果不明显可适当增加，过高可能引起负面效果）和语言。
+                            </small>
+                            <div id="asrHotwordsContainer">
+                                <!-- Hotword rows will be added here by JavaScript -->
+                                <!-- The initial (or only) add button might be placed here by JS -->
+                            </div>
                         </div>
-                        <!-- END ADDED: Hotwords Input -->
+                        <!-- END MODIFIED: Hotwords Input Area -->
                         
                         <div class="action-buttons mt-3 mb-3" style="border-top: none; padding-top: 0; justify-content: flex-start;">
                              <button type="button" class="btn btn-primary" id="startAsrBtn" style="padding: 10px 20px; font-size: 0.95em; margin-right: 10px;">
