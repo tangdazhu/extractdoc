@@ -57,14 +57,12 @@ def transcribe_audio_dashscope(audio_file_url: str, hotwords_config: list[dict] 
                     # hotwords_config should already be in the format: [{'text': ..., 'weight': ..., 'lang': ...}]
                     hotword_definitions = hotwords_config 
                     
-                    logger.info(f"Creating vocabulary with prefix='{vocab_prefix}', model='{current_model}', vocabulary_list={hotword_definitions}")
+                    logger.info(f"Creating vocabulary with target_model='{current_model}', vocabulary={hotword_definitions}, prefix='utvocab'")
                     
                     created_vocab_id = service.create_vocabulary(
-                        name=f"{vocab_prefix}_{uuid.uuid4().hex[:8]}",
-                        description='Temporary vocabulary for ASR hotwords',
-                        model=current_model,
-                        vocabulary_list=hotword_definitions,
-                        prefix="ut_vocab"
+                        target_model=current_model,
+                        vocabulary=hotword_definitions,
+                        prefix="utvocab"
                     )
                     
                     if created_vocab_id:
