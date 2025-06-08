@@ -231,8 +231,7 @@ function selectSubTab(buttonElement, subTabType, shouldUpdateAccept = true) {
     [pdfToWordOptionsDiv, pdfToExcelOptionsDiv, pdfToTxtOptionsDiv, pdfToPptOptionsDiv, pdfMergeOptionDiv].forEach(div => {
         div.classList.add('hidden');
     });
-    
-    // Show the appropriate options based on current selection
+      // Show the appropriate options based on current selection
     if (currentSelectedMainTab === 'pdfToFile') {
         let targetOptionsDiv = null;
         
@@ -264,6 +263,11 @@ function selectSubTab(buttonElement, subTabType, shouldUpdateAccept = true) {
         pdfMergeOptionDiv.classList.remove('hidden');
         pdfMergeOptionDiv.style.display = 'block';
         console.log("[selectSubTab] PDF merge option SHOWN");
+    } else if (currentSelectedMainTab === 'imgToFile') {
+        // Show merge option for image conversions too
+        pdfMergeOptionDiv.classList.remove('hidden');
+        pdfMergeOptionDiv.style.display = 'block';
+        console.log("[selectSubTab] Image merge option SHOWN");
     } else {
         console.log("[selectSubTab] All PDF options HIDDEN");
     }
