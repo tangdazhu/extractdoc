@@ -888,7 +888,9 @@ def img_to_file_view(request):
                         )
                         pptx_success, pptx_path_or_msg, _ = (
                             convert_docx_to_pptx_libreoffice(
-                                final_merged_docx_path, user_converted_dir
+                                final_merged_docx_path,
+                                user_converted_dir,
+                                skip_default_content=True,
                             )
                         )
 
@@ -1112,10 +1114,11 @@ def img_to_file_view(request):
                     final_pptx_full_path = os.path.join(
                         user_converted_dir, final_pptx_name
                     )
-
                     pptx_succ, actual_libre_pptx_path, pptx_msg = (
                         convert_docx_to_pptx_libreoffice(
-                            intermediate_docx_full_path, user_converted_dir
+                            intermediate_docx_full_path,
+                            user_converted_dir,
+                            skip_default_content=True,
                         )
                     )
 
