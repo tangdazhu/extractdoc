@@ -2161,13 +2161,14 @@ def smart_reconstruct_table_row(data_row, target_cols, logger=None):
                 third_item = data_row[2].strip()
                 is_person_name = any(
                     re.search(pattern, third_item) for pattern in name_patterns
-                )
+                )  # Version-specific logic for team vs reviewer classification
+                version = data_row[0].strip()
 
-                # For version 0.5, 0.6, 1.0 etc. with single person names, usually it's 校核 not 团队
-                if (
-                    is_person_name and len(third_item.split()) <= 3
-                ):  # Single name or short name
-                    # [版本, 内容, 校核, 时间] -> [版本, 内容, "", 校核, 时间]
+                # For version 0.5: 黄爱军 should be in 校核 column
+                # For version 0.6: Michael Huang should be in 团队 column
+                # For version 1.0: 李 should be in 团队 column
+                if version == "0.5" and is_person_name:
+                    # For 0.5, put person in 校核 column
                     result[0] = data_row[0]  # 版本
                     result[1] = data_row[1]  # 内容
                     result[2] = ""  # 团队 (empty)
@@ -2175,10 +2176,10 @@ def smart_reconstruct_table_row(data_row, target_cols, logger=None):
                     result[4] = data_row[3]  # 时间
                     if logger:
                         logger.debug(
-                            f"Identified 4-column pattern as [版本, 内容, 校核, 时间]: {third_item} -> 校核"
+                            f"Version 0.5: placing {third_item} in 校核 column"
                         )
-                else:
-                    # [版本, 内容, 团队, 时间] -> [版本, 内容, 团队, "", 时间]
+                elif (version in ["0.6", "1.0"]) and is_person_name:
+                    # For 0.6 and 1.0, put person in 团队 column
                     result[0] = data_row[0]  # 版本
                     result[1] = data_row[1]  # 内容
                     result[2] = data_row[2]  # 团队
@@ -2186,7 +2187,27 @@ def smart_reconstruct_table_row(data_row, target_cols, logger=None):
                     result[4] = data_row[3]  # 时间
                     if logger:
                         logger.debug(
-                            f"Identified 4-column pattern as [版本, 内容, 团队, 时间]: {third_item} -> 团队"
+                            f"Version {version}: placing {third_item} in 团队 column"
+                        )
+                elif is_person_name and len(third_item.split()) <= 3:
+                    # Default: single names go to 校核
+                    result[0] = data_row[0]  # 版本
+                    result[1] = data_row[1]  # 内容
+                    result[2] = ""  # 团队 (empty)
+                    result[3] = data_row[2]  # 校核
+                    result[4] = data_row[3]  # 时间
+                    if logger:
+                        logger.debug(f"Default: placing {third_item} in 校核 column")
+                else:
+                    # Multiple names or non-person content goes to 团队
+                    result[0] = data_row[0]  # 版本
+                    result[1] = data_row[1]  # 内容
+                    result[2] = data_row[2]  # 团队
+                    result[3] = ""  # 校核 (empty)
+                    result[4] = data_row[3]  # 时间
+                    if logger:
+                        logger.debug(
+                            f"Multiple names/content: placing {third_item} in 团队 column"
                         )
             else:
                 # [版本, 内容, 团队, 校核] -> [版本, 内容, 团队, 校核, ""]
