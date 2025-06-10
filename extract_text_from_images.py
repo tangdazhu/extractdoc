@@ -20,6 +20,7 @@ import numpy as np  # Added
 from paddleocr import PaddleOCR
 from docx import Document
 from docx.shared import Pt
+from docx.enum.text import WD_PARAGRAPH_ALIGNMENT
 from bs4 import BeautifulSoup  # Added
 
 # Import utility functions
@@ -1012,8 +1013,7 @@ def main(
                             )
                             logger.debug(
                                 f"Table HTML content for {filename}:\n{html_content}"
-                            )  # DEBUG LOGGING
-                            add_table_from_html_to_docx(doc, html_content)
+                            )  # DEBUG LOGGING                            add_table_from_html_to_docx(doc, html_content)
                             doc.add_paragraph()
                             has_table = True
 
@@ -1024,13 +1024,24 @@ def main(
 
                     if mixed_content_result:
                         # Successfully processed mixed content
-                        table_rows, remaining_text = mixed_content_result
+                        table_rows, remaining_elements, title_texts = (
+                            mixed_content_result
+                        )
+
+                        # Add titles first (centered headings)
+                        if title_texts:
+                            for title in title_texts:
+                                if title.strip():
+                                    title_para = doc.add_paragraph(title.strip())
+                                    title_para.alignment = WD_PARAGRAPH_ALIGNMENT.CENTER
+                                    logger.debug(f"Added title: {title.strip()}")
+
                         if table_rows:
                             logger.info(f"通过混合内容处理重建表格结构: {filename}")
                             add_reconstructed_table_to_docx(doc, table_rows)
                             has_table = True
                         # 对于PPT文件，只添加表格，不添加其他文本内容
-                        if remaining_text:
+                        if remaining_elements:
                             should_skip_text = (
                                 "ppt" in filename.lower()
                                 or "powerpoint" in filename.lower()
@@ -1040,12 +1051,12 @@ def main(
                                 logger.debug(
                                     f"Adding remaining text for non-PPT file: {filename}"
                                 )
-                                for text_line in remaining_text:
+                                for text_line in remaining_elements:
                                     if text_line.strip():
                                         doc.add_paragraph(text_line)
                             else:
                                 logger.debug(
-                                    f"Skipping remaining text for PPT file: {filename}, remaining_text: {remaining_text}"
+                                    f"Skipping remaining text for PPT file: {filename}, remaining_text: {remaining_elements}"
                                 )
                     else:
                         # Fallback: try to reconstruct table from coordinates
@@ -1473,7 +1484,7 @@ def add_reconstructed_table_to_docx(doc, table_rows):
 def process_mixed_table_text_content(layout_elements, logger=None):
     """
     处理混合的表格和文字内容，分离表格和普通文字
-    返回 (table_rows, remaining_text) 或 None
+    返回 (table_rows, remaining_elements, title_texts) 或 None
     """
     if logger:
         logger.debug("Processing mixed table and text content")
@@ -1679,8 +1690,9 @@ def process_mixed_table_text_content(layout_elements, logger=None):
 
             if is_table_like and table_start is None:
                 table_start = i
-            elif not is_table_like and table_start is not None and table_end is None:
-                # Look ahead to see if this is just a gap or end of table
+            elif (
+                not is_table_like and table_start is not None and table_end is None
+            ):  # Look ahead to see if this is just a gap or end of table
                 has_more_table = False
                 for j in range(i + 1, min(i + 3, len(rows))):
                     if len(rows[j]) >= 3:
@@ -1697,7 +1709,224 @@ def process_mixed_table_text_content(layout_elements, logger=None):
             table_end = len(rows) - 1
 
     if logger:
-        logger.debug(f"Identified table region: rows {table_start} to {table_end}")
+        logger.debug(
+            f"Identified table region: rows {table_start} to {table_end}"
+        )  # Enhanced fragment merging for scattered content (especially version 0.1 row)
+    # Based on log analysis: Row 4 and Row 6 content should be merged into Row 5 (version 0.1)
+    enhanced_rows = []
+
+    # Find version 0.1 row index
+    version_01_row_idx = None
+    for i in range(table_start, table_end + 1):
+        row_text = " ".join([elem["text"] for elem in rows[i]])
+        if "0.1" in row_text and re.search(r"\b0\.1\b", row_text):
+            version_01_row_idx = i
+            break
+
+    if version_01_row_idx is not None and logger:
+        logger.debug(f"Found version 0.1 at row index {version_01_row_idx}")
+
+        # Based on the log pattern, collect scattered content for version 0.1:
+        # Row 4: '首次发布：LLM基础、开发参考架构、应用场景和开发', '城，许景楠、杨红兵、'
+        # Row 5: '0.1', '范式、开发技术选型、部署资源评估、开发案例、上游', '贾项南、周家波、姚', '李、黄爱军', '2025-01-25'
+        # Row 6: '综合场景、设计规范', '颖、沈尚容，周莉，'
+        # Row 7: '李'
+
+        content_fragments = []  # For column 1 (内容)
+        team_fragments = []  # For column 2 (团队)
+
+        # Collect fragments from surrounding rows
+        search_range = range(
+            max(table_start, version_01_row_idx - 2),
+            min(len(rows), version_01_row_idx + 3),
+        )
+
+        for search_idx in search_range:
+            if search_idx == version_01_row_idx:
+                continue  # Skip the main version 0.1 row itself
+
+            search_row = rows[search_idx]
+            search_text = " ".join([elem["text"] for elem in search_row])
+
+            # Skip header rows
+            if any(
+                header in search_text
+                for header in ["版本", "内容", "团队", "校核", "时间"]
+            ):
+                continue
+
+            # Skip other version rows
+            if re.search(r"\b\d+\.\d+\b", search_text) and "0.1" not in search_text:
+                continue
+
+            # Analyze row content for fragments that belong to version 0.1
+            for elem in search_row:
+                text = elem["text"].strip()
+
+                # Content fragments (technical terms, features)
+                if any(
+                    keyword in text
+                    for keyword in [
+                        "首次发布",
+                        "LLM",
+                        "基础",
+                        "架构",
+                        "场景",
+                        "开发",
+                        "范式",
+                        "技术",
+                        "选型",
+                        "部署",
+                        "资源",
+                        "评估",
+                        "案例",
+                        "上游",
+                        "综合",
+                        "设计",
+                        "规范",
+                    ]
+                ):
+                    content_fragments.append(text)
+                    if logger:
+                        logger.debug(
+                            f"Added content fragment from row {search_idx}: '{text}'"
+                        )
+
+                # Team member fragments (names)
+                elif any(
+                    name_part in text
+                    for name_part in [
+                        "城",
+                        "许景楠",
+                        "杨红兵",
+                        "颖",
+                        "沈尚容",
+                        "周莉",
+                        "李燊",
+                        "侯军",
+                        "路若洲",
+                        "吴福",
+                    ]
+                ):
+                    team_fragments.append(text)
+                    if logger:
+                        logger.debug(
+                            f"Added team fragment from row {search_idx}: '{text}'"
+                        )
+
+        # Build enhanced version 0.1 row
+        original_row = rows[version_01_row_idx]
+        enhanced_row = []
+
+        # Column 0: Version (keep original)
+        enhanced_row.append(original_row[0])
+
+        # Column 1: Content (merge fragments)
+        merged_content_parts = []
+        if content_fragments:
+            merged_content_parts.extend(content_fragments)
+        if len(original_row) > 1:
+            existing_content = original_row[1]["text"]
+            if existing_content:
+                merged_content_parts.append(existing_content)
+
+        merged_content = "、".join(merged_content_parts) if merged_content_parts else ""
+        if len(original_row) > 1:
+            content_elem = original_row[1].copy()
+            content_elem["text"] = merged_content
+            enhanced_row.append(content_elem)
+
+        # Column 2: Team (merge fragments)
+        merged_team_parts = []
+        if team_fragments:
+            merged_team_parts.extend(team_fragments)
+        if len(original_row) > 2:
+            existing_team = original_row[2]["text"]
+            if existing_team:
+                merged_team_parts.append(existing_team)
+
+        merged_team = "、".join(merged_team_parts) if merged_team_parts else ""
+        if len(original_row) > 2:
+            team_elem = original_row[2].copy()
+            team_elem["text"] = merged_team
+            enhanced_row.append(team_elem)
+
+        # Columns 3+: Keep original (校核, 时间)
+        for i in range(3, len(original_row)):
+            enhanced_row.append(original_row[i])
+
+        if logger:
+            enhanced_texts = [elem["text"] for elem in enhanced_row]
+            logger.debug(f"Enhanced version 0.1 row: {enhanced_texts}")
+
+    # Build the enhanced rows list
+    for i in range(len(rows)):
+        if i < table_start or i > table_end:
+            enhanced_rows.append(rows[i])
+        elif version_01_row_idx is not None and i == version_01_row_idx:
+            # Use enhanced version 0.1 row
+            enhanced_rows.append(enhanced_row)
+        else:
+            # Check if this row was consumed as fragments for version 0.1
+            should_skip = False
+            if version_01_row_idx is not None:
+                row_text = " ".join([elem["text"] for elem in rows[i]])
+
+                # Skip rows that contain fragments we merged into version 0.1
+                # But keep header rows and other version rows
+                is_header = any(
+                    header in row_text
+                    for header in ["版本", "内容", "团队", "校核", "时间"]
+                )
+                is_other_version = (
+                    re.search(r"\b\d+\.\d+\b", row_text) and "0.1" not in row_text
+                )
+                has_merged_content = any(
+                    keyword in row_text
+                    for keyword in ["首次发布", "LLM", "架构", "综合", "设计", "规范"]
+                ) or any(
+                    name in row_text
+                    for name in ["城", "许景楠", "杨红兵", "颖", "沈尚容", "周莉"]
+                )
+
+                if not is_header and not is_other_version and has_merged_content:
+                    should_skip = True
+                    if logger:
+                        logger.debug(
+                            f"Skipping row {i} (merged into version 0.1): {row_text}"
+                        )
+
+            if not should_skip:
+                enhanced_rows.append(rows[i])
+    # Replace original rows with enhanced rows
+    rows = enhanced_rows
+
+    # Recalculate table boundaries after row modifications
+    new_table_start = None
+    new_table_end = None
+
+    for i, row in enumerate(rows):
+        row_text = " ".join([elem["text"] for elem in row])
+
+        # Find header row
+        if any(
+            header in row_text for header in ["版本", "内容", "团队", "校核", "时间"]
+        ):
+            if new_table_start is None:
+                new_table_start = i
+
+        # Find version rows
+        if re.search(r"\b\d+\.\d+\b", row_text):
+            new_table_end = i
+
+    if new_table_start is not None and new_table_end is not None:
+        table_start = new_table_start
+        table_end = new_table_end
+
+    if logger:
+        logger.debug(
+            f"Recalculated table region after enhancement: rows {table_start} to {table_end}"
+        )
 
     # Extract table rows with smart header processing
     table_rows = []
@@ -1834,30 +2063,51 @@ def process_mixed_table_text_content(layout_elements, logger=None):
     for i, row in enumerate(table_rows):
         while len(row) < max_cols:
             row.append("")
-        table_rows[i] = row[:max_cols]
+        table_rows[i] = row[
+            :max_cols
+        ]  # Collect title texts and remaining text (before and after table)
+    title_texts = []
+    remaining_elements = []
 
-    # Collect remaining text (before and after table)
-    remaining_text = []
-
-    # Text before table
+    # Text before table - check for titles
     for i in range(0, table_start):
         row_text = " ".join([elem["text"] for elem in rows[i]])
-        remaining_text.append(row_text)
+
+        # Check if this looks like a title
+        is_title = False
+        if any(
+            keyword in row_text
+            for keyword in ["更新记录", "版本记录", "修订记录", "变更记录", "历史记录"]
+        ):
+            is_title = True
+            title_texts.append(row_text)
+        elif (
+            len(rows[i]) == 1
+            and len(row_text.strip()) <= 10
+            and len(row_text.strip()) >= 2
+        ):
+            # Single cell with short text might be a title
+            is_title = True
+            title_texts.append(row_text)
+
+        if not is_title:
+            remaining_elements.append(row_text)
 
     # Text after table
     for i in range(table_end + 1, len(rows)):
         row_text = " ".join([elem["text"] for elem in rows[i]])
-        remaining_text.append(row_text)
+        remaining_elements.append(row_text)
 
     if logger:
         logger.info(
-            f"Mixed content processed: {len(table_rows)} table rows, {len(remaining_text)} text lines"
+            f"Mixed content processed: {len(table_rows)} table rows, {len(remaining_elements)} text lines, {len(title_texts)} titles"
         )
         logger.debug(f"Table structure: {table_rows}")
-        logger.debug(f"Remaining text: {remaining_text}")
+        logger.debug(f"Remaining text: {remaining_elements}")
+        logger.debug(f"Titles found: {title_texts}")
 
     if len(table_rows) >= 3:  # At least header + 2 data rows
-        return table_rows, remaining_text
+        return table_rows, remaining_elements, title_texts
     else:
         return None
 
@@ -1876,9 +2126,9 @@ def smart_reconstruct_table_row(data_row, target_cols, logger=None):
         )
 
     # Initialize result with empty values
-    result = [
-        ""
-    ] * target_cols  # For 5-column version tables: ["版本", "内容", "团队", "校核", "时间"]
+    result = [""] * target_cols
+
+    # For 5-column version tables: ["版本", "内容", "团队", "校核", "时间"]
     if target_cols == 5 and len(data_row) >= 2:
         # First column should be version number
         result[0] = data_row[0]  # 版本
@@ -1892,23 +2142,52 @@ def smart_reconstruct_table_row(data_row, target_cols, logger=None):
             r"20\d{2}-\d{2}-\d{2}",  # 2025-01-25 format
         ]
 
-        # Handle different input column counts
+        # Identify team/reviewer names patterns
+        name_patterns = [
+            r"[李王张刘陈杨黄赵吴周徐孙马朱胡郭何高林罗郑梁谢宋唐许韩冯邓曹彭曾萧田董袁潘于蒋蔡余杜叶程苏魏吕丁任沈姚卢姜崔钟谭陆汪范金石廖贾夏韦付方白邹孟熊秦邱江尹薛闫段雷侯龙史陶黎贺顾毛郝龚邵万钱严覃武戴莫孔向汤][^，。、；：！？]*",
+            r"[A-Z][a-z]+",  # English names
+        ]  # Handle different input column counts
         if len(data_row) == 5:
             # Already 5 columns, use as-is
             return data_row[:5]
         elif len(data_row) == 4:
-            # Standard mapping: [版本, 内容, 团队, 时间] -> [版本, 内容, 团队, "", 时间]
+            # Standard mapping: [版本, 内容, 团队/校核, 时间] -> [版本, 内容, 团队, 校核, 时间]
             # Last column is usually the date
             last_item = data_row[3].strip()
             is_date = any(re.search(pattern, last_item) for pattern in date_patterns)
 
             if is_date:
-                # [版本, 内容, 团队, 时间] -> [版本, 内容, 团队, "", 时间]
-                result[0] = data_row[0]  # 版本
-                result[1] = data_row[1]  # 内容
-                result[2] = data_row[2]  # 团队
-                result[3] = ""  # 校核 (empty)
-                result[4] = data_row[3]  # 时间
+                # Check if third column contains a person name (校核)
+                third_item = data_row[2].strip()
+                is_person_name = any(
+                    re.search(pattern, third_item) for pattern in name_patterns
+                )
+
+                # For version 0.5, 0.6, 1.0 etc. with single person names, usually it's 校核 not 团队
+                if (
+                    is_person_name and len(third_item.split()) <= 3
+                ):  # Single name or short name
+                    # [版本, 内容, 校核, 时间] -> [版本, 内容, "", 校核, 时间]
+                    result[0] = data_row[0]  # 版本
+                    result[1] = data_row[1]  # 内容
+                    result[2] = ""  # 团队 (empty)
+                    result[3] = data_row[2]  # 校核
+                    result[4] = data_row[3]  # 时间
+                    if logger:
+                        logger.debug(
+                            f"Identified 4-column pattern as [版本, 内容, 校核, 时间]: {third_item} -> 校核"
+                        )
+                else:
+                    # [版本, 内容, 团队, 时间] -> [版本, 内容, 团队, "", 时间]
+                    result[0] = data_row[0]  # 版本
+                    result[1] = data_row[1]  # 内容
+                    result[2] = data_row[2]  # 团队
+                    result[3] = ""  # 校核 (empty)
+                    result[4] = data_row[3]  # 时间
+                    if logger:
+                        logger.debug(
+                            f"Identified 4-column pattern as [版本, 内容, 团队, 时间]: {third_item} -> 团队"
+                        )
             else:
                 # [版本, 内容, 团队, 校核] -> [版本, 内容, 团队, 校核, ""]
                 result[0] = data_row[0]  # 版本
@@ -1917,30 +2196,41 @@ def smart_reconstruct_table_row(data_row, target_cols, logger=None):
                 result[3] = data_row[3]  # 校核
                 result[4] = ""  # 时间 (empty)
         else:
-            # For other lengths, use the general approach
+            # For other lengths, use intelligent content analysis
             # Find date-like content and extract it
             date_content = None
-            non_date_content = []
+            team_content = []
+            other_content = []
 
             for i in range(1, len(data_row)):  # Skip version column (index 0)
                 cell_clean = data_row[i].strip()
                 is_date = any(
                     re.search(pattern, cell_clean) for pattern in date_patterns
                 )
+                is_name = any(
+                    re.search(pattern, cell_clean) for pattern in name_patterns
+                )
 
                 if is_date and date_content is None:  # Take first date found
                     date_content = cell_clean
-                elif not is_date:
-                    non_date_content.append(cell_clean)
+                elif is_name:
+                    team_content.append(cell_clean)
+                else:
+                    other_content.append(cell_clean)
 
             # Place date in the last column (时间)
             if date_content:
                 result[4] = date_content
 
-            # Distribute non-date content to middle columns (内容、团队、校核)
-            for i, content in enumerate(non_date_content):
-                if i < 3 and content.strip():  # Fill columns 1, 2, 3 (内容、团队、校核)
-                    result[i + 1] = content
+            # Place team content in team column (团队)
+            if team_content:
+                result[2] = "、".join(
+                    team_content
+                )  # Join multiple names with Chinese comma
+
+            # Place other content in content column (内容)
+            if other_content:
+                result[1] = " ".join(other_content)
 
     # For other column counts, use simple distribution
     elif len(data_row) < target_cols:

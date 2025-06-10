@@ -269,14 +269,34 @@ def create_pptx_from_docx(docx_path, output_dir, skip_default_content=False):
         doc = Document(docx_path)
 
         # Create presentation
-        prs = Presentation()
-
-        # Get filename stem for output
+        prs = Presentation()  # Get filename stem for output
         input_filename_stem = os.path.splitext(os.path.basename(docx_path))[0]
         expected_pptx_filename = f"{input_filename_stem}.pptx"
         output_path = os.path.join(output_dir, expected_pptx_filename)
 
         slide_count = 0
+
+        # Find actual title from Word document (look for centered paragraphs)
+        actual_title = None
+        for para in doc.paragraphs:
+            if (
+                para.text.strip() and para.alignment == 1
+            ):  # WD_PARAGRAPH_ALIGNMENT.CENTER
+                actual_title = para.text.strip()
+                logger.info(f"Found centered title in Word document: '{actual_title}'")
+                break
+
+        if not actual_title:
+            # Look for common title keywords
+            for para in doc.paragraphs:
+                text = para.text.strip()
+                if any(
+                    keyword in text
+                    for keyword in ["更新记录", "版本记录", "修订记录", "变更记录"]
+                ):
+                    actual_title = text
+                    logger.info(f"Found title by keyword matching: '{actual_title}'")
+                    break
 
         # Process tables first (each table gets its own slide)
         for table in doc.tables:
@@ -284,10 +304,19 @@ def create_pptx_from_docx(docx_path, output_dir, skip_default_content=False):
             slide = prs.slides.add_slide(slide_layout)
             slide_count += 1
 
-            # Add title
+            # Add title - use actual title from document if found
             title_shape = slide.shapes.title
             if title_shape:
-                title_shape.text = f"表格 {slide_count}"
+                if actual_title:
+                    title_shape.text = actual_title
+                    logger.info(
+                        f"Using actual title for slide {slide_count}: '{actual_title}'"
+                    )
+                else:
+                    title_shape.text = f"表格 {slide_count}"
+                    logger.info(
+                        f"Using default title for slide {slide_count}: '表格 {slide_count}'"
+                    )
 
             # Calculate table dimensions
             rows = len(table.rows)
