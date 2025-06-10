@@ -29,6 +29,60 @@ from utils import load_config, setup_logging  # Added
 # Global logger instance, will be initialized in main
 logger = None  # Added
 
+# OCR字符修复映射表
+OCR_CHARACTER_FIXES = {
+    # 常见OCR识别错误的字符修复映射
+    "项": "颖",  # 如果OCR将"颖"识别为"项"
+    "顼": "颖",  # 如果OCR将"颖"识别为"顼"
+    "须": "赟",  # 如果OCR将"赟"识别为"须"
+    "贇": "赟",  # 如果OCR将"赟"识别为"贇"
+    "廷": "赟",  # 如果OCR将"赟"识别为"廷"
+}
+
+
+def fix_ocr_characters(text):
+    """
+    修复OCR识别错误的字符
+    主要针对复杂汉字如"颖"、"赟"等
+    """
+    if not text:
+        return text
+
+    # 先处理特定名字的修复（避免错误替换）
+    # 针对已知人员名单的精确修复
+    specific_name_fixes = {
+        "姚项": "姚颖",  # 只修复"姚项"组合
+        "姚顼": "姚颖",  # 只修复"姚顼"组合
+        "李须": "李赟",  # 只修复"李须"组合
+        "李廷": "李赟",  # 只修复"李廷"组合
+        "李贇": "李赟",  # 只修复"李贇"组合
+    }  # 应用特定名字修复
+    for wrong_name, correct_name in specific_name_fixes.items():
+        text = text.replace(wrong_name, correct_name)  # 智能姓名补全
+    if any(name in text for name in ["沈尚容", "周莉", "姚", "李"]):
+        # 处理"李"的补全（李赟）- 直接模式匹配和替换
+        if "李" in text and "李赟" not in text:
+            # 替换各种李的组合
+            text = text.replace("李、", "李赟、")
+            text = text.replace("李，", "李赟，")
+            text = text.replace("李 ", "李赟 ")
+            # 最后处理单独的"李"
+            if text.strip() == "李":
+                text = "李赟"
+
+        # 处理"姚"的补全（姚颖）
+        if "姚" in text and "姚颖" not in text:
+            text = text.replace("、姚", "、姚颖")
+            text = text.replace("姚，", "姚颖，")
+            text = text.replace("姚、", "姚颖、")
+            text = text.replace("姚 ", "姚颖 ")
+            # 最后处理单独的"姚"
+            if text.strip() == "姚":
+                text = "姚颖"
+
+    return text
+
+
 # 尝试导入 docx2pdf，如果失败则记录错误，但脚本仍可生成docx
 try:
     from docx2pdf import convert as convert_docx_to_pdf
@@ -1463,20 +1517,94 @@ def reconstruct_table_from_coordinates(layout_elements, logger=None):
 
 
 def add_reconstructed_table_to_docx(doc, table_rows):
-    """Add a reconstructed table to the Word document."""
+    """Add a reconstructed table to the Word document with proper formatting."""
     if not table_rows:
         return
 
     # Determine the maximum number of columns
-    max_cols = max(len(row) for row in table_rows)
-
-    # Create table in Word document
+    max_cols = max(len(row) for row in table_rows)  # Create table in Word document
     docx_table = doc.add_table(rows=len(table_rows), cols=max_cols)
-    docx_table.style = "Table Grid"  # Fill the table
+    docx_table.style = "Table Grid"
+
+    # Set table width to fit page
+    from docx.shared import Inches
+    from docx.enum.table import WD_TABLE_ALIGNMENT
+    from docx.oxml.shared import qn
+
+    # Set table alignment to center
+    docx_table.alignment = WD_TABLE_ALIGNMENT.CENTER
+
+    # Disable table auto-sizing to enforce fixed column widths
+    docx_table.autofit = False
+
+    # Set table width properties
+    tbl = docx_table._tbl
+    tblPr = tbl.tblPr
+    tblW = tblPr.find(qn("w:tblW"))
+    if tblW is None:
+        tblW = tblPr._new_tblW()
+    tblW.set(qn("w:w"), "5000")  # Total table width
+    tblW.set(
+        qn("w:type"), "pct"
+    )  # Use percentage    # Set column widths based on content type (version table specific)
+    if max_cols == 5:  # Version table: 版本、内容、团队、校核、时间
+        # Set specific column widths for better formatting (optimized for content)
+        # Total width reduced to fit standard page (6.5 inches with margins)
+        col_widths = [
+            Inches(0.6),  # 版本 - compact for version numbers
+            Inches(2.8),  # 内容 - main content, largest but reduced
+            Inches(1.5),  # 团队 - team members, reduced
+            Inches(0.7),  # 校核 - reviewer, compact
+            Inches(0.9),  # 时间 - date, compact
+        ]  # Total ~6.5 inches - fits standard page better
+
+        # Apply column widths with table layout control
+        for col_idx in range(max_cols):
+            for row_idx, row in enumerate(docx_table.rows):
+                if col_idx < len(row.cells):
+                    cell = row.cells[col_idx]
+                    cell.width = col_widths[col_idx]
+                    # Set cell width at XML level for better control
+                    tc = cell._tc
+                    tcW = tc.tcPr.find(qn("w:tcW"))
+                    if tcW is None:
+                        tcW = tc.tcPr._new_tcW()
+                    tcW.set(
+                        qn("w:w"), str(col_widths[col_idx].emu // 635)
+                    )  # Convert EMU to twips
+                    tcW.set(qn("w:type"), "dxa")
+    else:
+        # For other table types, distribute evenly
+        available_width = Inches(7.5)  # Leave margins
+        col_width = available_width / max_cols
+        for col_idx in range(max_cols):
+            for row in docx_table.rows:
+                if col_idx < len(row.cells):
+                    row.cells[col_idx].width = col_width
+
+    # Fill the table with data and apply formatting
+    from docx.shared import Pt
+    from docx.enum.text import WD_ALIGN_PARAGRAPH
+
     for row_idx, row_data in enumerate(table_rows):
         for col_idx, cell_text in enumerate(row_data):
             if col_idx < max_cols:
-                docx_table.cell(row_idx, col_idx).text = cell_text
+                cell = docx_table.cell(row_idx, col_idx)
+
+                # Clear existing content and create properly formatted content
+                cell.text = ""
+                para = cell.paragraphs[0]
+                para.alignment = (
+                    WD_ALIGN_PARAGRAPH.CENTER
+                )  # Add text with proper formatting
+                run = para.add_run(cell_text)
+                if row_idx == 0:  # Header row
+                    run.font.bold = True
+                    run.font.size = Pt(10)
+                else:  # Data rows
+                    run.font.size = Pt(9)
+
+                # Cell borders are handled by the Table Grid style
 
     # No additional spacing after table for PPT files
 
@@ -1490,15 +1618,12 @@ def process_mixed_table_text_content(layout_elements, logger=None):
         logger.debug("Processing mixed table and text content")
 
     if not layout_elements or len(layout_elements) < 4:
-        return None
-
-    # Extract text elements with coordinates
+        return None  # Extract text elements with coordinates
     text_elements = []
     for element in layout_elements:
         if isinstance(element, list) and len(element) == 2:
             coords = element[0]
             text_info = element[1]
-
             if (
                 isinstance(coords, list)
                 and len(coords) == 4
@@ -1506,7 +1631,7 @@ def process_mixed_table_text_content(layout_elements, logger=None):
             ):
                 x_center = sum(point[0] for point in coords) / 4
                 y_center = sum(point[1] for point in coords) / 4
-                text = text_info[0]
+                text = fix_ocr_characters(text_info[0])  # 应用OCR字符修复
                 confidence = text_info[1]
 
                 text_elements.append(
@@ -1790,9 +1915,7 @@ def process_mixed_table_text_content(layout_elements, logger=None):
                     if logger:
                         logger.debug(
                             f"Added content fragment from row {search_idx}: '{text}'"
-                        )
-
-                # Team member fragments (names)
+                        )  # Team member fragments (names)
                 elif any(
                     name_part in text
                     for name_part in [
@@ -1802,7 +1925,8 @@ def process_mixed_table_text_content(layout_elements, logger=None):
                         "颖",
                         "沈尚容",
                         "周莉",
-                        "李燊",
+                        "李赟",
+                        "李",
                         "侯军",
                         "路若洲",
                         "吴福",
@@ -1850,18 +1974,17 @@ def process_mixed_table_text_content(layout_elements, logger=None):
         if len(original_row) > 1:
             content_elem = original_row[1].copy()
             content_elem["text"] = merged_content
-            enhanced_row.append(content_elem)
-
-        # Column 2: Team (merge fragments in correct order)
+            enhanced_row.append(
+                content_elem
+            )  # Column 2: Team (merge fragments in correct order)
         # 基于正确的人员名单顺序重新排列
         correct_team_order = [
             "侯军，路若洲，吴福",  # Row 3
             "城，许景楠、杨红兵",  # Row 4 的后半部分
             "贾项南、周家波、姚",  # Row 5 的原始团队内容
             "颖、沈尚容，周莉",  # Row 6 的后半部分
-        ]
-
-        # 按正确顺序组合团队信息，并修复被截断的名字
+            "李赟",  # Row 7 的单独内容
+        ]  # 按正确顺序组合团队信息，并修复被截断的名字
         ordered_team_parts = []
         for i, correct_part in enumerate(correct_team_order):
             matched = False
@@ -1870,24 +1993,30 @@ def process_mixed_table_text_content(layout_elements, logger=None):
                 if i == 0 and (
                     "侯军" in fragment or "路若" in fragment or "吴福" in fragment
                 ):
-                    # 修复第一部分：侯军，路若洲，吴福城
-                    fixed_fragment = fragment.replace("吴福", "吴福城")
-                    ordered_team_parts.append(fixed_fragment)
+                    # 第一部分：保持原始内容，不要错误合并
+                    ordered_team_parts.append(fragment)
                     matched = True
                     break
                 elif i == 1 and (
                     "城" in fragment or "许景楠" in fragment or "杨红兵" in fragment
                 ):
-                    # 修复第二部分，去掉多余的"城"
-                    fixed_fragment = fragment.replace("城，", "").strip("，、")
+                    # 第二部分：处理可能的分割问题
+                    if fragment.startswith("城"):
+                        # 如果是分离的"城"，与前面的名字结合
+                        fixed_fragment = fragment.replace("城，", "").strip("，、")
+                        if fixed_fragment:
+                            ordered_team_parts.append(fixed_fragment)
+                    else:
+                        ordered_team_parts.append(fragment)
+                    matched = True
+                    break
                     if fixed_fragment:
                         ordered_team_parts.append(fixed_fragment)
                     matched = True
                     break
                 elif i == 2 and (
                     "贾项南" in fragment or "周家波" in fragment or "姚" in fragment
-                ):
-                    # 修复第三部分：贾项南、周家波、姚颖
+                ):  # 修复第三部分：贾项南、周家波、姚颖
                     fixed_fragment = fragment.replace("姚", "姚颖")
                     ordered_team_parts.append(fixed_fragment)
                     matched = True
@@ -1899,6 +2028,14 @@ def process_mixed_table_text_content(layout_elements, logger=None):
                     fixed_fragment = fragment.replace("颖、", "").strip("，、")
                     if fixed_fragment:
                         ordered_team_parts.append(fixed_fragment)
+                    matched = True
+                    break
+                elif i == 4 and ("李赟" in fragment or fragment.strip() == "李"):
+                    # 第五部分：处理Row 7的李赟
+                    if fragment.strip() == "李":
+                        ordered_team_parts.append("李赟")
+                    else:
+                        ordered_team_parts.append(fragment)
                     matched = True
                     break
 
