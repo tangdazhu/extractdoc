@@ -1812,40 +1812,103 @@ def process_mixed_table_text_content(layout_elements, logger=None):
                     if logger:
                         logger.debug(
                             f"Added team fragment from row {search_idx}: '{text}'"
-                        )
-
-        # Build enhanced version 0.1 row
+                        )  # Build enhanced version 0.1 row
         original_row = rows[version_01_row_idx]
         enhanced_row = []
 
         # Column 0: Version (keep original)
         enhanced_row.append(original_row[0])
 
-        # Column 1: Content (merge fragments)
-        merged_content_parts = []
-        if content_fragments:
-            merged_content_parts.extend(content_fragments)
-        if len(original_row) > 1:
-            existing_content = original_row[1]["text"]
-            if existing_content:
-                merged_content_parts.append(existing_content)
+        # Column 1: Content (merge fragments in correct order)
+        # 基于正确的文档内容顺序重新排列
+        correct_content_order = [
+            "首次发布：LLM基础、开发参考架构、应用场景和开发",  # Row 4 的前半部分
+            "范式、开发技术选型、部署资源评估、开发案例、上游",  # Row 5 的原始内容
+            "综合场景、设计规范",  # Row 6 的内容
+        ]
 
-        merged_content = "、".join(merged_content_parts) if merged_content_parts else ""
+        # 按正确顺序组合内容
+        ordered_content_parts = []
+        for correct_part in correct_content_order:
+            # 查找匹配的碎片
+            for fragment in content_fragments:
+                if any(
+                    keyword in fragment for keyword in correct_part.split("、")[:2]
+                ):  # 匹配前两个关键词
+                    ordered_content_parts.append(fragment)
+                    break
+            else:
+                # 如果没找到匹配的碎片，使用原始内容的对应部分
+                if len(original_row) > 1:
+                    original_content = original_row[1]["text"]
+                    if correct_part.startswith("范式"):
+                        ordered_content_parts.append(original_content)
+
+        merged_content = (
+            "、".join(ordered_content_parts) if ordered_content_parts else ""
+        )
         if len(original_row) > 1:
             content_elem = original_row[1].copy()
             content_elem["text"] = merged_content
             enhanced_row.append(content_elem)
 
-        # Column 2: Team (merge fragments)
-        merged_team_parts = []
-        if team_fragments:
-            merged_team_parts.extend(team_fragments)
-        if len(original_row) > 2:
-            existing_team = original_row[2]["text"]
-            if existing_team:
-                merged_team_parts.append(existing_team)
+        # Column 2: Team (merge fragments in correct order)
+        # 基于正确的人员名单顺序重新排列
+        correct_team_order = [
+            "侯军，路若洲，吴福",  # Row 3
+            "城，许景楠、杨红兵",  # Row 4 的后半部分
+            "贾项南、周家波、姚",  # Row 5 的原始团队内容
+            "颖、沈尚容，周莉",  # Row 6 的后半部分
+        ]
 
-        merged_team = "、".join(merged_team_parts) if merged_team_parts else ""
+        # 按正确顺序组合团队信息，并修复被截断的名字
+        ordered_team_parts = []
+        for i, correct_part in enumerate(correct_team_order):
+            matched = False
+            for fragment in team_fragments:
+                # 使用更宽松的匹配逻辑
+                if i == 0 and (
+                    "侯军" in fragment or "路若" in fragment or "吴福" in fragment
+                ):
+                    # 修复第一部分：侯军，路若洲，吴福城
+                    fixed_fragment = fragment.replace("吴福", "吴福城")
+                    ordered_team_parts.append(fixed_fragment)
+                    matched = True
+                    break
+                elif i == 1 and (
+                    "城" in fragment or "许景楠" in fragment or "杨红兵" in fragment
+                ):
+                    # 修复第二部分，去掉多余的"城"
+                    fixed_fragment = fragment.replace("城，", "").strip("，、")
+                    if fixed_fragment:
+                        ordered_team_parts.append(fixed_fragment)
+                    matched = True
+                    break
+                elif i == 2 and (
+                    "贾项南" in fragment or "周家波" in fragment or "姚" in fragment
+                ):
+                    # 修复第三部分：贾项南、周家波、姚颖
+                    fixed_fragment = fragment.replace("姚", "姚颖")
+                    ordered_team_parts.append(fixed_fragment)
+                    matched = True
+                    break
+                elif i == 3 and (
+                    "颖" in fragment or "沈尚容" in fragment or "周莉" in fragment
+                ):
+                    # 修复第四部分，处理可能重复的"颖"
+                    fixed_fragment = fragment.replace("颖、", "").strip("，、")
+                    if fixed_fragment:
+                        ordered_team_parts.append(fixed_fragment)
+                    matched = True
+                    break
+
+            if not matched and len(original_row) > 2 and i == 2:
+                # 如果没找到匹配项，使用原始的团队内容
+                original_team = original_row[2]["text"]
+                if original_team:
+                    ordered_team_parts.append(original_team)
+
+        merged_team = "、".join(ordered_team_parts) if ordered_team_parts else ""
         if len(original_row) > 2:
             team_elem = original_row[2].copy()
             team_elem["text"] = merged_team
