@@ -302,43 +302,103 @@ lsof -ti:8000 | xargs kill    # Linux/macOS
     python manage.py runserver
     ```
 
-## 主要依赖库
+# OCR and Table Extraction Script
 
-### 核心框架
-- `Django==5.2.1`: Web框架
+This project is a Python script for extracting text and tables from images using OCR.
 
-### OCR和图像处理
-- `paddleocr==2.7.3`: OCR文字识别
-- `pillow==10.3.0`: 图像处理
-- `numpy==1.26.4`: 数值计算支持
-- `beautifulsoup4==4.12.3`: HTML解析
+## Project Structure
 
-### PDF处理
-- `PyMuPDF>=1.23.0`: PDF文本提取和操作 (fitz)
-- `pdfplumber>=0.10.0`: PDF表格提取 (PDF→Excel主要方法)
-- `pdf2docx>=0.5.0`: PDF转Word
-- `PyPDF2==3.0.1`: PDF合并和分割
+```
+extract_doc/
+├── config/
+│   ├── __init__.py
+│   ├── patterns.py
+│   └── settings.py
+├── core/
+│   ├── __init__.py
+│   ├── layout_analyzer.py
+│   ├── ocr_engine.py
+│   ├── table_detector.py
+│   └── text_processor.py
+├── exporters/
+│   ├── __init__.py
+│   ├── base_exporter.py
+│   ├── docx_exporter.py
+│   └── pdf_exporter.py
+├── handlers/
+│   ├── __init__.py
+│   ├── image_specific.py
+│   └── special_tables.py
+├── models/                 # Contains OCR/detection models
+│   ├── det_model_ch/
+│   ├── layout_model/
+│   ├── rec_model_ch/
+│   └── table_model_ch/
+├── output/                 # Default output directory for extracted files
+├── processors/
+│   ├── __init__.py
+│   ├── content_merger.py
+│   ├── table_processor.py
+│   └── text_formatter.py
+├── test/
+│   ├── test_data/          # Sample images for testing
+│   └── test_output/        # Output from test runs
+├── utils/
+│   ├── __init__.py
+│   ├── config.py
+│   ├── coordinate_utils.py
+│   ├── text_utils.py
+│   └── validation.py
+├── app.log                 # Log file
+├── bilibili_downloader.py
+├── comprehensive_diagnosis.py
+├── config.yaml             # Configuration file for the script
+├── correct_function.py
+├── extract_text_from_images_original.py # Original monolithic script
+├── extract_text_from_images.py          # Main modular script
+├── extract_video_snapshots.py
+├── extracted_text.docx
+├── install_dependencies.py
+├── PROJECT_REBRANDING.md
+├── pytest.ini
+├── README.md
+├── REFACTORING_COMPLETION_REPORT.md
+├── REFACTORING_PLAN.md
+├── REFACTORING_VIEWS.md
+├── requirements.txt
+├── run_extraction.bat
+├── start_project.bat
+└── VERSION.md
+```
 
-### Office文档处理
-- `python-docx==1.1.2`: Word文档生成和操作
-- `python-pptx>=0.6.21`: PowerPoint演示文稿创建
-- `openpyxl==3.1.5`: Excel文件读写
-- `docx2pdf==0.1.8`: Word转PDF (需要Office或LibreOffice)
-- `comtypes==1.4.11`: Windows COM接口 (仅Windows)
+## Usage
 
-### PDF生成和报告
-- `reportlab==4.4.1`: PDF生成 (TXT→PDF)
+1.  **Install dependencies**:
+    ```bash
+    pip install -r requirements.txt
+    ```
+2.  **Configure**:
+    - Modify `config.yaml` to set paths for models, input/output directories, etc.
+3.  **Run the script**:
+    ```bash
+    python extract_text_from_images.py <image_path_or_directory>
+    ```
 
-### 配置和解析
-- `PyYAML==6.0.1`: YAML配置文件解析
+## Key Modules
 
-### 测试依赖 (开发环境)
-- `pytest>=7.4.0`: 测试框架
-- `pytest-django>=4.5.2`: Django测试集成
+-   `extract_text_from_images.py`: Main script to orchestrate the OCR process.
+-   `core/ocr_engine.py`: Handles the OCR operations using PaddleOCR.
+-   `core/table_detector.py`: Detects tables in the image.
+-   `core/layout_analyzer.py`: Analyzes the layout of the document.
+-   `core/text_processor.py`: Processes the extracted text.
+-   `processors/table_processor.py`: Processes detected tables.
+-   `exporters/docx_exporter.py`: Exports the extracted content to a DOCX file.
+-   `utils/`: Contains utility functions for configuration, text manipulation, etc.
+-   `config/`: Contains configuration settings and patterns.
 
-### 外部依赖
-- `LibreOffice`: Office文档转换 (可选，需单独安装)
-- `Microsoft Office`: Windows原生Office支持 (可选)
+## Logging
+
+The script logs its operations to `app.log`. This includes detailed information about the extraction process, errors, and warnings.
 
 ## 注意事项与已知问题
 
