@@ -25,6 +25,7 @@ import traceback  # 新增导入 for detailed exception logging
 import logging  # 新增导入
 import time  # ADDED IMPORT
 from docx import Document
+from docx.enum.text import WD_BREAK
 from docx.oxml import OxmlElement  # For adding content from sub-documents
 from docx.oxml.ns import qn
 from pathlib import Path  # 新增
@@ -48,6 +49,7 @@ from .libreoffice_converter import (
 from .word_to_pdf_converter import (
     convert_word_to_pdf,
 )  # ADDED: Import for the new Word to PDF converter
+from .image_to_pptx import copy_images_to_pptx  # 导入直接图片转PPTX函数
 from django.core.exceptions import PermissionDenied  # For security checks
 from .speech_processor import (
     transcribe_audio_dashscope,
@@ -279,33 +281,6 @@ def file_to_pdf_view(request):
     username = request.user.username
     today_date_str = datetime.now().strftime("%Y%m%d")
 
-    uploaded_files_info_from_frontend = request.POST.getlist("uploaded_files_info[]")
-    if not uploaded_files_info_from_frontend:
-        logger.warning(
-            f"file_to_pdf_view: No uploaded_files_info provided. RequestID: {request_id}"
-        )
-        # ADDED duration_seconds to error response
-        return format_error_response(
-            message="没有提供文件信息。",
-            request_id=request_id,
-            duration_seconds=round(time.perf_counter() - start_time_view, 2),
-        )
-
-    try:
-        parsed_files_info = [
-            json.loads(info) for info in uploaded_files_info_from_frontend
-        ]
-    except json.JSONDecodeError as e:
-        logger.error(
-            f"file_to_pdf_view: JSONDecodeError parsing uploaded_files_info: {e}. RequestID: {request_id}"
-        )
-        # ADDED duration_seconds to error response
-        return format_error_response(
-            message=f"解析文件信息时出错: {e}",
-            request_id=request_id,
-            duration_seconds=round(time.perf_counter() - start_time_view, 2),
-        )
-
     user_upload_dir, user_converted_dir = ensure_user_directories(
         username, today_date_str
     )
@@ -316,10 +291,68 @@ def file_to_pdf_view(request):
         # ADDED duration_seconds to error response
         return format_error_response(
             message="无法创建用户目录，请联系管理员。",
+            merge_output=request.POST.get("merge_output", "false") == "true",
             request_id=request_id,
             duration_seconds=round(time.perf_counter() - start_time_view, 2),
         )
 
+    # robust 文件上传处理逻辑，和 img_to_file_view 保持一致，保证 uploaded_files_info 一定被定义
+    uploaded_files_info = []
+    if request.FILES.getlist("images"):
+        for uploaded_file_obj in request.FILES.getlist("images"):
+            temp_input_path, original_filename, safe_filename = save_uploaded_file(
+                uploaded_file_obj, user_upload_dir, request_id
+            )
+            if temp_input_path and safe_filename:
+                uploaded_files_info.append(
+                    {
+                        "name": original_filename,
+                        "path": temp_input_path,
+                        "safe_original_filename": safe_filename,
+                        "status": "uploaded",
+                    }
+                )
+            else:
+                uploaded_files_info.append(
+                    {
+                        "name": getattr(uploaded_file_obj, "name", "未知文件"),
+                        "path": None,
+                        "safe_original_filename": None,
+                        "status": "error",
+                    }
+                )
+    else:
+        uploaded_files_info_from_frontend = request.POST.getlist(
+            "uploaded_files_info[]"
+        )
+        if uploaded_files_info_from_frontend:
+            try:
+                parsed_files_info = [
+                    json.loads(info) for info in uploaded_files_info_from_frontend
+                ]
+            except json.JSONDecodeError as e:
+                logger.error(
+                    f"file_to_pdf_view: JSONDecodeError parsing uploaded_files_info: {e}. RequestID: {request_id}"
+                )
+                return format_error_response(
+                    message=f"解析文件信息时出错: {e}",
+                    merge_output=request.POST.get("merge_output", "false") == "true",
+                    request_id=request_id,
+                    duration_seconds=round(time.perf_counter() - start_time_view, 2),
+                )
+            uploaded_files_info = parsed_files_info
+        else:
+            logger.warning(
+                f"file_to_pdf_view: No uploaded_files_info provided. RequestID: {request_id}"
+            )
+            return format_error_response(
+                message="没有提供文件信息。",
+                merge_output=request.POST.get("merge_output", "false") == "true",
+                request_id=request_id,
+                duration_seconds=round(time.perf_counter() - start_time_view, 2),
+            )
+
+    # 其余参数和逻辑
     file_results = []  # INITIALIZED
     errors_view = []  # INITIALIZED
     temp_files_to_clean_view = []
@@ -363,7 +396,7 @@ def file_to_pdf_view(request):
             f"file_to_pdf_view: Excel to PDF mode selected. RequestID: {request_id}"
         )
     elif mode == "ppt_to_pdf_mode":
-        conversion_func = ppt_pdf_converter.convert_ppt_to_pdf
+        conversion_func = ppt_pdf_converter.convert_pptx_to_pdf
         target_extension = ".pdf"
         logger.info(
             f"file_to_pdf_view: PPT to PDF mode selected. RequestID: {request_id}"
@@ -389,7 +422,7 @@ def file_to_pdf_view(request):
     converted_pdf_paths_for_merge = []
 
     if not errors_view:
-        for file_info in parsed_files_info:
+        for file_info in uploaded_files_info:
             original_filename = file_info.get("name", f"unknown_file_{request_id}")
             temp_input_path = file_info.get("path")
 
@@ -425,20 +458,33 @@ def file_to_pdf_view(request):
                     logger.info(
                         f"file_to_pdf_view: Attempting conversion for {original_filename} to {output_filepath_server} using mode {mode}. RequestID: {request_id}"
                     )
-                    conversion_func(temp_input_path, output_filepath_server)
+                    # 用实际的转换函数返回值
+                    pdf_success, actual_pdf_path, _ = convert_word_to_pdf(
+                        temp_input_path, output_filepath_server
+                    )
+                    if (
+                        not pdf_success
+                        or not actual_pdf_path
+                        or not os.path.exists(actual_pdf_path)
+                    ):
+                        logger.error(
+                            f"PDF conversion did not produce expected file: {actual_pdf_path}"
+                        )
+                        errors_view.append(f"PDF转换未生成目标文件: {actual_pdf_path}")
+                        continue
                     logger.info(
-                        f"file_to_pdf_view: Conversion successful for {original_filename}. Output: {output_filepath_server}. RequestID: {request_id}"
+                        f"file_to_pdf_view: Conversion successful for {original_filename}. Output: {actual_pdf_path}. RequestID: {request_id}"
                     )
                     file_results.append(
                         {
                             "original_name": original_filename,
-                            "converted_name": output_filename_display,
+                            "converted_name": os.path.basename(actual_pdf_path),
                             "download_url": reverse(
                                 "converter:download_converted_file",
                                 args=[
                                     username,
                                     today_date_str,
-                                    output_filename_display,
+                                    os.path.basename(actual_pdf_path),
                                 ],
                             ),
                             "status": "success",
@@ -446,7 +492,7 @@ def file_to_pdf_view(request):
                         }
                     )
                     if merge_output_flag and target_extension == ".pdf":
-                        converted_pdf_paths_for_merge.append(output_filepath_server)
+                        converted_pdf_paths_for_merge.append(actual_pdf_path)
                 except NotImplementedError as e_ni:
                     logger.error(
                         f"file_to_pdf_view: NotImplementedError for {original_filename}: {e_ni}. RequestID: {request_id}"
@@ -483,11 +529,27 @@ def file_to_pdf_view(request):
                 f"file_to_pdf_view: PyPDF2 not available, cannot merge PDFs. RequestID: {request_id}"
             )
             errors_view.append("PDF合并功能不可用 (缺少PyPDF2库)。单个文件已转换。")
-        elif len(converted_pdf_paths_for_merge) < 1:
-            logger.info(
-                f"file_to_pdf_view: Less than 1 PDF to merge, skipping merge. RequestID: {request_id}"
+        elif len(converted_pdf_paths_for_merge) == 1:
+            # 只有一个文件，直接用它作为合并输出，不再复制
+            single_pdf = converted_pdf_paths_for_merge[0]
+            original_name = uploaded_files_info[0].get(
+                "name", os.path.basename(single_pdf)
             )
-        else:
+            file_results = [
+                {
+                    "original_name": original_name,
+                    "converted_name": os.path.basename(single_pdf),
+                    "download_url": reverse(
+                        "converter:download_converted_file",
+                        args=[username, today_date_str, os.path.basename(single_pdf)],
+                    ),
+                    "status": "success",
+                    "message": "仅有一个文件，已直接作为合并结果输出。",
+                }
+            ]
+            # 不要清理 single_pdf（最终输出文件）
+            # temp_files_to_clean_view.append(single_pdf)
+        elif len(converted_pdf_paths_for_merge) > 1:
             merge_success = False
             merged_filename_display = f"{output_filename_base}_{request_id}_merged.pdf"
             merged_filepath_server = os.path.join(
@@ -527,10 +589,10 @@ def file_to_pdf_view(request):
                     # Create a descriptive name showing source files
                     source_files = [
                         file_info.get("name", "unknown")
-                        for file_info in parsed_files_info[:3]
+                        for file_info in uploaded_files_info[:3]
                     ]  # Show up to 3 file names
-                    if len(parsed_files_info) > 3:
-                        source_files.append(f"等{len(parsed_files_info)}个文件")
+                    if len(uploaded_files_info) > 3:
+                        source_files.append(f"等{len(uploaded_files_info)}个文件")
                     source_names = "、".join(source_files)
                     original_name_display = f"合并PDF (来自: {source_names})"
 
@@ -550,6 +612,8 @@ def file_to_pdf_view(request):
                             "message": f"成功合并 {len(converted_pdf_paths_for_merge)} 个文件为一个PDF。",
                         }
                     ]
+                    # 不要清理 merged_filepath_server（最终输出文件）
+                    # temp_files_to_clean_view.append(merged_filepath_server)
                 else:
                     logger.warning(
                         f"file_to_pdf_view: No pages were added to the merger. Merged file not created. RequestID: {request_id}"
@@ -567,13 +631,11 @@ def file_to_pdf_view(request):
 
             if merge_success:
                 for pdf_path in converted_pdf_paths_for_merge:
-                    temp_files_to_clean_view.append({"path": pdf_path, "type": "file"})
+                    temp_files_to_clean_view.append(pdf_path)
 
-    for file_info in parsed_files_info:
+    for file_info in uploaded_files_info:
         if file_info.get("path") and os.path.exists(file_info.get("path")):
-            temp_files_to_clean_view.append(
-                {"path": file_info.get("path"), "type": "file"}
-            )
+            temp_files_to_clean_view.append(file_info.get("path"))
 
     if temp_files_to_clean_view:
         cleanup_temp_files(temp_files_to_clean_view, request_id)
@@ -596,6 +658,7 @@ def file_to_pdf_view(request):
         )
         return format_error_response(
             message="; ".join(errors_view),
+            merge_output=merge_output_flag,
             request_id=request_id,
             duration_seconds=duration_seconds_view,
         )
@@ -672,38 +735,62 @@ def img_to_file_view(request):
     temp_files_to_delete_final = []
 
     uploaded_files_info = []
-    if not request.FILES.getlist("images"):
-        logger.warning(f"img_to_file_view: No files uploaded. RequestID: {request_id}")
-        return format_error_response(
-            message="没有上传文件。", merge_output=merge_output, request_id=request_id
-        )
-
-    for uploaded_file_obj in request.FILES.getlist("images"):
-        temp_input_path, original_filename, safe_filename = save_uploaded_file(
-            uploaded_file_obj, user_upload_dir, request_id
-        )
-        if temp_input_path and safe_filename:
-            uploaded_files_info.append(
-                {
-                    "name": original_filename,
-                    "path": temp_input_path,
-                    "safe_original_filename": safe_filename,
-                    "status": "uploaded",
-                }
+    if request.FILES.getlist("images"):
+        for uploaded_file_obj in request.FILES.getlist("images"):
+            logger.info(
+                f"Processing upload: {getattr(uploaded_file_obj, 'name', 'no name')}"
             )
+            temp_input_path, original_filename, safe_filename = save_uploaded_file(
+                uploaded_file_obj, user_upload_dir, request_id
+            )
+            logger.info(f"Saved to: {temp_input_path}")
+            if temp_input_path and safe_filename:
+                uploaded_files_info.append(
+                    {
+                        "name": original_filename,
+                        "path": temp_input_path,
+                        "safe_original_filename": safe_filename,
+                        "status": "uploaded",
+                    }
+                )
+            else:
+                uploaded_files_info.append(
+                    {
+                        "name": getattr(uploaded_file_obj, "name", "未知文件"),
+                        "path": None,
+                        "safe_original_filename": None,
+                        "status": "error",
+                    }
+                )
+    else:
+        uploaded_files_info_from_frontend = request.POST.getlist(
+            "uploaded_files_info[]"
+        )
+        if uploaded_files_info_from_frontend:
+            try:
+                parsed_files_info = [
+                    json.loads(info) for info in uploaded_files_info_from_frontend
+                ]
+            except json.JSONDecodeError as e:
+                logger.error(
+                    f"file_to_pdf_view: JSONDecodeError parsing uploaded_files_info: {e}. RequestID: {request_id}"
+                )
+                return format_error_response(
+                    message=f"解析文件信息时出错: {e}",
+                    merge_output=request.POST.get("merge_output", "false") == "true",
+                    request_id=request_id,
+                    duration_seconds=round(time.perf_counter() - start_time_view, 2),
+                )
+            uploaded_files_info = parsed_files_info
         else:
-            failed_original_name = (
-                original_filename if original_filename else "未知文件"
+            logger.warning(
+                f"file_to_pdf_view: No uploaded_files_info provided. RequestID: {request_id}"
             )
-            logger.error(
-                f"img_to_file_view: Failed to save uploaded file: {failed_original_name}. RequestID: {request_id}"
-            )
-            processed_files_final.append(
-                {
-                    "original_name": failed_original_name,
-                    "status": "error",
-                    "message": f'文件 "{failed_original_name}" 上传保存失败。',
-                }
+            return format_error_response(
+                message="没有提供文件信息。",
+                merge_output=request.POST.get("merge_output", "false") == "true",
+                request_id=request_id,
+                duration_seconds=round(time.perf_counter() - start_time_view, 2),
             )
 
     if not uploaded_files_info:
@@ -723,6 +810,50 @@ def img_to_file_view(request):
             merge_output=merge_output,
             request_id=request_id,
         )
+
+    # 直接插图逻辑提前，确保优先分支
+    direct_image_to_ppt = (
+        request.POST.get("direct_image_to_ppt", "false").lower() == "true"
+    )
+    if output_format == "pptx" and direct_image_to_ppt:
+        image_paths = [
+            item["path"] for item in uploaded_files_info if os.path.exists(item["path"])
+        ]
+        if not image_paths:
+            return format_error_response(
+                message="没有可用的图片文件用于PPTX生成。",
+                merge_output=merge_output,
+                request_id=request_id,
+            )
+        pptx_filename = f"images_{request_id}.pptx"
+        pptx_path = os.path.join(user_converted_dir, pptx_filename)
+        try:
+            copy_images_to_pptx(image_paths, pptx_path)
+            processed_files_final = [
+                {
+                    "original_name": f"批量图片转PPTX ({len(image_paths)}张)",
+                    "converted_name": pptx_filename,
+                    "download_url": reverse(
+                        "converter:download_converted_file",
+                        args=[request.user.username, today_date_str, pptx_filename],
+                    ),
+                    "status": "success",
+                    "message": "图片已直接插入PPT。",
+                }
+            ]
+            cleanup_temp_files(image_paths, request_id)
+            return format_json_response(
+                results=processed_files_final,
+                merge_output=merge_output,
+                request_id=request_id,
+            )
+        except Exception as e:
+            logger.error(f"图片直接插入PPTX失败: {e}", exc_info=True)
+            return format_error_response(
+                message=f"图片直接插入PPTX失败: {e}",
+                merge_output=merge_output,
+                request_id=request_id,
+            )
 
     # --- Core Img to File conversion logic (formerly _handle_img_to_file) ---
     img_script_results, script_created_files = process_images_to_files(
@@ -785,25 +916,71 @@ def img_to_file_view(request):
                 user_converted_dir, final_merged_docx_filename
             )
             try:
-                if len(script_created_files) > 0:  # Ensure there are files to merge
-                    master_doc = Document(script_created_files[0]["path"])
-                    for doc_info in script_created_files[1:]:
-                        sub_doc = Document(doc_info["path"])
-                        master_doc.add_page_break()
-                        append_document(sub_doc, master_doc)
-                    master_doc.save(final_merged_docx_path)
-                    logger.info(
-                        f"img_to_file_view: Merged {len(script_created_files)} DOCX files to {final_merged_docx_path}. RequestID: {request_id}"
-                    )
-                    temp_files_to_delete_final.extend(
-                        [
-                            item["path"]
-                            for item in (script_created_files or [])
-                            if isinstance(item, dict) and "path" in item
-                        ]
+                # 合并前检查所有待合并文件是否存在
+                missing_files = [
+                    f["path"]
+                    for f in script_created_files
+                    if not os.path.exists(f["path"])
+                ]
+                if missing_files:
+                    logger.error(f"以下中间DOCX文件不存在，无法合并: {missing_files}")
+                    raise FileNotFoundError(f"中间DOCX文件缺失: {missing_files}")
+                master_doc = Document(script_created_files[0]["path"])
+                for idx, doc_info in enumerate(script_created_files[1:], start=1):
+                    sub_doc = Document(doc_info["path"])
+                    append_document(sub_doc, master_doc)
+                    # 只在不是最后一个子文档后插入分页符
+                    if idx < len(script_created_files) - 1:
+                        para = master_doc.add_paragraph()
+                        para.add_run().add_break(break_type=WD_BREAK.PAGE)
+                master_doc.save(final_merged_docx_path)
+                logger.info(
+                    f"img_to_file_view: Merged {len(script_created_files)} DOCX files to {final_merged_docx_path}. RequestID: {request_id}"
+                )
+                temp_files_to_delete_final.extend(
+                    [
+                        item["path"]
+                        for item in (script_created_files or [])
+                        if isinstance(item, dict) and "path" in item
+                    ]
+                )
+
+                if output_format == "docx":
+                    # Create a descriptive name showing source files
+                    source_files = [
+                        item["name"] for item in uploaded_files_info[:3]
+                    ]  # Show up to 3 file names
+                    if len(uploaded_files_info) > 3:
+                        source_files.append(f"等{len(uploaded_files_info)}个文件")
+                    source_names = "、".join(source_files)
+                    original_name_display = f"合并文档 (来自: {source_names})"
+
+                    processed_files_final = [
+                        {
+                            "original_name": original_name_display,
+                            "converted_name": final_merged_docx_filename,
+                            "download_url": reverse(
+                                "converter:download_converted_file",
+                                args=[
+                                    request.user.username,
+                                    today_date_str,
+                                    final_merged_docx_filename,
+                                ],
+                            ),
+                            "status": "success",
+                            "message": "图像已成功合并为Word文档。",
+                        }
+                    ]
+                elif output_format == "pdf":
+                    final_merged_pdf_filename = f"{merged_base_name}.pdf"
+                    final_merged_pdf_path = os.path.join(
+                        user_converted_dir, final_merged_pdf_filename
                     )
 
-                    if output_format == "docx":
+                    pdf_success, pdf_path_or_msg, _ = convert_word_to_pdf(
+                        final_merged_docx_path, final_merged_pdf_path
+                    )
+                    if pdf_success and os.path.exists(final_merged_pdf_path):
                         # Create a descriptive name showing source files
                         source_files = [
                             item["name"] for item in uploaded_files_info[:3]
@@ -811,147 +988,108 @@ def img_to_file_view(request):
                         if len(uploaded_files_info) > 3:
                             source_files.append(f"等{len(uploaded_files_info)}个文件")
                         source_names = "、".join(source_files)
-                        original_name_display = f"合并文档 (来自: {source_names})"
+                        original_name_display = f"合并PDF (来自: {source_names})"
 
                         processed_files_final = [
                             {
                                 "original_name": original_name_display,
-                                "converted_name": final_merged_docx_filename,
+                                "converted_name": final_merged_pdf_filename,
                                 "download_url": reverse(
                                     "converter:download_converted_file",
                                     args=[
                                         request.user.username,
                                         today_date_str,
-                                        final_merged_docx_filename,
+                                        final_merged_pdf_filename,
                                     ],
                                 ),
                                 "status": "success",
-                                "message": "图像已成功合并为Word文档。",
+                                "message": "图像成功合并到Word并转换为PDF。",
                             }
                         ]
-                    elif output_format == "pdf":
-                        final_merged_pdf_filename = f"{merged_base_name}.pdf"
-                        final_merged_pdf_path = os.path.join(
-                            user_converted_dir, final_merged_pdf_filename
+                        temp_files_to_delete_final.append(final_merged_docx_path)
+                    else:
+                        processed_files_final = [
+                            {
+                                "original_name": "图像合并与PDF转换",
+                                "status": "error",
+                                "message": pdf_path_or_msg
+                                or "无法将合并的Word文档转换为PDF。",
+                            }
+                        ]
+                        # MODIFIED: Do not delete intermediate merged DOCX if output is PPTX for debugging
+                        # Temporarily disable cleanup to inspect the merged DOCX file
+                        # if output_format != 'pptx':                            #     temp_files_to_delete_final.append(final_merged_docx_path)
+                elif (
+                    output_format == "pptx"
+                ):  # New: Handle PPTX output for merged files
+                    final_merged_pptx_filename = f"{merged_base_name}.pptx"
+                    final_merged_pptx_path = os.path.join(
+                        user_converted_dir, final_merged_pptx_filename
+                    )
+                    pptx_success, pptx_path_or_msg, _ = (
+                        convert_docx_to_pptx_libreoffice(
+                            final_merged_docx_path,
+                            user_converted_dir,
+                            skip_default_content=True,
                         )
+                    )
 
-                        pdf_success, pdf_path_or_msg, _ = convert_word_to_pdf(
-                            final_merged_docx_path, final_merged_pdf_path
-                        )
-                        if pdf_success and os.path.exists(final_merged_pdf_path):
-                            # Create a descriptive name showing source files
-                            source_files = [
-                                item["name"] for item in uploaded_files_info[:3]
-                            ]  # Show up to 3 file names
-                            if len(uploaded_files_info) > 3:
-                                source_files.append(
-                                    f"等{len(uploaded_files_info)}个文件"
-                                )
-                            source_names = "、".join(source_files)
-                            original_name_display = f"合并PDF (来自: {source_names})"
+                    if (
+                        pptx_success
+                        and pptx_path_or_msg
+                        and os.path.exists(pptx_path_or_msg)
+                    ):
+                        # pptx_path_or_msg from libreoffice converter is the actual path of the created file (e.g., user_converted_dir/merged_images_requestid.pptx)
+                        # We need to rename it to final_merged_pptx_path if it's different (it should be if libreoffice names it based on docx stem)
+                        if pptx_path_or_msg != final_merged_pptx_path:
+                            if os.path.exists(final_merged_pptx_path):
+                                os.remove(
+                                    final_merged_pptx_path
+                                )  # Remove if somehow exists
+                            shutil.move(pptx_path_or_msg, final_merged_pptx_path)
 
-                            processed_files_final = [
-                                {
-                                    "original_name": original_name_display,
-                                    "converted_name": final_merged_pdf_filename,
-                                    "download_url": reverse(
-                                        "converter:download_converted_file",
-                                        args=[
-                                            request.user.username,
-                                            today_date_str,
-                                            final_merged_pdf_filename,
-                                        ],
-                                    ),
-                                    "status": "success",
-                                    "message": "图像成功合并到Word并转换为PDF。",
-                                }
-                            ]
-                            temp_files_to_delete_final.append(final_merged_docx_path)
-                        else:
-                            processed_files_final = [
-                                {
-                                    "original_name": "图像合并与PDF转换",
-                                    "status": "error",
-                                    "message": pdf_path_or_msg
-                                    or "无法将合并的Word文档转换为PDF。",
-                                }
-                            ]
-                            # MODIFIED: Do not delete intermediate merged DOCX if output is PPTX for debugging
-                            # Temporarily disable cleanup to inspect the merged DOCX file
-                            # if output_format != 'pptx':                            #     temp_files_to_delete_final.append(final_merged_docx_path)
-                    elif (
-                        output_format == "pptx"
-                    ):  # New: Handle PPTX output for merged files
-                        final_merged_pptx_filename = f"{merged_base_name}.pptx"
-                        final_merged_pptx_path = os.path.join(
-                            user_converted_dir, final_merged_pptx_filename
-                        )
-                        pptx_success, pptx_path_or_msg, _ = (
-                            convert_docx_to_pptx_libreoffice(
-                                final_merged_docx_path,
-                                user_converted_dir,
-                                skip_default_content=True,
-                            )
-                        )
+                        # Create a descriptive name showing source files
+                        source_files = [
+                            item["name"] for item in uploaded_files_info[:3]
+                        ]  # Show up to 3 file names
+                        if len(uploaded_files_info) > 3:
+                            source_files.append(f"等{len(uploaded_files_info)}个文件")
+                        source_names = "、".join(source_files)
+                        original_name_display = f"合并PPTX (来自: {source_names})"
 
-                        if (
-                            pptx_success
-                            and pptx_path_or_msg
-                            and os.path.exists(pptx_path_or_msg)
-                        ):
-                            # pptx_path_or_msg from libreoffice converter is the actual path of the created file (e.g., user_converted_dir/merged_images_requestid.pptx)
-                            # We need to rename it to final_merged_pptx_path if it's different (it should be if libreoffice names it based on docx stem)
-                            if pptx_path_or_msg != final_merged_pptx_path:
-                                if os.path.exists(final_merged_pptx_path):
-                                    os.remove(
-                                        final_merged_pptx_path
-                                    )  # Remove if somehow exists
-                                shutil.move(pptx_path_or_msg, final_merged_pptx_path)
-
-                            # Create a descriptive name showing source files
-                            source_files = [
-                                item["name"] for item in uploaded_files_info[:3]
-                            ]  # Show up to 3 file names
-                            if len(uploaded_files_info) > 3:
-                                source_files.append(
-                                    f"等{len(uploaded_files_info)}个文件"
-                                )
-                            source_names = "、".join(source_files)
-                            original_name_display = f"合并PPTX (来自: {source_names})"
-
-                            processed_files_final = [
-                                {
-                                    "original_name": original_name_display,
-                                    "converted_name": final_merged_pptx_filename,
-                                    "download_url": reverse(
-                                        "converter:download_converted_file",
-                                        args=[
-                                            request.user.username,
-                                            today_date_str,
-                                            final_merged_pptx_filename,
-                                        ],
-                                    ),
-                                    "status": "success",
-                                    "message": "图像成功合并到Word并转换为PPTX。",
-                                }
-                            ]
-                            # MODIFIED: Do not delete intermediate merged DOCX if output is PPTX for debugging
-                            # Temporarily disable cleanup to inspect the merged DOCX file
-                            # if output_format != 'pptx':
-                            #     temp_files_to_delete_final.append(final_merged_docx_path)
-                        else:
-                            processed_files_final = [
-                                {
-                                    "original_name": "图像合并与PPTX转换",
-                                    "status": "error",
-                                    "message": pptx_path_or_msg
-                                    or "无法将合并的Word文档转换为PPTX。",
-                                }
-                            ]
-                            # MODIFIED: Do not delete intermediate merged DOCX if output is PPTX for debugging, and it was an error with PPTX conversion
-                            # However, if the error is about PPTX conversion, the DOCX might be useful.
-                            # Let's keep it for now if output_format == 'pptx'. If it's another format, it should be deleted.
-                            # if output_format != 'pptx':                            #     temp_files_to_delete_final.append(final_merged_docx_path)
+                        processed_files_final = [
+                            {
+                                "original_name": original_name_display,
+                                "converted_name": final_merged_pptx_filename,
+                                "download_url": reverse(
+                                    "converter:download_converted_file",
+                                    args=[
+                                        request.user.username,
+                                        today_date_str,
+                                        final_merged_pptx_filename,
+                                    ],
+                                ),
+                                "status": "success",
+                                "message": "图像成功合并到Word并转换为PPTX。",
+                            }
+                        ]
+                        # MODIFIED: Do not delete intermediate merged DOCX if output is PPTX for debugging
+                        # Temporarily disable cleanup to inspect the merged DOCX file
+                        # if output_format != 'pptx':
+                        #     temp_files_to_delete_final.append(final_merged_docx_path)
+                    else:
+                        processed_files_final = [
+                            {
+                                "original_name": "图像合并与PPTX转换",
+                                "status": "error",
+                                "message": pptx_path_or_msg
+                                or "无法将合并的Word文档转换为PPTX。",
+                            }
+                        ]
+                        # MODIFIED: Do not delete intermediate merged DOCX if output is PPTX for debugging, and it was an error with PPTX conversion
+                        # However, if the error is about PPTX conversion, the DOCX might be useful.
+                        # Let's keep it for now if output_format == 'pptx'. If it's another format, it should be deleted.
+                        # if output_format != 'pptx':                            #     temp_files_to_delete_final.append(final_merged_docx_path)
                 else:
                     processed_files_final.extend(
                         img_script_results
@@ -1298,40 +1436,58 @@ def pdf_to_file_view(request):
     temp_files_to_delete_final = []
 
     uploaded_files_info = []
-    if not request.FILES.getlist("images"):
-        logger.warning(f"pdf_to_file_view: No files uploaded. RequestID: {request_id}")
-        return format_error_response(
-            message="没有上传PDF文件。",
-            merge_output=merge_output,
-            request_id=request_id,
-        )
-
-    for uploaded_file_obj in request.FILES.getlist("images"):
-        temp_input_path, original_filename, safe_filename = save_uploaded_file(
-            uploaded_file_obj, user_upload_dir, request_id
-        )
-        if temp_input_path and safe_filename:
-            uploaded_files_info.append(
-                {
-                    "name": original_filename,
-                    "path": temp_input_path,
-                    "safe_original_filename": safe_filename,
-                    "status": "uploaded",
-                }
+    if request.FILES.getlist("images"):
+        for uploaded_file_obj in request.FILES.getlist("images"):
+            temp_input_path, original_filename, safe_filename = save_uploaded_file(
+                uploaded_file_obj, user_upload_dir, request_id
             )
+            if temp_input_path and safe_filename:
+                uploaded_files_info.append(
+                    {
+                        "name": original_filename,
+                        "path": temp_input_path,
+                        "safe_original_filename": safe_filename,
+                        "status": "uploaded",
+                    }
+                )
+            else:
+                uploaded_files_info.append(
+                    {
+                        "name": getattr(uploaded_file_obj, "name", "未知文件"),
+                        "path": None,
+                        "safe_original_filename": None,
+                        "status": "error",
+                    }
+                )
+    else:
+        uploaded_files_info_from_frontend = request.POST.getlist(
+            "uploaded_files_info[]"
+        )
+        if uploaded_files_info_from_frontend:
+            try:
+                parsed_files_info = [
+                    json.loads(info) for info in uploaded_files_info_from_frontend
+                ]
+            except json.JSONDecodeError as e:
+                logger.error(
+                    f"file_to_pdf_view: JSONDecodeError parsing uploaded_files_info: {e}. RequestID: {request_id}"
+                )
+                return format_error_response(
+                    message=f"解析文件信息时出错: {e}",
+                    merge_output=request.POST.get("merge_output", "false") == "true",
+                    request_id=request_id,
+                    duration_seconds=round(time.perf_counter() - start_time_view, 2),
+                )
+            uploaded_files_info = parsed_files_info
         else:
-            failed_original_name = (
-                original_filename if original_filename else "未知文件"
+            logger.warning(
+                f"file_to_pdf_view: No uploaded_files_info provided. RequestID: {request_id}"
             )
-            logger.error(
-                f"pdf_to_file_view: Failed to save uploaded PDF: {failed_original_name}. RequestID: {request_id}"
-            )
-            processed_files_final.append(
-                {
-                    "original_name": failed_original_name,
-                    "status": "error",
-                    "message": f'PDF文件 "{failed_original_name}" 上传保存失败。',
-                }
+            return format_error_response(
+                message="没有提供文件信息。",
+                merge_output=request.POST.get("merge_output", "false") == "true",
+                request_id=request_id,
+                duration_seconds=round(time.perf_counter() - start_time_view, 2),
             )
 
     if not uploaded_files_info:

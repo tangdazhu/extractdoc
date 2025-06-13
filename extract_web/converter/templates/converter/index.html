@@ -703,7 +703,14 @@
                     <div style="display: flex; align-items: center;">
                         <button type="button" onclick="document.getElementById('fileUpload').click();"><i class="fas fa-plus" style="margin-right: 5px;"></i> 添加文件</button> {# Example with icon, requires FontAwesome #}
                         <button type="button" onclick="clearFileList()" style="margin-left: 10px;"><i class="fas fa-trash-alt" style="margin-right: 5px;"></i> 清空列表</button>
-                        
+                        <!-- 在图片转PPT模式下显示：直接插入图片到PPT的选项 -->
+                        <div id="imgToPptDirectInsertOption" style="margin-left: 20px; display: none; align-items: center;">
+                            <label style="display: flex; align-items: center; font-size: 0.9em; font-weight: normal; cursor: not-allowed;">
+                                <input type="checkbox" id="directImageToPptCheckbox" checked disabled style="margin-right: 8px; cursor: not-allowed; transform: scale(1.1);">
+                                直接将图片插入PPT
+                            </label>
+                        </div>
+
                         <!-- PDF to Word Mode Options (Radio Group and Merge Checkbox) - Hidden by default -->
                         <div id="pdfToWordOptions" class="hidden" style="margin-left: 20px; display: flex; align-items: baseline; gap: 15px;">
                             <div class="radio-button-group" style="display: flex; flex-direction: column; gap: 5px;">
@@ -926,4 +933,25 @@
 
 {% block extra_js %}
 <script src="{% static 'converter/index.js' %}" defer></script>
+<script>
+function updateImgToPptDirectInsertOption() {
+    const isImgToPpt = (window.currentSelectedMainTab === 'imgToFile' && window.currentSelectedSubTab === 'imgToPpt');
+    const optionDiv = document.getElementById('imgToPptDirectInsertOption');
+    if (optionDiv) {
+        optionDiv.style.display = isImgToPpt ? 'flex' : 'none';
+    }
+}
+window.updateImgToPptDirectInsertOption = updateImgToPptDirectInsertOption;
+const origShowTab = window.showTab;
+window.showTab = function(tabId) {
+    origShowTab(tabId);
+    updateImgToPptDirectInsertOption();
+};
+const origSelectSubTab = window.selectSubTab;
+window.selectSubTab = function(btn, subTabType, shouldUpdateAccept) {
+    origSelectSubTab(btn, subTabType, shouldUpdateAccept);
+    updateImgToPptDirectInsertOption();
+};
+window.addEventListener('DOMContentLoaded', updateImgToPptDirectInsertOption);
+</script>
 {% endblock %} 

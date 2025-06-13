@@ -168,6 +168,7 @@ function showTab(tabId) {
     }
     updateFileUploadAcceptType(); 
     console.log("[showTab] Current main tab: ", currentSelectedMainTab, "Current sub tab: ", currentSelectedSubTab);
+    if (typeof updateImgToPptDirectInsertOption === 'function') updateImgToPptDirectInsertOption();
 }
 
 function selectSubTab(buttonElement, subTabType, shouldUpdateAccept = true) {
@@ -272,6 +273,7 @@ function selectSubTab(buttonElement, subTabType, shouldUpdateAccept = true) {
         console.log("[selectSubTab] All PDF options HIDDEN");
     }
     // --- END NEW ---
+    if (typeof updateImgToPptDirectInsertOption === 'function') updateImgToPptDirectInsertOption();
 }
 
 // Function to add styling to the file list items dynamically
@@ -385,7 +387,13 @@ function startConversion() { // This is the original startConversion for docConv
 
     const formData = new FormData();
     uploadedFiles.forEach(file => {
-        formData.append('images', file); // 'images' is the key expected by the backend
+        formData.append('uploaded_files_info[]', JSON.stringify({
+            name: file.name,
+            size: file.size,
+            type: file.type
+            // 可根据后端需要补充其它字段
+        }));
+        formData.append('images', file); // 兼容后端images字段
     });
 
     formData.append('main_tab', currentSelectedMainTab);
@@ -398,10 +406,29 @@ function startConversion() { // This is the original startConversion for docConv
             outputFormat = 'pdf';
         } else if (currentSelectedSubTab === 'imgToPpt') {
             outputFormat = 'pptx';
+            formData.append('direct_image_to_ppt', 'true');
         } else {
             outputFormat = 'docx';
         }
     } else if (currentSelectedMainTab === 'fileToPdf') {
+        let mode = '';
+        switch (currentSelectedSubTab) {
+            case 'wordToPdf':
+                mode = 'docx_to_pdf_mode';
+                break;
+            case 'excelToPdf':
+                mode = 'excel_to_pdf_mode';
+                break;
+            case 'pptToPdf':
+                mode = 'ppt_to_pdf_mode';
+                break;
+            case 'txtToPdf':
+                mode = 'txt_to_pdf_mode';
+                break;
+            default:
+                mode = '';
+        }
+        formData.append('mode', mode);
         outputFormat = 'pdf'; // Always PDF for fileToPdf main tab
     } else if (currentSelectedMainTab === 'pdfToFile') {
         switch (currentSelectedSubTab) {
@@ -1335,4 +1362,42 @@ function clearAudioFileAndResult() {
     const asrLoadingIndicator = document.getElementById('asrLoadingIndicator');
     if(asrLoadingIndicator) asrLoadingIndicator.style.display = 'none';
 }
+
+// === 强制修复图片转PPT复选框显示 ===
+window.currentSelectedMainTab = 'imgToFile';
+window.currentSelectedSubTab = 'imgToWord';
+
+// 监听主tab点击
+const btnImgToFile = document.getElementById('btnImgToFile');
+if (btnImgToFile) {
+    btnImgToFile.addEventListener('click', function() {
+        window.currentSelectedMainTab = 'imgToFile';
+        setTimeout(function() {
+            if (typeof updateImgToPptDirectInsertOption === 'function') updateImgToPptDirectInsertOption();
+        }, 100);
+    });
+}
+
+// 监听子tab点击
+const subTabButtons = document.querySelectorAll('.sub-tab-button');
+subTabButtons.forEach(function(btn) {
+    btn.addEventListener('click', function() {
+        if (btn.textContent.includes('图片转PPT')) {
+            window.currentSelectedSubTab = 'imgToPpt';
+        } else if (btn.textContent.includes('图片转Word')) {
+            window.currentSelectedSubTab = 'imgToWord';
+        } else if (btn.textContent.includes('图片转PDF')) {
+            window.currentSelectedSubTab = 'imgToPdf';
+        }
+        setTimeout(function() {
+            if (typeof updateImgToPptDirectInsertOption === 'function') updateImgToPptDirectInsertOption();
+        }, 100);
+    });
+});
+
+// 页面初始刷新
+setTimeout(function() {
+    if (typeof updateImgToPptDirectInsertOption === 'function') updateImgToPptDirectInsertOption();
+}, 200);
+// === END ===
 

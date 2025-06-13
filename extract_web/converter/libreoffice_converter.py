@@ -247,16 +247,8 @@ def convert_to_pptx(input_path, output_dir, skip_default_content=False):
 def create_pptx_from_docx(docx_path, output_dir, skip_default_content=False):
     """
     Creates a PPTX file from a DOCX file using python-pptx library.
-    Reads tables and text from DOCX and creates slides in PPTX with improved formatting.
-    Each image's content is kept on a single slide to preserve the original structure.
-
-    Args:
-        docx_path (str): Path to the input DOCX file
-        output_dir (str): Directory where PPTX should be saved
-        skip_default_content (bool): If True, skip adding default "文档内容" slide when no content is found
-
-    Returns:
-        tuple: (bool_success, pptx_output_path_or_error_msg, original_pptx_filename_or_None)
+    Each page (separated by page break) in the DOCX becomes a separate slide in the PPTX.
+    All content (paragraphs, tables, headings) between page breaks is grouped into one slide.
     """
     try:
         from pptx import Presentation
@@ -264,222 +256,107 @@ def create_pptx_from_docx(docx_path, output_dir, skip_default_content=False):
         from pptx.enum.text import PP_ALIGN
         from pptx.dml.color import RGBColor
         from docx import Document
+        from docx.oxml.text.paragraph import CT_P
+        from docx.oxml.table import CT_Tbl
+        from docx.text.paragraph import Paragraph
+        from docx.table import Table
 
-        # Read DOCX content
         doc = Document(docx_path)
-
-        # Create presentation
-        prs = Presentation()  # Get filename stem for output
+        prs = Presentation()
         input_filename_stem = os.path.splitext(os.path.basename(docx_path))[0]
         expected_pptx_filename = f"{input_filename_stem}.pptx"
         output_path = os.path.join(output_dir, expected_pptx_filename)
 
+        # 1. 按分页分组内容，确保分页符之间所有内容都进同一slide
+        def iter_block_items(parent):
+            for child in parent.element.body.iterchildren():
+                if isinstance(child, CT_P):
+                    yield Paragraph(child, parent)
+                elif isinstance(child, CT_Tbl):
+                    yield Table(child, parent)
+
+        W_NS = {"w": "http://schemas.openxmlformats.org/wordprocessingml/2006/main"}
+        slides_content = []
+        current_slide_content = []
+        for block in iter_block_items(doc):
+            is_page_break = False
+            if isinstance(block, Paragraph):
+                # 检查是否是仅包含分页符的段落（即段落内容为空但有分页符）
+                is_page_break = any(
+                    run
+                    for run in block.runs
+                    if any(
+                        br.get(
+                            "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}type"
+                        )
+                        == "page"
+                        for br in run._element.findall(".//w:br", namespaces=W_NS)
+                    )
+                )
+            if is_page_break and not (block.text and block.text.strip()):
+                # 分割slide，分页符本身不进slide内容
+                if current_slide_content:
+                    slides_content.append(current_slide_content)
+                current_slide_content = []
+                continue
+            # 段落、表格都要收集
+            current_slide_content.append(block)
+        if current_slide_content:
+            slides_content.append(current_slide_content)
+
         slide_count = 0
-
-        # Find actual title from Word document (look for centered paragraphs)
-        actual_title = None
-        for para in doc.paragraphs:
-            if (
-                para.text.strip() and para.alignment == 1
-            ):  # WD_PARAGRAPH_ALIGNMENT.CENTER
-                actual_title = para.text.strip()
-                logger.info(f"Found centered title in Word document: '{actual_title}'")
-                break
-
-        if not actual_title:
-            # Look for common title keywords
-            for para in doc.paragraphs:
-                text = para.text.strip()
-                if any(
-                    keyword in text
-                    for keyword in ["更新记录", "版本记录", "修订记录", "变更记录"]
-                ):
-                    actual_title = text
-                    logger.info(f"Found title by keyword matching: '{actual_title}'")
-                    break
-
-        # Process tables first (each table gets its own slide)
-        for table in doc.tables:
-            slide_layout = prs.slide_layouts[5]  # Blank layout
+        for slide_items in slides_content:
+            slide_layout = prs.slide_layouts[1]  # Title and content layout
             slide = prs.slides.add_slide(slide_layout)
             slide_count += 1
-
-            # Add title - use actual title from document if found
             title_shape = slide.shapes.title
-            if title_shape:
-                if actual_title:
-                    title_shape.text = actual_title
-                    logger.info(
-                        f"Using actual title for slide {slide_count}: '{actual_title}'"
-                    )
-                else:
-                    title_shape.text = f"表格 {slide_count}"
-                    logger.info(
-                        f"Using default title for slide {slide_count}: '表格 {slide_count}'"
-                    )
-
-            # Calculate table dimensions
-            rows = len(table.rows)
-            cols = len(table.rows[0].cells) if rows > 0 else 0
-
-            if rows > 0 and cols > 0:
-                # Add table to slide
-                left = Inches(1)
-                top = Inches(1.5)
-                width = Inches(8)
-                height = Inches(4)
-
-                ppt_table = slide.shapes.add_table(
-                    rows, cols, left, top, width, height
-                ).table
-
-                # Copy data from DOCX table to PPT table
-                for row_idx, row in enumerate(table.rows):
-                    for col_idx, cell in enumerate(row.cells):
-                        if row_idx < len(ppt_table.rows) and col_idx < len(
-                            ppt_table.rows[row_idx].cells
-                        ):
-                            ppt_cell = ppt_table.rows[row_idx].cells[col_idx]
-                            ppt_cell.text = cell.text.strip()
-
-                            # Format header row
-                            if row_idx == 0:
-                                for paragraph in ppt_cell.text_frame.paragraphs:
-                                    for run in paragraph.runs:
-                                        run.font.bold = True
-                                        run.font.size = Pt(
-                                            12
-                                        )  # Collect all paragraphs (skip for PPT files when skipping default content)
-        paragraphs = []
-        if (
-            not skip_default_content
-        ):  # Only process paragraphs if not skipping default content
-            for para in doc.paragraphs:
-                text = para.text.strip()
-                if text:
-                    paragraphs.append(text)
-
-        logger.info(
-            f"skip_default_content: {skip_default_content}, found {len(paragraphs)} paragraphs"
-        )
-
-        # Create a single content slide for all text content (preserving original structure)
-        if paragraphs:
-            # Create one slide for all content
-            slide_layout = prs.slide_layouts[1]  # Title and content layout
-            slide = prs.slides.add_slide(slide_layout)
-
-            # Set title - use first paragraph if it looks like a title, otherwise use generic title
-            title_shape = slide.shapes.title
-            title_text = "Content"
-            content_start_idx = 0
-
-            if title_shape:
-                first_para = paragraphs[0]
-                # Check if first paragraph looks like a title
-                if len(first_para) <= 50 and (
-                    any(
-                        keyword in first_para
-                        for keyword in ["目的", "Content", "Whitepaper"]
-                    )
-                    or re.match(r"^\d+[.、]", first_para)
-                    or first_para.isupper()
-                ):
-                    title_text = first_para
-                    content_start_idx = 1
-                title_shape.text = title_text
-
-            # Set content - put ALL remaining content on this single slide
             content_shape = slide.placeholders[1]
-            if content_shape:
-                text_frame = content_shape.text_frame
+            text_frame = content_shape.text_frame if content_shape else None
+            if text_frame:
                 text_frame.clear()
-
-                # Add all paragraphs to the single slide
-                content_paragraphs = paragraphs[content_start_idx:]
-
-                for i, para_text in enumerate(content_paragraphs):
-                    if i == 0:
-                        p = text_frame.paragraphs[0]
-                    else:
-                        p = text_frame.add_paragraph()
-
-                    p.text = para_text
-
-                    # Apply formatting based on content patterns
-                    if re.match(
-                        r"^\d+[.、]\s*\S", para_text
-                    ):  # Numbered sections (1. 2. 3.)
-                        p.font.bold = True
-                        p.font.size = Pt(16)
-                        p.font.color.rgb = RGBColor(
-                            0, 51, 102
-                        )  # Dark blue for main sections
-                    elif para_text.startswith(("•", "·", "-", "*")):  # Bullet points
-                        p.level = 1  # Indent bullet points
-                        p.font.size = Pt(12)
-                    elif (
-                        any(
-                            keyword in para_text
-                            for keyword in [
-                                "开发",
-                                "技术",
-                                "平台",
-                                "框架",
-                                "选型",
-                                "架构",
-                                "安全",
-                                "评估",
-                            ]
+            first_title = None
+            for idx, item in enumerate(slide_items):
+                if isinstance(item, Paragraph):
+                    text = item.text.strip()
+                    if idx == 0 and title_shape and text:
+                        title_shape.text = text
+                        first_title = text
+                    elif text_frame and text:
+                        p = (
+                            text_frame.add_paragraph()
+                            if text_frame.paragraphs
+                            else text_frame.paragraphs[0]
                         )
-                        and len(para_text) <= 80
-                    ):
-                        # Technical terms that might be headings
-                        p.font.bold = True
+                        p.text = text
                         p.font.size = Pt(14)
-                        p.font.color.rgb = RGBColor(
-                            51, 51, 153
-                        )  # Medium blue for sub-headings
-                    elif len(para_text) <= 30:  # Short text might be headings
-                        p.font.bold = True
-                        p.font.size = Pt(13)
-                    else:
-                        # Regular content
-                        p.font.size = Pt(11)
-
-                # Adjust text frame to fit more content
-                text_frame.margin_bottom = Inches(0.1)
-                text_frame.margin_top = Inches(0.1)
-                text_frame.margin_left = Inches(0.1)
-                text_frame.margin_right = Inches(
-                    0.1
-                )  # If no paragraphs and not skipping default content, create a simple slide
-        elif (
-            len(prs.slides) == slide_count and not skip_default_content
-        ):  # Only table slides exist or no content at all
-            logger.info(
-                f"Adding default content slide because: slides={len(prs.slides)}, slide_count={slide_count}, skip_default_content={skip_default_content}"
-            )
-            slide_layout = prs.slide_layouts[1]  # Title and content layout
+                elif isinstance(item, Table):
+                    # 在内容区插入表格（简单方式：转文本）
+                    table_text = []
+                    for row in item.rows:
+                        row_text = [cell.text.strip() for cell in row.cells]
+                        table_text.append("\t".join(row_text))
+                    if text_frame:
+                        for t in table_text:
+                            p = (
+                                text_frame.add_paragraph()
+                                if text_frame.paragraphs
+                                else text_frame.paragraphs[0]
+                            )
+                            p.text = t
+                            p.font.size = Pt(12)
+            # 如果没有标题，给个默认标题
+            if title_shape and not (first_title and first_title.strip()):
+                title_shape.text = f"Slide {slide_count}"
+        if slide_count == 0 and not skip_default_content:
+            slide_layout = prs.slide_layouts[1]
             slide = prs.slides.add_slide(slide_layout)
-
-            title_shape = slide.shapes.title
-            content_shape = slide.placeholders[1]
-
-            if title_shape:
-                title_shape.text = "文档内容"
-            if content_shape:
-                content_shape.text = "从图片中提取的文本内容"
-        else:
-            logger.info(
-                f"Skipping default content slide because: slides={len(prs.slides)}, slide_count={slide_count}, skip_default_content={skip_default_content}"
-            )
-
-        # Save the presentation
+            if slide.shapes.title:
+                slide.shapes.title.text = "文档内容"
+            if slide.placeholders[1]:
+                slide.placeholders[1].text = "从图片中提取的文本内容"
         prs.save(output_path)
         logger.info(f"Successfully created PPTX using python-pptx: {output_path}")
         return True, output_path, expected_pptx_filename
-
     except ImportError as e:
         error_msg = f"Required libraries not available for PPTX creation: {e}. Please install python-pptx and python-docx."
         logger.error(error_msg)
