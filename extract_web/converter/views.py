@@ -3005,6 +3005,28 @@ def speech_to_text_view(request):
             f"speech_to_text_view: Processing URL: {audio_url}. RequestID: {request_id}"
         )
 
+        # 文件大小校验（最大500MB）
+        try:
+            import requests
+
+            head_resp = requests.head(audio_url, timeout=10)
+            content_length = int(head_resp.headers.get("Content-Length", 0))
+            max_size = 500 * 1024 * 1024  # 500MB
+            if content_length > max_size:
+                logger.warning(
+                    f"speech_to_text_view: 文件大小超出限制 ({content_length} bytes > 500MB). RequestID: {request_id}"
+                )
+                return format_error_response(
+                    message="音频文件大小不能超过500MB。",
+                    merge_output=False,
+                    http_status=400,
+                    request_id=request_id,
+                )
+        except Exception as e:
+            logger.warning(
+                f"speech_to_text_view: 获取音频文件大小失败，无法校验。RequestID: {request_id}, Error: {e}"
+            )
+
         # Pass hotwords_config_from_request to the transcription function
         transcription_result = transcribe_audio_dashscope(
             audio_url, hotwords_config=hotwords_config_from_request

@@ -875,6 +875,14 @@ function initializeAsrFunctionality() {
     startAsrBtn.addEventListener('click', async function() {
         const audioUrl = audioUrlInput.value.trim();
 
+        // 文件大小校验（仅本地文件上传时可用，OSS URL无法前端校验）
+        // if (audioFileInput.files[0] && audioFileInput.files[0].size > 500 * 1024 * 1024) {
+        //     asrErrorOutput.textContent = '音频文件不能超过500MB';
+        //     addNotification('音频文件不能超过500MB', 'error');
+        //     return;
+        // }
+        // 对于OSS URL，无法前端校验文件大小，需后端校验。
+
         if (!audioUrl) {
             asrErrorOutput.textContent = '请输入有效的音频文件URL。';
             addNotification('请输入有效的音频文件URL。', 'error');
