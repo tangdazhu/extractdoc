@@ -44,6 +44,8 @@ anthropic>=0.40.0       # Anthropic Claude models API client
 dashscope==1.23.3        # Alibaba Qwen models API client
 ollama>=0.4.0           # Local LLM client (Ollama)
 
+scenedetect==0.6.6 # video scene detection
+
 # Notes on External Dependencies:
 # - LibreOffice: For Office document conversion (optional, requires separate installation)
 #   * Used for: PDF→Word, PDF→PPT (alternative methods)

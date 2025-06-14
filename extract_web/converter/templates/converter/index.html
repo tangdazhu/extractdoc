@@ -772,6 +772,8 @@
                  <h1 class="page-title">视频分析</h1>
             </div>
             
+            <input type="hidden" id="processVideoUrl" value="{% url 'converter:api_video_to_extraction' %}">
+            
             <div class="form-group" style="margin-top: 10px;">
                 <label for="videoFileForAnalysisInput" style="font-weight: 500;">选择视频文件 (Select Video File):</label>
                 <input type="file" id="videoFileForAnalysisInput" name="videoFileForAnalysisInput" class="form-control-file" accept="video/*" style="margin-top: 5px;">
@@ -934,6 +936,17 @@
 {% block extra_js %}
 <script src="{% static 'converter/index.js' %}" defer></script>
 <script>
+// 确保页面加载后激活导航功能
+document.addEventListener('DOMContentLoaded', function() {
+    console.log('DOM加载完成，确保导航功能正常工作');
+    if (typeof selectMainNavigation === 'function') {
+        // 初始化界面
+        selectMainNavigation(currentSelectedMainNavigation || 'docConversion', true);
+    } else {
+        console.error('selectMainNavigation 函数未定义，请确认 index.js 已正确加载');
+    }
+});
+
 function updateImgToPptDirectInsertOption() {
     const isImgToPpt = (window.currentSelectedMainTab === 'imgToFile' && window.currentSelectedSubTab === 'imgToPpt');
     const optionDiv = document.getElementById('imgToPptDirectInsertOption');
@@ -954,4 +967,4 @@ window.selectSubTab = function(btn, subTabType, shouldUpdateAccept) {
 };
 window.addEventListener('DOMContentLoaded', updateImgToPptDirectInsertOption);
 </script>
-{% endblock %} 
+{% endblock %}

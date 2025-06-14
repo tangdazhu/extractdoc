@@ -1089,12 +1089,12 @@ async function processVideo() {
     if(progressListContainer) progressListContainer.style.display = 'none';
     if(progressList) progressList.innerHTML = '';
     if(resultsContainer) resultsContainer.innerHTML = ''; // Clear previous results
-
     isConverting = true; // Use the global flag
     updateMainNavigationButtonStates(true); // Disable main navigation
 
     try {
-        const response = await fetch("{% url 'converter:api_process_video' %}", {
+        const processVideoUrl = document.getElementById('processVideoUrl').value;
+        const response = await fetch(processVideoUrl, {
             method: 'POST',
             headers: {
                 'X-CSRFToken': csrfToken
@@ -1115,112 +1115,59 @@ async function processVideo() {
             return;
         }
 
-        const result = await response.json();
-        console.log("[processVideo] Received response:", result);
-
-        if (result.task_id) {
-            addNotification('视频处理任务已启动，ID: ' + result.task_id, 'info');
-            if(progressBarContainer) progressBarContainer.style.display = 'block';
-            if(progressListContainer) progressListContainer.style.display = 'block';
-            if(spinner) spinner.style.display = 'none'; // Hide spinner, show progress bar
-            pollVideoTaskStatus(result.task_id);
-        } else if (result.error) {
-             addNotification('视频处理启动失败: ' + result.error, 'error');
-             displayVideoProcessingResults({ error: result.error });
-        } else {
-            // Handle direct result if not using tasks (though task_id is expected)
-            displayVideoProcessingResults(result);
+        // --- 新增：流式解析 SSE ---
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder('utf-8');
+        let buffer = '';
+        if(progressBarContainer) progressBarContainer.style.display = 'block';
+        if(progressListContainer) progressListContainer.style.display = 'block';
+        if(spinner) spinner.style.display = 'none';
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            buffer += decoder.decode(value, { stream: true });
+            let lines = buffer.split('\n');
+            buffer = lines.pop(); // 最后一行可能不完整
+            for (let line of lines) {
+                if (line.startsWith('data: ')) {
+                    try {
+                        const data = JSON.parse(line.slice(6));
+                        if (data.type === 'progress') {
+                            // 更新进度条
+                            if(progressBar && typeof data.percent === 'number') {
+                                progressBar.style.width = data.percent + '%';
+                                progressBar.textContent = data.percent + '%';
+                            }
+                        } else if (data.type === 'info') {
+                            // 显示日志
+                            if(progressList) {
+                                const li = document.createElement('li');
+                                li.textContent = data.message;
+                                progressList.appendChild(li);
+                                progressList.scrollTop = progressList.scrollHeight;
+                            }
+                        } else if (data.type === 'result') {
+                            // 显示最终下载链接
+                            displayVideoProcessingResults({ results: data.results });
+                        } else if (data.type === 'error') {
+                            displayVideoProcessingResults({ error: data.message });
+                        }
+                    } catch (e) {
+                        console.warn('解析SSE行失败:', line, e);
+                    }
+                }
+            }
         }
-
     } catch (error) {
         console.error('[processVideo] API call failed:', error);
         addNotification('调用视频处理服务时发生网络或未知错误。详情请查看控制台。', 'error');
         displayVideoProcessingResults({ error: '网络或客户端错误，无法连接到服务器。' });
     } finally {
-        // isConverting and button states will be reset by pollVideoTaskStatus or if an error occurs before polling
-        // If no task_id, means direct error or direct result, so we can re-enable here.
-        if (!document.getElementById('videoProgressBarContainer').style.display || document.getElementById('videoProgressBarContainer').style.display === 'none') {
-            isConverting = false;
-            updateMainNavigationButtonStates(false);
-            if(processBtn) processBtn.disabled = false;
-            if(spinner) spinner.style.display = 'none';
-        }
+        isConverting = false;
+        updateMainNavigationButtonStates(false);
+        if(processBtn) processBtn.disabled = false;
+        if(spinner) spinner.style.display = 'none';
     }
-}
-
-async function pollVideoTaskStatus(taskId) {
-    console.log(`[pollVideoTaskStatus] Starting to poll for task ID: ${taskId}`);
-    const progressBar = document.getElementById('videoProgressBar');
-    const progressList = document.getElementById('videoProgressList');
-    const resultsContainer = document.getElementById('videoProcessingResultsTableContainer');
-    const processBtn = document.querySelector('#videoAnalysisContent button[onclick="processVideo()"]');
-
-    let intervalId = setInterval(async () => {
-        try {
-            const response = await fetch(`/api/task_status/${taskId}/`);
-            if (!response.ok) {
-                console.error(`[pollVideoTaskStatus] Error fetching status for ${taskId}: ${response.status}`);
-                // Potentially stop polling on certain client/server errors like 404 Not Found for task
-                if (response.status === 404) {
-                    clearInterval(intervalId);
-                    addNotification(`任务 ${taskId} 未找到或已过期。`, 'error');
-                    displayVideoProcessingResults({ error: `任务 ${taskId} 未找到。` });
-                    resetVideoProcessingUI(processBtn);
-                }
-                return; 
-            }
-            const data = await response.json();
-            console.log(`[pollVideoTaskStatus] Status for ${taskId}:`, data);
-
-            if (progressBar) {
-                progressBar.style.width = data.progress + '%';
-                progressBar.textContent = data.progress + '%';
-            }
-            if (progressList && data.current_step) {
-                const newItem = document.createElement('li');
-                newItem.textContent = `[${new Date().toLocaleTimeString()}] ${data.current_step}`;
-                progressList.appendChild(newItem);
-                progressList.scrollTop = progressList.scrollHeight; // Auto-scroll
-            }
-
-            if (data.state === 'SUCCESS') {
-                clearInterval(intervalId);
-                addNotification('视频处理完成!', 'success');
-                if (data.result && data.result.message) { // For direct messages from task
-                     addNotification(data.result.message, 'info');
-                }
-                displayVideoProcessingResults(data.result || {}); 
-                resetVideoProcessingUI(processBtn);
-            } else if (data.state === 'FAILURE') {
-                clearInterval(intervalId);
-                const errorDetail = data.result && data.result.error ? data.result.error : '未知错误';
-                addNotification(`视频处理失败: ${errorDetail}`, 'error');
-                displayVideoProcessingResults({ error: errorDetail, details: data.result });
-                resetVideoProcessingUI(processBtn);
-            } else if (data.state === 'PENDING' || data.state === 'PROGRESS' || data.state === 'STARTED') {
-                // Continue polling
-                console.log(`[pollVideoTaskStatus] Task ${taskId} is ${data.state}. Progress: ${data.progress}%.`);
-            } else {
-                // Unknown state or task disappeared
-                clearInterval(intervalId);
-                addNotification(`任务 ${taskId} 状态未知或已中断。`, 'warning');
-                displayVideoProcessingResults({ error: `任务 ${taskId} 状态未知或已中断。` });
-                resetVideoProcessingUI(processBtn);
-            }
-        } catch (error) {
-            console.error('[pollVideoTaskStatus] Error polling task status:', error);
-            // Don't clear interval on network error, allow it to retry
-        }
-    }, 3000); // Poll every 3 seconds
-}
-    
-function resetVideoProcessingUI(processBtn) {
-    isConverting = false;
-    updateMainNavigationButtonStates(false);
-    if (processBtn) processBtn.disabled = false;
-    const spinner = document.getElementById('videoProcessingSpinner');
-    if (spinner) spinner.style.display = 'none';
-    // Keep progress bar visible with final status
 }
 
 function displayVideoProcessingResults(data) {
@@ -1228,6 +1175,62 @@ function displayVideoProcessingResults(data) {
     if (!container) return;
     container.innerHTML = ''; // Clear previous results
 
+    // 兼容 results 数组，风格与图片转文件一致
+    if (Array.isArray(data.results) && data.results.length > 0) {
+        const table = document.createElement('table');
+        table.className = 'table table-striped table-bordered';
+        table.style.borderCollapse = 'collapse';
+
+        const thead = document.createElement('thead');
+        thead.innerHTML = '<tr>' +
+                            '<th>原始文件名</th>' +
+                            '<th>转换后文件名</th>' +
+                            '<th>状态</th>' +
+                            '<th>消息/下载</th>' +
+                        '</tr>';
+        table.appendChild(thead);
+
+        const tbody = document.createElement('tbody');
+        data.results.forEach(result => {
+            const row = tbody.insertRow();
+            row.insertCell().textContent = result.original_name || 'N/A';
+            row.insertCell().textContent = result.converted_name || 'N/A';
+
+            const statusCell = row.insertCell();
+            const statusBadge = document.createElement('span');
+            statusBadge.classList.add('status-badge');
+            statusBadge.textContent = result.status;
+            if (result.status === 'success' || result.status === 'success_fallback') {
+                statusBadge.classList.add('status-success');
+            } else if (result.status === 'error' || (typeof result.status === 'string' && result.status.includes('_error'))) {
+                statusBadge.classList.add('status-error');
+            } else {
+                statusBadge.classList.add('status-processing');
+            }
+            statusCell.appendChild(statusBadge);
+
+            const actionCell = row.insertCell();
+            if (result.status === 'success' || result.status === 'success_fallback') {
+                if (result.download_url) {
+                    const downloadLink = document.createElement('a');
+                    downloadLink.href = result.download_url;
+                    downloadLink.textContent = '下载';
+                    downloadLink.className = 'download-link';
+                    downloadLink.target = '_blank';
+                    actionCell.appendChild(downloadLink);
+                } else {
+                    actionCell.textContent = result.message || '-';
+                }
+            } else {
+                actionCell.textContent = result.message || '未知错误';
+            }
+        });
+        table.appendChild(tbody);
+        container.appendChild(table);
+        return;
+    }
+
+    // 原有单文件/错误逻辑
     if (data.error) {
         container.innerHTML = `<p class="text-danger">处理失败: ${escapeHtml(data.error)}</p>`;
         if (data.details && data.details.traceback) {

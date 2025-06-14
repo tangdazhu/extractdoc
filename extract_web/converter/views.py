@@ -1313,8 +1313,7 @@ def img_to_file_view(request):
                         # MODIFIED: Do not delete intermediate DOCX if output is PPTX for debugging, and it was an error with PPTX conversion
                         # However, if the error is about PPTX conversion, the DOCX might be useful.
                         # Let's keep it for now if output_format == 'pptx'. If it's another format, it should be deleted.
-                        # if output_format != 'pptx':
-                        #     temp_files_to_delete_final.append(final_merged_docx_path)
+                        # if output_format != 'pptx':                            #     temp_files_to_delete_final.append(final_merged_docx_path)
                 else:
                     logger.warning(
                         f"img_to_file_view: 不支持的输出格式 '{output_format}' 用于单个图像处理. RequestID: {request_id}"
@@ -2251,21 +2250,30 @@ def process_video_extraction_view(request):
             exc_info=True,
         )
         return format_error_response(
-            message="服务器错误：无法创建用户目录。", request_id=request_id
+            message="服务器错误：无法创建用户目录。",
+            merge_output=False,  # 视频处理不涉及合并输出
+            request_id=request_id,
         )
 
-    video_file_obj = request.FILES.get("videoFile")  # Ensure frontend name matches
-    scene_threshold_str = request.POST.get("sceneDetectionThreshold", "10.0")
-    group_size_str = request.POST.get("deduplicationGroupSize", "5")
+    video_file_obj = request.FILES.get(
+        "video_file"
+    )  # 与前端 formData.append('video_file', uploadedVideoFile) 对应
+    scene_threshold_str = request.POST.get(
+        "scene_detection_threshold", "10.0"
+    )  # 与前端 formData.append('scene_detection_threshold', ...) 对应
+    group_size_str = request.POST.get(
+        "deduplication_group_size", "5"
+    )  # 与前端 formData.append('deduplication_group_size', ...) 对应
 
     if not video_file_obj:
         logger.warning(
             f"process_video_extraction_view: No video file uploaded. RequestID: {request_id}"
         )
         return format_error_response(
-            message="没有上传视频文件。", request_id=request_id
+            message="没有上传视频文件。",
+            merge_output=False,  # 视频处理不涉及合并输出
+            request_id=request_id,
         )
-
     try:
         scene_threshold = float(scene_threshold_str)
         group_size = int(group_size_str)
@@ -2274,7 +2282,9 @@ def process_video_extraction_view(request):
             f"process_video_extraction_view: Invalid threshold or group size. T: {scene_threshold_str}, G: {group_size_str}. RequestID: {request_id}"
         )
         return format_error_response(
-            message="场景阈值或分组大小参数无效。", request_id=request_id
+            message="场景阈值或分组大小参数无效。",
+            merge_output=False,  # 视频处理不涉及合并输出
+            request_id=request_id,
         )
 
     temp_video_path, original_video_filename, safe_video_filename = save_uploaded_file(
@@ -2286,6 +2296,7 @@ def process_video_extraction_view(request):
         )
         return format_error_response(
             message=f'视频文件 "{original_video_filename}" 上传保存失败。',
+            merge_output=False,  # 视频处理不涉及合并输出
             request_id=request_id,
         )
 
@@ -2302,7 +2313,9 @@ def process_video_extraction_view(request):
         # Use the 'type' key for cleanup_temp_files if passing a list of dicts
         cleanup_temp_files([{"path": temp_video_path, "type": "file"}], request_id)
         return format_error_response(
-            message="服务器配置错误：找不到视频处理脚本。", request_id=request_id
+            message="服务器配置错误：找不到视频处理脚本。",
+            merge_output=False,  # 视频处理不涉及合并输出
+            request_id=request_id,
         )
 
     # Create a temporary directory for script execution
@@ -2824,12 +2837,10 @@ def process_video_extraction_view(request):
     # A better way for post-stream cleanup might involve signals or a different architecture.
     # For now, we rely on the main view's structure or a later scheduled task if needed.
     # The _temp_files_to_clean_stream_arg in the generator is a good start if we can pass its state out.
-    # Let's assume process_video_extraction_view's own `temp_files_to_clean_main_view` handles inputs like temp_video_path.
     # The exec_temp_dir is created by the script and should be cleaned up by it, or explicitly here.
-    # However, current logic in stream_video_processing_response has its own _temp_files_to_clean_stream_arg
-    # which includes temp_video_path and exec_temp_dir.
-    # The issue is *when* to call cleanup_temp_files for these.
-    # Let's assume the global cleanup in process_video_extraction_view is sufficient for now.
+    # For now, this exec_temp_dir (created as os.path.join(user_upload_dir, f"video_exec_{request_id}"))
+    # will be cleaned up IF the stream_video_processing_response is fully iterated by the client and server.
+    # If connection drops, it might not be. This is a general challenge with external processes and temp dirs.
 
     # Add items to the main view's cleanup list
     # temp_files_to_clean_main_view.append({'path': temp_video_path, 'type': 'file'}) # Already added from save_uploaded_file
