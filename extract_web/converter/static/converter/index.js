@@ -628,51 +628,60 @@ function displayConvertedFiles(data) { // Specific to docConversionContent
     
 // Initial setup: DOMContentLoaded listener
 document.addEventListener('DOMContentLoaded', function() {
-    // Move TTS initialization to the top to ensure it runs first
-    initializeTtsFunctionality(); 
-
-    initializeTabSwitching();
-    initializeMainFileUploadLogic();
-    initializeVideoProcessing();
-    initializeSpeechToText();
+    console.log('DOM loaded, initializing functionality...');
     
-    // Auto-select tab based on URL hash
-    if (window.location.hash) {
-        const targetTab = document.querySelector(`a[href="${window.location.hash}"]`);
-        if (targetTab) {
-            // Using bootstrap's method to show tab
-            const tab = new bootstrap.Tab(targetTab);
-            tab.show();
-            // Also update the main navigation state if the hash corresponds to one
-            const mainTabId = window.location.hash.substring(1); // remove #
-            if (['fileToPdfContent', 'imgToFileContent', 'pdfToFileContent', 'videoExtractorContent', 'speechToTextContent', 'ttsContent'].includes(mainTabId)) {
-                currentSelectedMainNavigation = mainTabId;
-            }
-        }
-    } else {
-        // Fallback to the default view if no hash
-        switchUIToMainTab(currentSelectedMainNavigation, true);
-    }
-
     // Initialize the view based on currentSelectedMainNavigation
-    // Pass true to prevent clearing inputs on initial load if state needs to be preserved (e.g. page refresh with form data)
     selectMainNavigation(currentSelectedMainNavigation, true);
 
-    const convertBtn = document.getElementById('startConversionBtn'); // For doc conversion
+    // Bind the document conversion button
+    const convertBtn = document.getElementById('startConversionBtn');
     if(convertBtn) {
         convertBtn.addEventListener('click', startConversion);
+        console.log('Document conversion button event listener bound');
+    } else {
+        console.error('startConversionBtn not found!');
     }
-    // renderFileList(); // Called by selectMainNavigation -> showTab -> selectSubTab which is fine
 
-    // Note: Specific initializations for video and speech tabs are now called within selectMainNavigation
+    // Initialize drag and drop for main file upload
+    const dropZone = document.getElementById('dropZone');
+    const fileUpload = document.getElementById('fileUpload');
+    
+    if (dropZone && fileUpload) {
+        // Drag and drop events
+        ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
+            dropZone.addEventListener(eventName, preventDefaults, false);
+        });
 
-    if (videoProcessingTab) {
-        initializeVideoProcessingFunctionality();
-    }
-    if(document.getElementById('speechProcessingContent')) {
-        initializeAsrFunctionality();
-        // 初始化新增的TTS功能
-        initializeTtsFunctionality();
+        function preventDefaults(e) {
+            e.preventDefault();
+            e.stopPropagation();
+        }
+
+        ['dragenter', 'dragover'].forEach(eventName => {
+            dropZone.addEventListener(eventName, highlight, false);
+        });
+
+        ['dragleave', 'drop'].forEach(eventName => {
+            dropZone.addEventListener(eventName, unhighlight, false);
+        });
+
+        function highlight(e) {
+            dropZone.classList.add('border-primary');
+        }
+
+        function unhighlight(e) {
+            dropZone.classList.remove('border-primary');
+        }
+
+        dropZone.addEventListener('drop', handleDrop, false);
+
+        function handleDrop(e) {
+            const dt = e.dataTransfer;
+            const files = dt.files;
+            handleFiles(files);
+        }
+        
+        console.log('Drag and drop functionality initialized');
     }
 });
 
