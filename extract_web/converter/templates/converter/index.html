@@ -310,7 +310,9 @@
     #convertedFilesTableContainer table th,
     #convertedFilesTableContainer table td,
     #videoProcessingResultsTableContainer table th,
-    #videoProcessingResultsTableContainer table td {
+    #videoProcessingResultsTableContainer table td,
+    #ttsResultsTableContainer table th,
+    #ttsResultsTableContainer table td {
         font-size: 0.9em; /* Match other table font sizes */
         vertical-align: middle; /* Vertically align content in cells */
         border: 1px solid #ddd; /* Gray border for cells */
@@ -318,19 +320,22 @@
         text-align: left; /* Align text to left for better readability, can be adjusted */
     }
     #convertedFilesTableContainer table,
-    #videoProcessingResultsTableContainer table {
+    #videoProcessingResultsTableContainer table,
+    #ttsResultsTableContainer table {
         table-layout: auto; /* Allow table to adjust column widths based on content */
         width: 100%; /* Ensure table uses full container width */
         border-collapse: collapse; /* Important for single borders */
         border: 1px solid #ddd; /* Optional: Outer border for the table itself */
     }
     #convertedFilesTableContainer table th,
-    #videoProcessingResultsTableContainer table th {
+    #videoProcessingResultsTableContainer table th,
+    #ttsResultsTableContainer table th {
         background-color: #f8f9fa; /* Light background for headers */
         font-weight: 600; /* Make header text bold */
     }
     #convertedFilesTableContainer .download-link,
-    #videoProcessingResultsTableContainer .download-link {
+    #videoProcessingResultsTableContainer .download-link,
+    #ttsResultsTableContainer .download-link {
         display: inline-block;
         padding: 6px 12px;
         background-color: #28a745; 
@@ -343,7 +348,8 @@
         transition: background-color 0.2s;
     }
     #convertedFilesTableContainer .download-link:hover,
-    #videoProcessingResultsTableContainer .download-link:hover {
+    #videoProcessingResultsTableContainer .download-link:hover,
+    #ttsResultsTableContainer .download-link:hover {
         background-color: #218838;
     }
     .status-badge {
@@ -986,24 +992,24 @@
                             </div>
                         </div>
 
-                        <!-- NEW: TTS Result Display Area -->
-                        <div id="ttsResultContainer" class="mt-4" style="display: none;">
-                            <h5>转换结果</h5>
+                        <!-- TTS Result Display Area -->
+                        <div class="converted-files-container" id="ttsResultContainer" style="margin-top: 30px; display: none;">
+                            <h3>转换结果</h3>
                             
                             <!-- Progress Bar -->
-                            <div id="ttsProgressContainer" class="progress-container" style="display: none;">
+                            <div id="ttsProgressContainer" class="progress-container" style="display: none; margin-bottom: 15px;">
                                 <div class="progress">
                                     <div id="ttsProgressBar" class="progress-bar progress-bar-striped progress-bar-animated" role="progressbar" style="width: 0%;" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100"></div>
                                 </div>
-                                <p id="ttsProgressText" class="progress-text mt-1">正在处理...</p>
+                                <p id="ttsProgressText" class="progress-text mt-1" style="font-size: 0.9em; text-align: center;">正在处理...</p>
                             </div>
 
                             <!-- Error Output -->
                             <div id="ttsErrorOutput" class="alert alert-danger" style="display: none;"></div>
 
-                            <!-- Results Table -->
-                            <div id="ttsResultsTableContainer" class="mt-3">
-                                <!-- JS will populate this with a table -->
+                            <!-- Results Table Container -->
+                            <div id="ttsResultsTableContainer">
+                                <!-- Table will be inserted here by JavaScript -->
                             </div>
                         </div>
 

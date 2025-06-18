@@ -602,10 +602,10 @@ function displayConvertedFiles(data) { // Specific to docConversionContent
         statusBadge.textContent = result.status;
         if (result.status === 'success' || result.status === 'success_fallback') {
             statusBadge.classList.add('status-success');
-        } else if (result.status === 'error' || result.status.includes('_error')) {
+        } else if (result.status === 'error' || (typeof result.status === 'string' && result.status.includes('_error'))) {
             statusBadge.classList.add('status-error');
         } else {
-            statusBadge.classList.add('status-processing'); // Or a default style
+            statusBadge.classList.add('status-processing');
         }
         statusCell.appendChild(statusBadge);
 
@@ -1690,75 +1690,87 @@ function initializeTtsFunctionality() {
     function displayTtsResults(data) {
         console.log("[displayTtsResults] Rendering data:", data);
         
-        // --- FIX START ---
-        // Ensure the table structure exists before trying to append to it.
-        const resultsTableContainer = document.getElementById('ttsResultsTableContainer');
-        if (!resultsTableContainer) {
+        const container = document.getElementById('ttsResultsTableContainer');
+        if (!container) {
             console.error('TTS Results container not found!');
             addNotification('发生UI错误：无法找到结果显示区域。', 'error');
             return;
         }
+        container.innerHTML = ''; // Clear previous results
 
-        resultsTableContainer.innerHTML = `
-            <table class="table table-bordered table-striped">
-                <thead class="table-light">
-                    <tr>
-                        <th scope="col">原始内容</th>
-                        <th scope="col">输出文件名</th>
-                        <th scope="col">状态</th>
-                        <th scope="col">操作</th>
-                    </tr>
-                </thead>
-                <tbody id="ttsResultsTableBody">
-                </tbody>
-            </table>
-        `;
-        const resultsTableBody = document.getElementById('ttsResultsTableBody');
-        // --- FIX END ---
+        // ADDED: Display overall duration first if available
+        if (data.duration_seconds !== undefined) {
+            const overallDurationP = document.createElement('p');
+            overallDurationP.className = 'text-muted small mb-2'; // Consistent styling
+            overallDurationP.textContent = `总处理时长: ${data.duration_seconds} 秒`;
+            container.appendChild(overallDurationP);
+        }
 
-        if (data.results && data.results.length > 0) {
-            data.results.forEach(result => {
-                const row = document.createElement('tr');
+        if (data.error) {
+            let errorMessage = `<p class="text-danger">处理失败: ${escapeHtml(data.error)}</p>`;
+            container.innerHTML += errorMessage; // Append error message after duration
+            return;
+        }
 
-                // 1. 原始输入/文件名
-                const originalNameCell = document.createElement('td');
-                originalNameCell.textContent = result.original_name || 'N/A';
-                row.appendChild(originalNameCell);
+        if (!data.results || data.results.length === 0) {
+            container.innerHTML += '<p class="no-files">没有转换结果。</p>'; // Append after duration
+            return;
+        }
 
-                // 2. 转换后音频
-                const convertedNameCell = document.createElement('td');
-                convertedNameCell.textContent = result.converted_name || 'N/A';
-                row.appendChild(convertedNameCell);
-                
-                // 3. 状态
-                const statusCell = document.createElement('td');
-                const statusSpan = document.createElement('span');
-                statusSpan.textContent = result.status === 'success' ? '成功' : '失败';
-                statusSpan.className = result.status === 'success' ? 'status-success' : 'status-error';
-                statusCell.appendChild(statusSpan);
-                row.appendChild(statusCell);
+        // Add the same container class as document conversion for consistent styling
+        container.className = 'converted-files-container';
+        
+        const table = document.createElement('table');
+        table.className = 'table table-striped table-bordered'; 
+        table.style.borderCollapse = 'collapse';
 
-                // 4. 消息/下载
-                const actionCell = document.createElement('td');
-                if (result.status === 'success' && result.download_url) {
+        const thead = document.createElement('thead');
+        thead.innerHTML = '<tr>' +
+                            '<th>原始文件名</th>' +
+                            '<th>转换后文件名</th>' +
+                            '<th>状态</th>' +
+                            '<th>消息/下载</th>' +
+                        '</tr>';
+        table.appendChild(thead);
+
+        const tbody = document.createElement('tbody');
+        data.results.forEach(result => {
+            const row = tbody.insertRow();
+            row.insertCell().textContent = result.original_name || 'N/A';
+            row.insertCell().textContent = result.converted_name || 'N/A';
+            
+            const statusCell = row.insertCell();
+            const statusBadge = document.createElement('span');
+            statusBadge.classList.add('status-badge');
+            statusBadge.textContent = result.status;
+            
+            if (result.status === 'success' || result.status === 'success_fallback') {
+                statusBadge.classList.add('status-success');
+            } else if (result.status === 'error' || (typeof result.status === 'string' && result.status.includes('_error'))) {
+                statusBadge.classList.add('status-error');
+            } else {
+                statusBadge.classList.add('status-processing');
+            }
+            statusCell.appendChild(statusBadge);
+
+            const actionCell = row.insertCell();
+            if (result.status === 'success' || result.status === 'success_fallback') {
+                if (result.download_url) {
                     const downloadLink = document.createElement('a');
                     downloadLink.href = result.download_url;
-                    downloadLink.textContent = '下载音频';
-                    downloadLink.className = 'btn btn-success btn-sm';
-                    downloadLink.setAttribute('download', ''); 
+                    downloadLink.textContent = '下载';
+                    downloadLink.className = 'download-link';
+                    downloadLink.target = '_blank';
                     actionCell.appendChild(downloadLink);
                 } else {
-                    actionCell.textContent = result.message || '无有效操作';
+                    actionCell.textContent = result.message || '-';
                 }
-                row.appendChild(actionCell);
-
-                resultsTableBody.appendChild(row);
-            });
-            resultsTableContainer.style.display = 'block';
-        } else {
-            addNotification("转换成功，但服务器未返回有效的结果列表。", "warning");
-            resultsTableContainer.style.display = 'none';
-        }
+            } else {
+                actionCell.textContent = result.message || '未知错误';
+            }
+        });
+        table.appendChild(tbody);
+        container.appendChild(table);
     }
     
     // Mark TTS as initialized
