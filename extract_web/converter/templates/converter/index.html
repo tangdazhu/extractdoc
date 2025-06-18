@@ -847,10 +847,10 @@
             <!-- Speech Processing Content Area -->
             <div class="sub-tabs-container" style="margin-bottom: 20px; display: flex; flex-direction: column; align-items: flex-start; border-bottom: 1px solid #dee2e6; padding-bottom: 15px;">
                 <h4 style="margin: 0 0 10px 0; color: #2c3e50; font-size: 22px; font-weight: 600;">语音处理</h4>
-                <div class="sub-tabs"> <!-- Removed ms-auto -->
+                <div class="sub-tabs">
                     <button id="speechSubTabAsr" class="sub-tab-button active" onclick="showSpeechSubTab('asrContent', this)">语音转文字</button>
-                    <button id="speechSubTabClone" class="sub-tab-button disabled" onclick="showSpeechSubTab('voiceCloningContent', this)" title="功能开发中" disabled>声音克隆</button>
-                    <button id="speechSubTabTts" class="sub-tab-button disabled" onclick="showSpeechSubTab('ttsContent', this)" title="功能开发中" disabled>文字转语音</button>
+                    <button id="speechSubTabClone" class="sub-tab-button" onclick="showSpeechSubTab('voiceCloningContent', this)" title="功能开发中">声音克隆</button>
+                    <button id="speechSubTabTts" class="sub-tab-button" onclick="showSpeechSubTab('ttsContent', this)">文字转语音</button>
                 </div>
             </div>
 
@@ -908,21 +908,80 @@
             </div>
 
             <!-- Voice Cloning Sub-content (Placeholder) -->
-            <div id="voiceCloningContent" class="speech-sub-content" style="display:none; padding-top: 15px;">
+            <div id="voiceCloningContent" class="speech-sub-content" style="display: none;">
                 <div class="card shadow-sm mb-4">
                     <div class="card-body">
-                        <h5 class="card-title" style="color: #34495e; font-weight: 500;">声音克隆</h5>
-                        <p class="text-muted">此功能正在开发中，敬请期待。</p>
+                        <h5 class="card-title" style="color: #34495e; font-weight: 500;">声音克隆 (Voice Cloning)</h5>
+                        <p class="card-text text-muted">上传一段或多段WAV格式的音频，训练你自己的声音模型。（功能开发中...）</p>
+                        <form id="voiceCloningForm">
+                            <div class="form-group">
+                                <label for="cloneAudioFiles">上传音频文件 (WAV):</label>
+                                <input type="file" class="form-control-file" id="cloneAudioFiles" name="cloneAudioFiles" multiple>
+                            </div>
+                            <button type="button" class="btn btn-primary" id="startCloningBtn">开始训练</button>
+                        </form>
                     </div>
                 </div>
             </div>
 
             <!-- TTS Sub-content (Placeholder) -->
-            <div id="ttsContent" class="speech-sub-content" style="display:none; padding-top: 15px;">
+            <div id="ttsContent" class="speech-sub-content" style="display: none;">
                 <div class="card shadow-sm mb-4">
                     <div class="card-body">
-                        <h5 class="card-title" style="color: #34495e; font-weight: 500;">个性化语音合成</h5>
-                        <p class="text-muted">此功能（使用克隆声音将文本转换为语音）正在开发中。</p>
+                        <h5 class="card-title" style="color: #34495e; font-weight: 500;">文字转语音 (Text-to-Speech)</h5>
+                        <p class="card-text text-muted">输入文本或上传文档，选择一个音色模型，系统将生成对应的语音。单次转换建议不超过5000字，长文本会自动分段处理。</p>
+
+                        <div class="row">
+                            <div class="col">
+                                <!-- Input Type: Text -->
+                                <div class="form-group">
+                                    <div class="custom-control custom-radio">
+                                        <input type="radio" id="ttsInputTypeText" name="ttsInputType" class="custom-control-input" value="text" checked>
+                                        <label class="custom-control-label" for="ttsInputTypeText">文本输入</label>
+                                    </div>
+                                </div>
+
+                                <!-- Text Input Area (Full Width) -->
+                                <div id="ttsTextContainer" class="mb-3">
+                                    <textarea class="form-control" id="ttsInputText" rows="8" placeholder="在此输入要转换为语音的文本..." style="width: 80%;"></textarea>
+                                </div>
+                                
+                                <!-- Input Type: File -->
+                                <div class="form-group">
+                                    <div class="custom-control custom-radio">
+                                        <input type="radio" id="ttsInputTypeFile" name="ttsInputType" class="custom-control-input" value="file">
+                                        <label class="custom-control-label" for="ttsInputTypeFile">文件上传</label>
+                                    </div>
+                                </div>
+                                
+                                <!-- File Upload Area -->
+                                <div id="ttsFileContainer" style="display: none;">
+                                    <div id="ttsDropZone" class="content-area">
+                                        <p>点击或拖拽文件到此区域</p>
+                                        <input type="file" id="ttsFileInput" accept=".txt,.pdf,.docx" style="display: none;" multiple>
+                                    </div>
+                                    <ul id="ttsFileList" class="list-unstyled mt-3"></ul>
+                                    <div class="mt-2">
+                                         <button type="button" class="btn btn-sm btn-outline-secondary" id="ttsAddFileBtn">添加文件</button>
+                                         <button type="button" class="btn btn-sm btn-outline-danger ml-2" id="ttsClearListBtn">清空列表</button>
+                                    </div>
+                                </div>
+                                
+                                <!-- 音色选择 -->
+                                <div class="form-group mt-3">
+                                    <label for="ttsVoiceSelection" class="font-weight-bold">选择音色模型:</label>
+                                    <select class="form-control" id="ttsVoiceSelection">
+                                        <option value="大助（默认）- 成熟稳重的男声，适合新闻、解说">大助（默认）- 成熟稳重的男声，适合新闻、解说</option>
+                                        <option value="云飞 - 深沉磁性的男声, 适合纪录片、朗诵">云飞 - 深沉磁性的男声, 适合纪录片、朗诵</option>
+                                    </select>
+                                </div>
+
+                                <div class="mt-4">
+                                    <button id="startTtsBtn" class="btn btn-primary">开始转换</button>
+                                    <button id="clearTtsBtn" class="btn btn-outline-secondary ml-2">清空</button>
+                                </div>
+                            </div>
+                        </div>
                     </div>
                 </div>
             </div>

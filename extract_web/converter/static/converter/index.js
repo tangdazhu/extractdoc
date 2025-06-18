@@ -628,6 +628,32 @@ function displayConvertedFiles(data) { // Specific to docConversionContent
     
 // Initial setup: DOMContentLoaded listener
 document.addEventListener('DOMContentLoaded', function() {
+    // Move TTS initialization to the top to ensure it runs first
+    initializeTtsFunctionality(); 
+
+    initializeTabSwitching();
+    initializeMainFileUploadLogic();
+    initializeVideoProcessing();
+    initializeSpeechToText();
+    
+    // Auto-select tab based on URL hash
+    if (window.location.hash) {
+        const targetTab = document.querySelector(`a[href="${window.location.hash}"]`);
+        if (targetTab) {
+            // Using bootstrap's method to show tab
+            const tab = new bootstrap.Tab(targetTab);
+            tab.show();
+            // Also update the main navigation state if the hash corresponds to one
+            const mainTabId = window.location.hash.substring(1); // remove #
+            if (['fileToPdfContent', 'imgToFileContent', 'pdfToFileContent', 'videoExtractorContent', 'speechToTextContent', 'ttsContent'].includes(mainTabId)) {
+                currentSelectedMainNavigation = mainTabId;
+            }
+        }
+    } else {
+        // Fallback to the default view if no hash
+        switchUIToMainTab(currentSelectedMainNavigation, true);
+    }
+
     // Initialize the view based on currentSelectedMainNavigation
     // Pass true to prevent clearing inputs on initial load if state needs to be preserved (e.g. page refresh with form data)
     selectMainNavigation(currentSelectedMainNavigation, true);
@@ -639,6 +665,15 @@ document.addEventListener('DOMContentLoaded', function() {
     // renderFileList(); // Called by selectMainNavigation -> showTab -> selectSubTab which is fine
 
     // Note: Specific initializations for video and speech tabs are now called within selectMainNavigation
+
+    if (videoProcessingTab) {
+        initializeVideoProcessingFunctionality();
+    }
+    if(document.getElementById('speechProcessingContent')) {
+        initializeAsrFunctionality();
+        // 初始化新增的TTS功能
+        initializeTtsFunctionality();
+    }
 });
 
 // --- Main Navigation Logic ---
@@ -1411,4 +1446,236 @@ setTimeout(function() {
     if (typeof updateImgToPptDirectInsertOption === 'function') updateImgToPptDirectInsertOption();
 }, 200);
 // === END ===
+
+function initializeTtsFunctionality() {
+    // --- Top Level Elements ---
+    const startTtsBtn = document.getElementById('startTtsBtn');
+    const clearTtsBtn = document.getElementById('clearTtsBtn');
+    const ttsVoiceSelection = document.getElementById('ttsVoiceSelection');
+    
+    // --- Input Containers and Radios ---
+    const ttsTextContainer = document.getElementById('ttsTextContainer');
+    const ttsFileContainer = document.getElementById('ttsFileContainer');
+    const radioText = document.getElementById('ttsInputTypeText');
+    const radioFile = document.getElementById('ttsInputTypeFile');
+    
+    // --- Text Input ---
+    const ttsInputText = document.getElementById('ttsInputText');
+
+    // --- File Upload Elements ---
+    const ttsDropZone = document.getElementById('ttsDropZone');
+    const ttsFileInput = document.getElementById('ttsFileInput');
+    const ttsFileListUI = document.getElementById('ttsFileList');
+    const ttsAddFileBtn = document.getElementById('ttsAddFileBtn');
+    const ttsClearListBtn = document.getElementById('ttsClearListBtn');
+    let ttsUploadedFiles = []; // Array to hold file objects
+
+    // --- Result Display Elements ---
+    const ttsResultContainer = document.getElementById('ttsResultContainer');
+    const ttsProgressContainer = document.getElementById('ttsProgressContainer');
+    const ttsProgressBar = document.getElementById('ttsProgressBar');
+    const ttsProgressText = document.getElementById('ttsProgressText');
+    const ttsErrorOutput = document.getElementById('ttsErrorOutput');
+    const ttsResultsTableContainer = document.getElementById('ttsResultsTableContainer');
+
+    // --- LOGIC ---
+
+    // 1. Input Mode Switching
+    const handleTtsInputSwitch = () => {
+        if (radioText.checked) {
+            ttsTextContainer.style.display = 'block';
+            ttsFileContainer.style.display = 'none';
+        } else {
+            ttsTextContainer.style.display = 'none';
+            ttsFileContainer.style.display = 'block';
+        }
+    };
+    radioText.addEventListener('change', handleTtsInputSwitch);
+    radioFile.addEventListener('change', handleTtsInputSwitch);
+
+    // 2. File Handling Logic
+    const handleTtsFiles = (files) => {
+        [...files].forEach(file => {
+            // Basic validation for supported types
+            if (['text/plain', 'application/pdf', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'].includes(file.type) || 
+                file.name.endsWith('.txt') || file.name.endsWith('.pdf') || file.name.endsWith('.docx')) {
+                ttsUploadedFiles.push(file);
+            } else {
+                addNotification(`不支持的文件类型: ${file.name}`, 'warning');
+            }
+        });
+        updateTtsFileList();
+    };
+
+    const updateTtsFileList = () => {
+        ttsFileListUI.innerHTML = '';
+        ttsUploadedFiles.forEach((file, index) => {
+            const li = document.createElement('li');
+            li.className = 'list-group-item d-flex justify-content-between align-items-center';
+            li.innerHTML = `
+                <span>${escapeHtml(file.name)}</span>
+                <button type="button" class="btn-close" aria-label="Close"></button>
+            `;
+            li.querySelector('.btn-close').addEventListener('click', () => {
+                ttsUploadedFiles.splice(index, 1);
+                updateTtsFileList();
+            });
+            ttsFileListUI.appendChild(li);
+        });
+    };
+
+    ttsDropZone.addEventListener('click', () => ttsFileInput.click());
+    ttsAddFileBtn.addEventListener('click', () => ttsFileInput.click());
+    ttsFileInput.addEventListener('change', (e) => handleTtsFiles(e.target.files));
+    
+    ['dragover', 'drop'].forEach(eventName => {
+        ttsDropZone.addEventListener(eventName, e => e.preventDefault());
+    });
+    ttsDropZone.addEventListener('dragenter', () => ttsDropZone.classList.add('border-primary'));
+    ttsDropZone.addEventListener('dragleave', () => ttsDropZone.classList.remove('border-primary'));
+    ttsDropZone.addEventListener('drop', (e) => {
+        ttsDropZone.classList.remove('border-primary');
+        handleTtsFiles(e.dataTransfer.files);
+    });
+
+    ttsClearListBtn.addEventListener('click', () => {
+        ttsUploadedFiles = [];
+        ttsFileInput.value = ''; // Reset file input
+        updateTtsFileList();
+    });
+
+    // 3. Main Action Buttons
+    if (startTtsBtn) {
+        startTtsBtn.addEventListener('click', async function() {
+            const inputType = radioText.checked ? 'text' : 'file';
+            const text = ttsInputText.value.trim();
+            const voice = ttsVoiceSelection.value;
+
+            if (inputType === 'text' && !text) {
+                addNotification('请输入要转换的文本。', 'warning');
+                return;
+            }
+            if (inputType === 'file' && ttsUploadedFiles.length === 0) {
+                addNotification('请至少上传一个文件。', 'warning');
+                return;
+            }
+
+            ttsResultContainer.style.display = 'block';
+            ttsProgressContainer.style.display = 'block';
+            ttsErrorOutput.style.display = 'none';
+            ttsResultsTableContainer.innerHTML = '';
+            updateProgressBar('10%', '正在准备转换...');
+
+            const formData = new FormData();
+            formData.append('voice_model', voice);
+            
+            if (inputType === 'text') {
+                formData.append('text_input', text);
+            } else {
+                ttsUploadedFiles.forEach(file => formData.append('file_input', file));
+            }
+
+            try {
+                setTimeout(() => updateProgressBar('40%', '正在上传和提取文本...'), 500);
+
+                const response = await fetch('/api/text-to-speech/', {
+                    method: 'POST',
+                    body: formData,
+                    headers: { 'X-CSRFToken': getCsrfToken() },
+                });
+
+                updateProgressBar('75%', '服务器正在合成音频...');
+
+                if (!response.ok) {
+                    const errorData = await response.json().catch(() => ({ message: '服务器返回了非JSON格式的错误响应。' }));
+                    throw new Error(errorData.message || `服务器错误，状态码: ${response.status}`);
+                }
+
+                const result = await response.json();
+                updateProgressBar('100%', '处理完成！');
+                
+                setTimeout(() => {
+                    ttsProgressContainer.style.display = 'none';
+                    displayTtsResults(result);
+                }, 500);
+
+            } catch (error) {
+                console.error('TTS Error:', error);
+                ttsProgressContainer.style.display = 'none';
+                ttsErrorOutput.textContent = `转换失败: ${error.message}`;
+                ttsErrorOutput.style.display = 'block';
+                addNotification(`转换失败: ${error.message}`, 'error');
+            }
+        });
+    }
+
+    if (clearTtsBtn) {
+        clearTtsBtn.addEventListener('click', function() {
+            ttsInputText.value = '';
+            ttsUploadedFiles = [];
+            ttsFileInput.value = '';
+            updateTtsFileList();
+            ttsResultContainer.style.display = 'none';
+            ttsErrorOutput.style.display = 'none';
+            ttsResultsTableContainer.innerHTML = '';
+        });
+    }
+
+    // Helper for progress bar
+    function updateProgressBar(percentage, text) {
+        ttsProgressBar.style.width = percentage;
+        ttsProgressBar.textContent = percentage;
+        ttsProgressText.textContent = text;
+    }
+}
+
+function displayTtsResults(data) {
+    const container = document.getElementById('ttsResultsTableContainer');
+    const errorOutput = document.getElementById('ttsErrorOutput');
+    container.innerHTML = '';
+    errorOutput.style.display = 'none';
+
+    if (data.status === 'error' || !data.results || data.results.length === 0) {
+        errorOutput.textContent = data.message || '转换失败或未返回有效结果。';
+        errorOutput.style.display = 'block';
+        return;
+    }
+
+    const table = document.createElement('table');
+    table.className = 'table table-striped table-bordered';
+    
+    const thead = document.createElement('thead');
+    thead.innerHTML = `
+        <tr>
+            <th>原始输入</th>
+            <th>转换后音频</th>
+            <th>状态</th>
+            <th>消息/下载</th>
+        </tr>
+    `;
+    table.appendChild(thead);
+
+    const tbody = document.createElement('tbody');
+    data.results.forEach(item => {
+        const row = document.createElement('tr');
+        const statusBadge = item.status === 'success' 
+            ? `<span class="badge badge-success">成功</span>` 
+            : `<span class="badge badge-danger">失败</span>`;
+        
+        const downloadLink = item.status === 'success'
+            ? `<a href="${item.download_url}" class="btn btn-sm btn-success" download>下载音频</a>`
+            : '';
+
+        row.innerHTML = `
+            <td title="${escapeHtml(item.original_name)}">${escapeHtml(item.original_name.substring(0, 50))}${item.original_name.length > 50 ? '...' : ''}</td>
+            <td>${item.converted_name ? escapeHtml(item.converted_name) : '-'}</td>
+            <td>${statusBadge}</td>
+            <td>${item.status === 'success' ? downloadLink : escapeHtml(item.message)}</td>
+        `;
+        tbody.appendChild(row);
+    });
+
+    table.appendChild(tbody);
+    container.appendChild(table);
+}
 

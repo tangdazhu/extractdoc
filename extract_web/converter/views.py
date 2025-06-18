@@ -3105,3 +3105,281 @@ def speech_to_text_view(request):
             http_status=500,
             request_id=request_id,
         )
+
+
+# =====================================================================================
+# NEW: Text to Speech (TTS) View
+# =====================================================================================
+
+
+def _extract_text_from_file(file_path):
+    """Extracts text from txt, pdf, or docx file."""
+    text = ""
+    file_extension = os.path.splitext(file_path)[1].lower()
+
+    if file_extension == ".txt":
+        with open(file_path, "r", encoding="utf-8") as f:
+            text = f.read()
+    elif file_extension == ".pdf":
+        with pdfplumber.open(file_path) as pdf:
+            all_pages = [
+                page.extract_text() for page in pdf.pages if page.extract_text()
+            ]
+            text = "\n".join(all_pages)
+    elif file_extension == ".docx":
+        doc = docx.Document(file_path)
+        all_paras = [para.text for para in doc.paragraphs]
+        text = "\n".join(all_paras)
+    else:
+        raise ValueError(f"Unsupported file type: {file_extension}")
+
+    return text
+
+
+def _chunk_text(text, max_length=1000):
+    """Splits text into chunks, trying to preserve sentences."""
+    if not text:
+        return []
+
+    chunks = []
+    while len(text) > max_length:
+        # Find a good split point (end of sentence, or last space)
+        split_at = text.rfind("。", 0, max_length)
+        if split_at == -1:
+            split_at = text.rfind("！", 0, max_length)
+        if split_at == -1:
+            split_at = text.rfind("？", 0, max_length)
+        if split_at == -1:
+            split_at = text.rfind("\n", 0, max_length)
+        if split_at == -1:
+            split_at = text.rfind(" ", 0, max_length)
+        if split_at == -1:  # If no good split point, just force split
+            split_at = max_length - 1
+
+        chunks.append(text[: split_at + 1].strip())
+        text = text[split_at + 1 :].strip()
+
+    if text:  # Add the last remaining part
+        chunks.append(text)
+
+    return chunks
+
+
+@login_required
+@require_POST
+def text_to_speech_view(request):
+    request_id = generate_request_id()
+    logger.info(f"text_to_speech_view: Received request. RID: {request_id}")
+
+    # --- Setup Directories and Paths ---
+    username = request.user.username
+    today_date_str = datetime.now().strftime("%Y%m%d")
+    user_upload_dir, user_converted_dir = ensure_user_directories(
+        username, today_date_str
+    )
+
+    # Path to the so-vits-svc project
+    # Assuming the script runs from 'extract_doc' directory, and 'voice-mock-gpu' is at the same level
+    project_root = os.path.abspath(os.path.join(settings.BASE_DIR, ".."))
+    so_vits_dir = os.path.join(project_root, "voice-mock-gpu", "so-vits-svc")
+    voice_mock_script = os.path.join(so_vits_dir, "voice-mock.py")
+
+    if not os.path.exists(voice_mock_script):
+        logger.error(
+            f"text_to_speech_view: voice-mock.py not found at {voice_mock_script}. RID: {request_id}"
+        )
+        return format_error_response(message="服务器配置错误：找不到语音合成脚本。")
+
+    temp_files_to_clean = []
+
+    try:
+        # --- Parse Input ---
+        voice_model = request.POST.get("voice_model")
+        text_input = request.POST.get("text_input")
+        # MODIFIED: Handle multiple files
+        file_inputs = request.FILES.getlist("file_input")
+
+        if not voice_model:
+            return format_error_response(message="必须选择一个音色模型。")
+        if not text_input and not file_inputs:
+            return format_error_response(message="请输入文本或上传一个文件。")
+
+        original_input_name = "文本输入"
+        full_text = ""
+
+        if file_inputs:
+            all_texts = []
+            original_filenames = []
+            for file_input in file_inputs:
+                temp_file_path, _, _ = save_uploaded_file(
+                    file_input, user_upload_dir, request_id
+                )
+                temp_files_to_clean.append(temp_file_path)
+                original_filenames.append(file_input.name)
+                try:
+                    extracted_text = _extract_text_from_file(temp_file_path)
+                    all_texts.append(extracted_text)
+                    logger.info(
+                        f"text_to_speech_view: Extracted {len(extracted_text)} chars from {file_input.name}. RID: {request_id}"
+                    )
+                except Exception as e:
+                    return format_error_response(
+                        message=f"从文件 '{file_input.name}' 提取文本失败: {e}"
+                    )
+
+            full_text = "\n".join(all_texts)
+            original_input_name = ", ".join(original_filenames)
+        else:
+            full_text = text_input
+
+        if not full_text.strip():
+            return format_error_response(message="输入文本为空。")
+
+        # --- Process Text and Synthesize ---
+        text_chunks = _chunk_text(full_text)
+        audio_chunks_paths = []
+
+        for i, chunk in enumerate(text_chunks):
+            logger.info(
+                f"text_to_speech_view: Processing chunk {i+1}/{len(text_chunks)}. RID: {request_id}"
+            )
+
+            # Write chunk to input.txt in so-vits-svc directory
+            chunk_input_txt_path = os.path.join(so_vits_dir, "input.txt")
+            with open(chunk_input_txt_path, "w", encoding="utf-8") as f:
+                f.write(chunk)
+
+            chunk_output_filename = f"chunk_{request_id}_{i}.wav"
+
+            # Run voice-mock.py for the chunk
+            command = [
+                sys.executable,
+                voice_mock_script,
+                "--spk",
+                voice_model,
+                "--output",
+                chunk_output_filename,
+                "--wav_format",
+                "wav",  # Force wav for easier concatenation
+            ]
+
+            logger.info(
+                f"text_to_speech_view: Executing command: {' '.join(command)} in cwd: {so_vits_dir}. RID: {request_id}"
+            )
+            result = subprocess.run(
+                command,
+                cwd=so_vits_dir,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+            )
+
+            if result.returncode != 0:
+                logger.error(
+                    f"text_to_speech_view: voice-mock.py failed for chunk {i}. STDERR: {result.stderr}. RID: {request_id}"
+                )
+                raise RuntimeError(f"语音合成脚本执行失败 (片段 {i+1})。")
+
+            # Find the generated audio chunk
+            generated_chunk_path = os.path.join(
+                so_vits_dir, "results", "wav", chunk_output_filename
+            )
+            if not os.path.exists(generated_chunk_path):
+                logger.error(
+                    f"text_to_speech_view: voice-mock.py did not produce expected output file: {generated_chunk_path}. RID: {request_id}"
+                )
+                raise RuntimeError("语音合成脚本未生成预期的音频文件。")
+
+            audio_chunks_paths.append(generated_chunk_path)
+            temp_files_to_clean.append(generated_chunk_path)
+
+        # --- Concatenate Audio Chunks (if necessary) ---
+        final_audio_path = ""
+        if not audio_chunks_paths:
+            raise RuntimeError("没有生成任何音频片段。")
+        elif len(audio_chunks_paths) == 1:
+            final_audio_path = audio_chunks_paths[0]
+        else:
+            logger.info(
+                f"text_to_speech_view: Concatenating {len(audio_chunks_paths)} audio chunks. RID: {request_id}"
+            )
+            concat_list_path = os.path.join(user_upload_dir, f"concat_{request_id}.txt")
+            with open(concat_list_path, "w", encoding="utf-8") as f:
+                for chunk_path in audio_chunks_paths:
+                    # ffmpeg requires escaped backslashes on Windows
+                    f.write(f"file '{chunk_path.replace(os.sep, '/')}'\n")
+
+            temp_files_to_clean.append(concat_list_path)
+
+            concatenated_filename = f"tts_merged_{request_id}.wav"
+            concatenated_output_path = os.path.join(
+                user_upload_dir, concatenated_filename
+            )
+
+            concat_command = [
+                "ffmpeg",
+                "-y",
+                "-f",
+                "concat",
+                "-safe",
+                "0",
+                "-i",
+                concat_list_path,
+                "-c",
+                "copy",
+                concatenated_output_path,
+            ]
+
+            logger.info(
+                f"text_to_speech_view: Executing ffmpeg concat: {' '.join(concat_command)}. RID: {request_id}"
+            )
+            result = subprocess.run(concat_command, capture_output=True, text=True)
+
+            if result.returncode != 0:
+                logger.error(
+                    f"text_to_speech_view: ffmpeg concatenation failed. STDERR: {result.stderr}. RID: {request_id}"
+                )
+                raise RuntimeError("音频片段合并失败。")
+
+            final_audio_path = concatenated_output_path
+            temp_files_to_clean.append(final_audio_path)
+
+        # --- Finalize and Prepare Response ---
+        final_filename_display = f"tts_output_{request_id}.wav"
+        final_destination_path = os.path.join(
+            user_converted_dir, final_filename_display
+        )
+        shutil.move(final_audio_path, final_destination_path)
+
+        # Create meta file
+        meta_file_path = f"{final_destination_path}.meta"
+        with open(meta_file_path, "w", encoding="utf-8") as mf:
+            mf.write(original_input_name)
+
+        download_url = reverse(
+            "converter:download_converted_file",
+            args=[username, today_date_str, final_filename_display],
+        )
+
+        response_results = [
+            {
+                "original_name": original_input_name,
+                "converted_name": final_filename_display,
+                "download_url": download_url,
+                "status": "success",
+                "message": "文字转语音成功。",
+            }
+        ]
+
+        return format_json_response(results=response_results, request_id=request_id)
+
+    except Exception as e:
+        logger.error(
+            f"text_to_speech_view: An error occurred. RID: {request_id}. Error: {e}",
+            exc_info=True,
+        )
+        return format_error_response(message=f"处理失败: {e}", request_id=request_id)
+    finally:
+        cleanup_temp_files(
+            [{"path": p, "type": "file"} for p in temp_files_to_clean], request_id
+        )
