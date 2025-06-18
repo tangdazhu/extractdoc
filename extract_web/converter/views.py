@@ -54,6 +54,9 @@ from django.core.exceptions import PermissionDenied  # For security checks
 from .speech_processor import (
     transcribe_audio_dashscope,
 )  # ADDED: Import for speech transcription
+from .text_to_voice import (
+    get_predefined_tts_voices,
+)  # ADDED: Import for TTS voice list
 
 # ADDED: For text extraction from PDF in TTS, make it an optional import
 try:
@@ -123,8 +126,19 @@ except ImportError:
 
 
 def index(request):
-    # 未来这里会处理表单提交和文件上传
-    return render(request, "converter/index.html")
+    """
+    Renders the main converter page, passing the curated list of TTS voices
+    to the template.
+    """
+    # This block ensures the static list from text_to_voice.py is always called.
+    try:
+        tts_voices = get_predefined_tts_voices()
+    except Exception as e:
+        logging.error(f"Critical error getting predefined TTS voices: {e}")
+        tts_voices = []
+
+    context = {"tts_voices": tts_voices}
+    return render(request, "converter/index.html", context)
 
 
 @login_required

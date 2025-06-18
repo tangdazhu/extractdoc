@@ -971,8 +971,11 @@
                                 <div class="form-group mt-3">
                                     <label for="ttsVoiceSelection" class="font-weight-bold">选择音色模型:</label>
                                     <select class="form-control" id="ttsVoiceSelection">
-                                        <option value="大助（默认）- 成熟稳重的男声，适合新闻、解说">大助（默认）- 成熟稳重的男声，适合新闻、解说</option>
-                                        <option value="云飞 - 深沉磁性的男声, 适合纪录片、朗诵">云飞 - 深沉磁性的男声, 适合纪录片、朗诵</option>
+                                        {% for voice in tts_voices %}
+                                            <option value="{{ voice.ShortName }}">{{ voice.DisplayName }}</option>
+                                        {% empty %}
+                                            <option value="" disabled>未能加载音色模型</option>
+                                        {% endfor %}
                                     </select>
                                 </div>
 
