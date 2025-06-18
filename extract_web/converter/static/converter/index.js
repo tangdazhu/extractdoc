@@ -1560,10 +1560,20 @@ function initializeTtsFunctionality() {
                 return;
             }
 
+            // --- FIX START ---
+            // Clear previous results but preserve the table structure
+            const resultsTableBody = document.getElementById('ttsResultsTableBody');
+            if (resultsTableBody) {
+                resultsTableBody.innerHTML = '';
+            } else {
+                 // If the table body isn't there, clear the whole container to be safe
+                ttsResultsTableContainer.innerHTML = '';
+            }
             ttsResultContainer.style.display = 'block';
             ttsProgressContainer.style.display = 'block';
             ttsErrorOutput.style.display = 'none';
-            ttsResultsTableContainer.innerHTML = '';
+            // --- FIX END ---
+            
             updateProgressBar('10%', '正在准备转换...');
 
             const formData = new FormData();
@@ -1635,10 +1645,32 @@ function initializeTtsFunctionality() {
     // NEW FUNCTION: Replicates the style and structure of displayConvertedFiles for TTS
     function displayTtsResults(data) {
         console.log("[displayTtsResults] Rendering data:", data);
-        const resultsTableBody = document.getElementById('ttsResultsTableBody');
-        const resultsTableContainer = document.getElementById('ttsResultsTableContainer');
         
-        resultsTableBody.innerHTML = ''; 
+        // --- FIX START ---
+        // Ensure the table structure exists before trying to append to it.
+        const resultsTableContainer = document.getElementById('ttsResultsTableContainer');
+        if (!resultsTableContainer) {
+            console.error('TTS Results container not found!');
+            addNotification('发生UI错误：无法找到结果显示区域。', 'error');
+            return;
+        }
+
+        resultsTableContainer.innerHTML = `
+            <table class="table table-bordered table-striped">
+                <thead class="table-light">
+                    <tr>
+                        <th scope="col">原始内容</th>
+                        <th scope="col">输出文件名</th>
+                        <th scope="col">状态</th>
+                        <th scope="col">操作</th>
+                    </tr>
+                </thead>
+                <tbody id="ttsResultsTableBody">
+                </tbody>
+            </table>
+        `;
+        const resultsTableBody = document.getElementById('ttsResultsTableBody');
+        // --- FIX END ---
 
         if (data.results && data.results.length > 0) {
             data.results.forEach(result => {
