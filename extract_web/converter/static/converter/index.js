@@ -7,6 +7,9 @@ const uploadedFiles = [];  // For document conversion multi-file
 let uploadedVideoFile = null; // For single video file in video analysis
 let uploadedAudioFile = null; // For single audio file in speech processing
 
+// Global flag to prevent multiple TTS initializations
+let ttsInitialized = false;
+
 // --- Helper function to disable/enable main navigation buttons ---
 function updateMainNavigationButtonStates(disableNonActive) {
     const navButtons = document.querySelectorAll('.sidebar-nav li button');
@@ -764,8 +767,9 @@ function initializeSpeechTab() {
     } else {
         console.error("ASR sub-tab button not found for default initialization.");
     }
-    // Logic for ASR specific elements (URL input, buttons, etc.)
+    // Initialize all speech processing functionalities
     initializeAsrFunctionality();
+    initializeTtsFunctionality(); // Add TTS initialization
 }
 
 // Renamed from showSpeechProcessingSubTab for clarity if it's only for main speech tab
@@ -799,6 +803,23 @@ function showSpeechSubTab(subTabIdToShow, clickedButton) {
         clickedButton.classList.add('active');
     }
     currentSelectedSpeechSubTab = subTabIdToShow; // Update global state
+    
+    // Initialize specific functionality based on the selected sub-tab
+    if (subTabIdToShow === 'ttsContent') {
+        console.log("[showSpeechSubTab] Initializing TTS functionality for TTS tab");
+        // Ensure TTS functionality is initialized when TTS tab is shown
+        // Use a longer delay to ensure DOM elements are fully visible and accessible
+        setTimeout(() => {
+            const startTtsBtn = document.getElementById('startTtsBtn');
+            if (startTtsBtn) {
+                console.log("[showSpeechSubTab] TTS button found, initializing...");
+                initializeTtsFunctionality();
+            } else {
+                console.error("[showSpeechSubTab] TTS button not found, cannot initialize TTS functionality");
+            }
+        }, 200); // Increased delay
+    }
+    
     console.log(`[showSpeechSubTab] Current active speech sub-tab: ${currentSelectedSpeechSubTab}`);
 }
 
@@ -1457,10 +1478,24 @@ setTimeout(function() {
 // === END ===
 
 function initializeTtsFunctionality() {
+    // Prevent multiple initializations
+    if (ttsInitialized) {
+        console.log("[initializeTtsFunctionality] TTS already initialized, skipping.");
+        return;
+    }
+    
+    console.log("[initializeTtsFunctionality] Initializing TTS functionality.");
+    
     // --- Top Level Elements ---
     const startTtsBtn = document.getElementById('startTtsBtn');
     const clearTtsBtn = document.getElementById('clearTtsBtn');
     const ttsVoiceSelection = document.getElementById('ttsVoiceSelection');
+    
+    // Check if essential elements exist
+    if (!startTtsBtn || !clearTtsBtn || !ttsVoiceSelection) {
+        console.error("[initializeTtsFunctionality] Essential TTS elements not found, aborting initialization.");
+        return;
+    }
     
     // --- Input Containers and Radios ---
     const ttsTextContainer = document.getElementById('ttsTextContainer');
@@ -1725,5 +1760,9 @@ function initializeTtsFunctionality() {
             resultsTableContainer.style.display = 'none';
         }
     }
+    
+    // Mark TTS as initialized
+    ttsInitialized = true;
+    console.log("[initializeTtsFunctionality] TTS functionality initialized successfully.");
 }
 
