@@ -32,7 +32,7 @@ urlpatterns = [
     path("api/pdf-to-file/", views.pdf_to_file_view, name="api_pdf_to_file"),
     path("api/speech-to-text/", views.speech_to_text_view, name="api_speech_to_text"),
     # API for text-to-speech (New)
-    path("api/text-to-speech/", views.text_to_speech_view, name="api_text_to_speech"),
+    path("api/tts/", views.text_to_speech_view, name="api_tts"),
     # 旧的 process_images 端点 - 现在指向一个废弃提示视图
     # 客户端应更新为使用上述新的API端点。
     path("process-images/", views.process_images_view, name="process_images"),

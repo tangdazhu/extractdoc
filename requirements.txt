@@ -11,7 +11,7 @@ opencv-python-headless  # OpenCV for video and image processing (headless for se
 
 # PDF Processing
 PyMuPDF==1.24.6         # PDF text extraction and manipulation (fitz)
-pdfplumber>=0.10.0      # Extract text and tables from PDF files (primary method for PDF→Excel)
+pdfplumber==0.10.3      # Extract text and tables from PDF files (primary method for PDF→Excel)
 pdf2docx==0.5.8         # Convert PDF files to Word (.docx)
 PyPDF2==3.0.1           # PDF manipulation (merging, splitting, etc.)
 
@@ -45,6 +45,9 @@ dashscope==1.23.3        # Alibaba Qwen models API client
 ollama>=0.4.0           # Local LLM client (Ollama)
 
 scenedetect==0.6.6 # video scene detection
+
+# Speech Synthesis
+edge-tts==7.0.2         # Microsoft Edge Text-to-Speech client
 
 # Notes on External Dependencies:
 # - LibreOffice: For Office document conversion (optional, requires separate installation)

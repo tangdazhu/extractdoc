@@ -1578,11 +1578,11 @@ function initializeTtsFunctionality() {
             try {
                 setTimeout(() => updateProgressBar('40%', '正在上传和提取文本...'), 500);
 
-                const response = await fetch('/api/text-to-speech/', {
+                const response = await fetch('/api/tts/', {
                     method: 'POST',
                     body: formData,
-                    headers: { 'X-CSRFToken': getCsrfToken() },
-                });
+                    headers: { 'X-CSRFToken': getCookie('csrftoken') },
+                })
 
                 updateProgressBar('75%', '服务器正在合成音频...');
 
@@ -1623,59 +1623,66 @@ function initializeTtsFunctionality() {
 
     // Helper for progress bar
     function updateProgressBar(percentage, text) {
-        ttsProgressBar.style.width = percentage;
-        ttsProgressBar.textContent = percentage;
-        ttsProgressText.textContent = text;
-    }
-}
-
-function displayTtsResults(data) {
-    const container = document.getElementById('ttsResultsTableContainer');
-    const errorOutput = document.getElementById('ttsErrorOutput');
-    container.innerHTML = '';
-    errorOutput.style.display = 'none';
-
-    if (data.status === 'error' || !data.results || data.results.length === 0) {
-        errorOutput.textContent = data.message || '转换失败或未返回有效结果。';
-        errorOutput.style.display = 'block';
-        return;
+        const progressBar = document.getElementById('ttsProgressBar');
+        const progressText = document.getElementById('ttsProgressText');
+        if(progressBar && progressText) {
+            progressBar.style.width = percentage;
+            progressBar.setAttribute('aria-valuenow', percentage.replace('%', ''));
+            progressText.textContent = text;
+        }
     }
 
-    const table = document.createElement('table');
-    table.className = 'table table-striped table-bordered';
-    
-    const thead = document.createElement('thead');
-    thead.innerHTML = `
-        <tr>
-            <th>原始输入</th>
-            <th>转换后音频</th>
-            <th>状态</th>
-            <th>消息/下载</th>
-        </tr>
-    `;
-    table.appendChild(thead);
-
-    const tbody = document.createElement('tbody');
-    data.results.forEach(item => {
-        const row = document.createElement('tr');
-        const statusBadge = item.status === 'success' 
-            ? `<span class="badge badge-success">成功</span>` 
-            : `<span class="badge badge-danger">失败</span>`;
+    // NEW FUNCTION: Replicates the style and structure of displayConvertedFiles for TTS
+    function displayTtsResults(data) {
+        console.log("[displayTtsResults] Rendering data:", data);
+        const resultsTableBody = document.getElementById('ttsResultsTableBody');
+        const resultsTableContainer = document.getElementById('ttsResultsTableContainer');
         
-        const downloadLink = item.status === 'success'
-            ? `<a href="${item.download_url}" class="btn btn-sm btn-success" download>下载音频</a>`
-            : '';
+        resultsTableBody.innerHTML = ''; 
 
-        row.innerHTML = `
-            <td title="${escapeHtml(item.original_name)}">${escapeHtml(item.original_name.substring(0, 50))}${item.original_name.length > 50 ? '...' : ''}</td>
-            <td>${item.converted_name ? escapeHtml(item.converted_name) : '-'}</td>
-            <td>${statusBadge}</td>
-            <td>${item.status === 'success' ? downloadLink : escapeHtml(item.message)}</td>
-        `;
-        tbody.appendChild(row);
-    });
+        if (data.results && data.results.length > 0) {
+            data.results.forEach(result => {
+                const row = document.createElement('tr');
 
-    table.appendChild(tbody);
-    container.appendChild(table);
+                // 1. 原始输入/文件名
+                const originalNameCell = document.createElement('td');
+                originalNameCell.textContent = result.original_name || 'N/A';
+                row.appendChild(originalNameCell);
+
+                // 2. 转换后音频
+                const convertedNameCell = document.createElement('td');
+                convertedNameCell.textContent = result.converted_name || 'N/A';
+                row.appendChild(convertedNameCell);
+                
+                // 3. 状态
+                const statusCell = document.createElement('td');
+                const statusSpan = document.createElement('span');
+                statusSpan.textContent = result.status === 'success' ? '成功' : '失败';
+                statusSpan.className = result.status === 'success' ? 'status-success' : 'status-error';
+                statusCell.appendChild(statusSpan);
+                row.appendChild(statusCell);
+
+                // 4. 消息/下载
+                const actionCell = document.createElement('td');
+                if (result.status === 'success' && result.download_url) {
+                    const downloadLink = document.createElement('a');
+                    downloadLink.href = result.download_url;
+                    downloadLink.textContent = '下载音频';
+                    downloadLink.className = 'btn btn-success btn-sm';
+                    downloadLink.setAttribute('download', ''); 
+                    actionCell.appendChild(downloadLink);
+                } else {
+                    actionCell.textContent = result.message || '无有效操作';
+                }
+                row.appendChild(actionCell);
+
+                resultsTableBody.appendChild(row);
+            });
+            resultsTableContainer.style.display = 'block';
+        } else {
+            addNotification("转换成功，但服务器未返回有效的结果列表。", "warning");
+            resultsTableContainer.style.display = 'none';
+        }
+    }
 }
 
