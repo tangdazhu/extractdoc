@@ -63,6 +63,10 @@ wheels/
 .installed.cfg
 *.egg
 
+# voice-mock-cpu and voice-mock-gpu
+voice_mock-cpu/
+voice-mock-gpu/
+
 # Temporary files
 *.swp
 *.swo
