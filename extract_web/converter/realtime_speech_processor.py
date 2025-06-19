@@ -47,6 +47,7 @@ class RealtimeSpeechRecognizer:
         self.audio_queue = Queue()
         self.send_thread = None
         self.receive_thread = None
+        self.final_results = []
 
         # WebSocket URL and headers
         self.ws_url = "wss://dashscope.aliyuncs.com/api-ws/v1/inference"
@@ -169,6 +170,8 @@ class RealtimeSpeechRecognizer:
                         logger.info(
                             f"收到识别结果: {result['text']} (final: {result['is_final']})"
                         )
+                        if result["is_final"]:
+                            self.final_results.append(result)
                         if self.result_handler:
                             self.result_handler(result)
 
@@ -337,7 +340,11 @@ class RealtimeSpeechRecognizer:
                 self.recognition_thread.join(timeout=10.0)  # 增加超时时间
 
             logger.info("实时语音识别已停止")
-            return {"status": "success", "message": "识别已停止"}
+            return {
+                "status": "success",
+                "message": "识别已停止",
+                "final_results": self.final_results,
+            }
 
         except Exception as e:
             logger.error(f"停止识别时出错: {e}")

@@ -23,6 +23,7 @@ except ImportError:
     AsyncWebsocketConsumer = object  # 占位符类
 
 from .realtime_speech_processor import create_realtime_recognizer
+from .utils.translation import translate_text, contains_chinese
 
 logger = logging.getLogger("ocr_system")
 # 全局会话存储（简单实现，生产环境建议使用Redis等）
@@ -273,180 +274,174 @@ else:
 
 
 # HTTP API Views for real-time speech recognition
-@csrf_exempt
 @login_required
 def start_realtime_recognition(request):
-    logger.info("[TEST] start_realtime_recognition called, method=%s", request.method)
-    """Start a real-time speech recognition session"""
-    if request.method != "POST":
-        return JsonResponse({"error": "Only POST method allowed"}, status=405)
+    """开启一个新的实时语音识别会话"""
+    if request.method == "POST":
+        logger.info("[TEST] start_realtime_recognition called, method=POST")
+        try:
+            data = json.loads(request.body)
+            language_hints = data.get("language_hints", ["zh", "en"])
+            session_id = str(uuid.uuid4())
 
-    try:
-        data = json.loads(request.body) if request.body else {}
-        language_hints = data.get("language_hints", ["zh", "en"])
+            # 为每个会话创建一个结果列表
+            session_results = []
 
-        # Generate session ID
-        session_id = str(uuid.uuid4())
+            def result_handler(result: dict):
+                """将中间结果和最终结果添加到会话列表中，并触发翻译"""
+                # 对最终的识别结果进行翻译
+                if result.get("is_final") and result.get("text"):
+                    original_text = result["text"]
+                    # 如果包含中文字符，则翻译成英文，否则翻译成中文
+                    target_lang = "en" if contains_chinese(original_text) else "zh"
+                    translated_text = translate_text(original_text, target_lang)
+                    result["translated_text"] = translated_text
 
-        # Create result handler
-        results = []
+                session_results.append(result)
 
-        def result_handler(result: dict):
-            results.append(
-                {
-                    "text": result.get("text", ""),
-                    "is_final": result.get("is_final", False),
-                    "confidence": result.get("confidence", 0.0),
-                    "timestamp": time.time(),
-                }
+            recognizer = create_realtime_recognizer(
+                result_handler=result_handler, language_hints=language_hints
             )
 
-        # Create recognizer
-        recognizer = create_realtime_recognizer(
-            result_handler=result_handler, language_hints=language_hints
-        )
+            if not recognizer:
+                logger.error("创建识别器失败")
+                return JsonResponse(
+                    {"status": "error", "message": "无法创建识别器"}, status=500
+                )
 
-        if not recognizer:
-            return JsonResponse({"error": "Failed to create recognizer"}, status=500)
-
-        # Start recognition
-        if recognizer.start_recognition():
-            # Store session
+            # 存储识别器、结果列表和用户ID
             _recognition_sessions[session_id] = {
                 "recognizer": recognizer,
-                "results": results,
+                "results": session_results,
                 "user_id": request.user.id,
-                "created_at": time.time(),
+                "creation_time": time.time(),
             }
 
-            return JsonResponse(
-                {
-                    "status": "success",
-                    "session_id": session_id,
-                    "message": "实时识别会话已启动",
-                }
-            )
-        else:
-            return JsonResponse({"error": "Failed to start recognition"}, status=500)
+            if recognizer.start_recognition():
+                logger.info(f"实时识别启动成功, session_id: {session_id}")
+                return JsonResponse(
+                    {
+                        "status": "success",
+                        "session_id": session_id,
+                        "message": "识别已启动",
+                    }
+                )
+            else:
+                logger.error(f"实时识别启动失败, session_id: {session_id}")
+                # 清理失败的会话
+                if session_id in _recognition_sessions:
+                    del _recognition_sessions[session_id]
+                return JsonResponse(
+                    {"status": "error", "message": "启动识别失败"}, status=500
+                )
 
-    except Exception as e:
-        logger.error(f"Error starting realtime recognition: {e}", exc_info=True)
-        return JsonResponse({"error": str(e)}, status=500)
+        except Exception as e:
+            logger.error(f"启动识别时发生错误: {e}", exc_info=True)
+            return JsonResponse({"status": "error", "message": str(e)}, status=500)
+
+    return JsonResponse({"status": "error", "message": "仅支持POST请求"}, status=405)
 
 
 @csrf_exempt
 @login_required
 def send_audio_data(request, session_id):
-    logger.info(
-        "[TEST] send_audio_data view called, session_id=%s, method=%s",
-        session_id,
-        request.method,
-    )
-    """Send audio data to recognition session"""
-    if request.method != "POST":
-        return JsonResponse({"error": "Only POST method allowed"}, status=405)
-
-    try:
+    """接收前端发送的音频数据并传递给识别器"""
+    if request.method == "POST":
+        logger.debug(
+            f"[TEST] send_audio_data view called, session_id={session_id}, method=POST"
+        )
         session = _recognition_sessions.get(session_id)
         if not session:
-            return JsonResponse({"error": "Session not found"}, status=404)
+            return JsonResponse(
+                {"status": "error", "message": "会话未找到"}, status=404
+            )
 
-        if session["user_id"] != request.user.id:
-            return JsonResponse({"error": "Access denied"}, status=403)
+        # 增加用户ID校验
+        if session.get("user_id") != request.user.id:
+            return JsonResponse({"status": "error", "message": "权限不足"}, status=403)
 
-        # Get audio data
-        if request.content_type == "application/json":
-            data = json.loads(request.body)
-            audio_data_b64 = data.get("audio_data")
-            if not audio_data_b64:
-                return JsonResponse({"error": "No audio data provided"}, status=400)
-            audio_data = base64.b64decode(audio_data_b64)
-        else:
-            audio_data = request.body
+        try:
+            recognizer = session.get("recognizer")
+            if recognizer and recognizer.is_recognition_active():
+                # 直接从 request.body 获取原始的二进制数据
+                audio_data = request.body
+                if not recognizer.send_audio_data(audio_data):
+                    logger.warning(f"无法将音频数据放入队列, session_id={session_id}")
+                return JsonResponse({"status": "success"})
+            else:
+                return JsonResponse(
+                    {"status": "error", "message": "识别器未激活"}, status=400
+                )
+        except Exception as e:
+            logger.error(f"发送音频数据时出错: {e}", exc_info=True)
+            return JsonResponse({"status": "error", "message": str(e)}, status=500)
 
-        # Send to recognizer
-        recognizer = session["recognizer"]
-        if recognizer.send_audio_data(audio_data):
-            return JsonResponse({"status": "success"})
-        else:
-            return JsonResponse({"error": "Failed to process audio data"}, status=500)
-
-    except Exception as e:
-        logger.error(f"Error sending audio data: {e}", exc_info=True)
-        return JsonResponse({"error": str(e)}, status=500)
+    return JsonResponse({"status": "error", "message": "仅支持POST请求"}, status=405)
 
 
 @csrf_exempt
 @login_required
 def get_recognition_results(request, session_id):
-    logger.info(
-        "[TEST] get_recognition_results called, session_id=%s, method=%s",
-        session_id,
-        request.method,
-    )
-    """Get recognition results from session"""
-    if request.method != "GET":
-        return JsonResponse({"error": "Only GET method allowed"}, status=405)
-
-    try:
-        session = _recognition_sessions.get(session_id)
-        if not session:
-            return JsonResponse({"error": "Session not found"}, status=404)
-
-        if session["user_id"] != request.user.id:
-            return JsonResponse({"error": "Access denied"}, status=403)
-
-        results = session["results"]
-        return JsonResponse(
-            {"status": "success", "results": results, "session_id": session_id}
+    """获取指定会话的当前识别结果"""
+    if request.method == "GET":
+        logger.info(
+            f"[TEST] get_recognition_results called, session_id={session_id}, method=GET"
         )
-
-    except Exception as e:
-        logger.error(f"Error getting recognition results: {e}", exc_info=True)
-        return JsonResponse({"error": str(e)}, status=500)
+        session = _recognition_sessions.get(session_id)
+        if session:
+            # 增加用户ID校验
+            if session.get("user_id") != request.user.id:
+                return JsonResponse(
+                    {"status": "error", "message": "权限不足"}, status=403
+                )
+            # 返回当前所有的结果，并清空列表，避免重复发送
+            current_results = session["results"]
+            session["results"] = []  # 清空以避免下次重复获取
+            return JsonResponse({"status": "success", "results": current_results})
+        else:
+            return JsonResponse(
+                {"status": "error", "message": "会话未找到或已过期"}, status=404
+            )
+    return JsonResponse({"status": "error", "message": "仅支持GET请求"}, status=405)
 
 
 @csrf_exempt
 @login_required
 def stop_realtime_recognition(request, session_id):
-    logger.info(
-        "[TEST] stop_realtime_recognition called, session_id=%s, method=%s",
-        session_id,
-        request.method,
-    )
-    """Stop a real-time speech recognition session"""
-    if request.method != "POST":
-        return JsonResponse({"error": "Only POST method allowed"}, status=405)
-
-    try:
-        session = _recognition_sessions.get(session_id)
-        if not session:
-            return JsonResponse({"error": "Session not found"}, status=404)
-
-        if session["user_id"] != request.user.id:
-            return JsonResponse({"error": "Access denied"}, status=403)
-
-        # Stop recognizer - 这会触发最终结果的生成
-        recognizer = session["recognizer"]
-        stop_result = recognizer.stop_recognition()
-
-        # Get final results (包含停止时生成的最终结果)
-        final_results = session["results"]
-
-        # Clean up session
-        del _recognition_sessions[session_id]
-
-        return JsonResponse(
-            {
-                "status": "success",
-                "final_results": final_results,
-                "message": "实时识别会话已结束",
-            }
+    """停止一个实时语音识别会话"""
+    if request.method == "POST":
+        logger.info(
+            f"[TEST] stop_realtime_recognition called, session_id={session_id}, method=POST"
         )
+        session = _recognition_sessions.get(session_id)
+        if session and "recognizer" in session:
+            # 增加用户ID校验
+            if session.get("user_id") != request.user.id:
+                return JsonResponse(
+                    {"status": "error", "message": "权限不足"}, status=403
+                )
 
-    except Exception as e:
-        logger.error(f"Error stopping realtime recognition: {e}", exc_info=True)
-        return JsonResponse({"error": str(e)}, status=500)
+            recognizer = session["recognizer"]
+            result = recognizer.stop_recognition()  # 这个方法现在会返回最终结果
+
+            # 清理会话
+            del _recognition_sessions[session_id]
+
+            logger.info(f"会话 {session_id} 已停止并清理")
+
+            # 从结果中提取 final_results 并返回
+            return JsonResponse(
+                {
+                    "status": result.get("status", "error"),
+                    "message": result.get("message", "处理停止请求时出错"),
+                    "final_results": result.get("final_results", []),
+                }
+            )
+        else:
+            return JsonResponse(
+                {"status": "error", "message": "会话未找到或已过期"}, status=404
+            )
+    return JsonResponse({"status": "error", "message": "仅支持POST请求"}, status=405)
 
 
 def cleanup_old_sessions():
