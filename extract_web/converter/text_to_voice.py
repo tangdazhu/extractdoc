@@ -46,21 +46,27 @@ PREDEFINED_VOICES = [
         "Locale": "zh-CN",
     },
     {
+        "DisplayName": "晓艺 - 活泼、甜美的少女音",
+        "ShortName": "zh-CN-XiaoyiNeural",
+        "Gender": "Female",
+        "Locale": "zh-CN",
+    },
+    {
         "DisplayName": "云希 - 阳光、活力的少年音",
         "ShortName": "zh-CN-YunxiNeural",
         "Gender": "Male",
         "Locale": "zh-CN",
     },
     {
-        "DisplayName": "云扬 - 成熟、稳重的磁性男声",
-        "ShortName": "zh-CN-YunyangNeural",
-        "Gender": "Male",
+        "DisplayName": "云夏 - 清新、自然的青年女声",
+        "ShortName": "zh-CN-YunxiaNeural",
+        "Gender": "Female",
         "Locale": "zh-CN",
     },
     {
-        "DisplayName": "晓辰 - 知性、优雅的青年女声",
-        "ShortName": "zh-CN-XiaochenNeural",
-        "Gender": "Female",
+        "DisplayName": "云健 - 成熟、稳重的男声",
+        "ShortName": "zh-CN-YunjianNeural",
+        "Gender": "Male",
         "Locale": "zh-CN",
     },
     {
@@ -75,7 +81,29 @@ PREDEFINED_VOICES = [
         "Gender": "Female",
         "Locale": "zh-CN",
     },
+    {
+        "DisplayName": "云扬 - 成熟、稳重的磁性男声",
+        "ShortName": "zh-CN-YunyangNeural",
+        "Gender": "Male",
+        "Locale": "zh-CN",
+    },
+    {
+        "DisplayName": "晓辰 - 知性、优雅的青年女声",
+        "ShortName": "zh-CN-XiaochenNeural",
+        "Gender": "Female",
+        "Locale": "zh-CN",
+    },
 ]
+
+# Fallback voice mapping for compatibility
+# All unavailable voices will fallback to XiaoxiaoNeural (which is confirmed available)
+VOICE_FALLBACK_MAP = {
+    "zh-CN-XiaohanNeural": "zh-CN-XiaoxiaoNeural",  # 晓涵 -> 晓晓
+    "zh-CN-XiaomoNeural": "zh-CN-XiaoxiaoNeural",  # 晓墨 -> 晓晓
+    "zh-CN-YunyangNeural": "zh-CN-YunxiNeural",  # 云扬 -> 云希
+    "zh-CN-XiaochenNeural": "zh-CN-XiaoyiNeural",  # 晓辰 -> 晓艺
+    "zh-CN-XiaoqiuNeural": "zh-CN-XiaoxiaoNeural",  # 晓秋 -> 晓晓
+}
 
 
 def get_predefined_tts_voices() -> List[Dict[str, Any]]:
@@ -87,24 +115,78 @@ def get_predefined_tts_voices() -> List[Dict[str, Any]]:
     return PREDEFINED_VOICES
 
 
+async def validate_voice(voice: str) -> bool:
+    """
+    Validate if a voice is available in edge-tts service.
+    """
+    try:
+        voices_manager = await edge_tts.VoicesManager.create()
+        available_voices = [v["ShortName"] for v in voices_manager.voices]
+        is_available = voice in available_voices
+        logger.info(
+            f"Voice validation for '{voice}': {'Available' if is_available else 'Not available'}"
+        )
+        if not is_available:
+            # Log some similar voices for debugging
+            similar_voices = [
+                v for v in available_voices if "zh-CN" in v and "Neural" in v
+            ][:5]
+            logger.info(f"Available Chinese Neural voices (first 5): {similar_voices}")
+        return is_available
+    except Exception as e:
+        logger.error(f"Failed to validate voice '{voice}': {e}")
+        return False
+
+
 # The function that performs the actual conversion remains, as it still needs to contact the service.
 async def text_to_speech_edge_tts_async(text: str, voice: str, output_path: str):
     """
     Asynchronously converts text to speech and saves it to a file.
     """
     proxy = os.environ.get("HTTPS_PROXY") or os.environ.get("HTTP_PROXY")
+    original_voice = voice
+
     try:
         logger.info(
             f"Starting TTS conversion with voice '{voice}'. Using proxy: {proxy}"
             if proxy
             else f"Starting TTS conversion with voice '{voice}'. No proxy."
         )
+
+        # Validate voice before attempting conversion
+        is_voice_valid = await validate_voice(voice)
+        if not is_voice_valid:
+            # Try fallback voice if available
+            if voice in VOICE_FALLBACK_MAP:
+                fallback_voice = VOICE_FALLBACK_MAP[voice]
+                logger.warning(
+                    f"Voice '{voice}' not available, trying fallback voice '{fallback_voice}'"
+                )
+                is_fallback_valid = await validate_voice(fallback_voice)
+                if is_fallback_valid:
+                    voice = fallback_voice
+                    logger.info(f"Using fallback voice '{voice}' for conversion")
+                else:
+                    logger.error(
+                        f"Both original voice '{original_voice}' and fallback voice '{fallback_voice}' are not available"
+                    )
+                    raise ValueError(
+                        f"Voice '{original_voice}' and its fallback are not available."
+                    )
+            else:
+                logger.error(
+                    f"Voice '{voice}' is not available and no fallback defined"
+                )
+                raise ValueError(
+                    f"Voice '{voice}' is not available. Please check the voice name."
+                )
+
         communicate = edge_tts.Communicate(text, voice, proxy=proxy)
         await communicate.save(output_path)
         logger.info(f"Successfully saved TTS audio to: {output_path}")
     except Exception as e:
         logger.error(
-            f"An error occurred during TTS conversion to '{output_path}'.",
+            f"An error occurred during TTS conversion to '{output_path}': {e}",
             exc_info=True,
         )
         raise
@@ -117,7 +199,7 @@ def text_to_speech_edge_tts(text: str, voice: str, output_path: str):
     try:
         asyncio.run(text_to_speech_edge_tts_async(text, voice, output_path))
     except Exception as e:
-        logger.error(f"Sync wrapper failed for TTS conversion for voice '{voice}'.")
+        logger.error(f"Sync wrapper failed for TTS conversion for voice '{voice}': {e}")
         raise
 
 
@@ -154,8 +236,39 @@ async def main():
             logger.warning("Input text file is empty. Nothing to convert.")
             return
 
-        logger.info(f"Starting TTS conversion with voice: {args.voice}")
-        communicate = edge_tts.Communicate(text, args.voice)
+        voice = args.voice
+        original_voice = voice
+        logger.info(f"Starting TTS conversion with voice: {voice}")
+
+        # Validate voice before attempting conversion
+        is_voice_valid = await validate_voice(voice)
+        if not is_voice_valid:
+            # Try fallback voice if available
+            if voice in VOICE_FALLBACK_MAP:
+                fallback_voice = VOICE_FALLBACK_MAP[voice]
+                logger.warning(
+                    f"Voice '{voice}' not available, trying fallback voice '{fallback_voice}'"
+                )
+                is_fallback_valid = await validate_voice(fallback_voice)
+                if is_fallback_valid:
+                    voice = fallback_voice
+                    logger.info(f"Using fallback voice '{voice}' for conversion")
+                else:
+                    logger.error(
+                        f"Both original voice '{original_voice}' and fallback voice '{fallback_voice}' are not available"
+                    )
+                    raise ValueError(
+                        f"Voice '{original_voice}' and its fallback are not available."
+                    )
+            else:
+                logger.error(
+                    f"Voice '{voice}' is not available and no fallback defined"
+                )
+                raise ValueError(
+                    f"Voice '{voice}' is not available. Please check the voice name."
+                )
+
+        communicate = edge_tts.Communicate(text, voice)
         await communicate.save(args.output_file)
         logger.info(f"Successfully saved TTS audio to: {args.output_file}")
     except FileNotFoundError:
