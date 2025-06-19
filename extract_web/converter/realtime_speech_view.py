@@ -197,7 +197,13 @@ if CHANNELS_AVAILABLE:
             """Stop recognizer (run in thread)"""
             try:
                 if self.recognizer:
-                    return self.recognizer.stop_recognition()
+                    result = self.recognizer.stop_recognition()
+                    # stop_recognition 现在返回字典，检查状态
+                    return (
+                        result.get("status") == "success"
+                        if isinstance(result, dict)
+                        else bool(result)
+                    )
                 return True
             except Exception as e:
                 logger.error(f"Error in _stop_recognizer: {e}", exc_info=True)
@@ -420,11 +426,11 @@ def stop_realtime_recognition(request, session_id):
         if session["user_id"] != request.user.id:
             return JsonResponse({"error": "Access denied"}, status=403)
 
-        # Stop recognizer
+        # Stop recognizer - 这会触发最终结果的生成
         recognizer = session["recognizer"]
-        recognizer.stop_recognition()
+        stop_result = recognizer.stop_recognition()
 
-        # Get final results
+        # Get final results (包含停止时生成的最终结果)
         final_results = session["results"]
 
         # Clean up session

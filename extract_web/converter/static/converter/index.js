@@ -2066,7 +2066,13 @@ async function stopRealtimeRecognition() {
                 });
                 
                 if (response.ok) {
-                    console.log('Recognition session stopped successfully');
+                    const data = await response.json();
+                    console.log('Recognition session stopped successfully', data);
+                    
+                    // 处理停止时返回的最终识别结果
+                    if (data.status === 'success' && data.final_results && data.final_results.length > 0) {
+                        processRecognitionResults(data.final_results);
+                    }
                 } else {
                     console.error('Failed to stop recognition session');
                 }
@@ -2168,20 +2174,28 @@ function processRecognitionResults(results) {
     const outputDiv = document.getElementById('realtimeTranscriptionOutput');
     const intermediateDiv = document.getElementById('realtimeIntermediateResults');
     
-    results.forEach(result => {
-        // 兼容没有 type 字段但有 text 的情况
-        if ((result.type === 'result' || result.type === undefined) && result.text) {
-            if (result.is_final) {
+    // 如果是在录音过程中，只添加新结果
+    // 如果是停止时的最终结果，直接添加所有结果
+    if (isRealtimeRecording) {
+        // 录音过程中：只添加还没显示过的新结果
+        let startIdx = recognitionResults.length;
+        for (let i = startIdx; i < results.length; i++) {
+            const result = results[i];
+            if ((result.type === 'result' || result.type === undefined) && result.text && result.is_final) {
                 recognitionResults.push(result.text);
-                updateRealtimeOutput();
-                intermediateDiv.innerHTML = '';
-            } else {
-                intermediateDiv.innerHTML = `<em>正在识别: ${result.text}</em>`;
             }
-        } else if (result.type === 'error') {
-            showRealtimeError(result.message);
         }
-    });
+    } else {
+        // 停止时的最终结果：直接添加所有结果
+        results.forEach(result => {
+            if ((result.type === 'result' || result.type === undefined) && result.text) {
+                recognitionResults.push(result.text);
+            }
+        });
+    }
+    
+    updateRealtimeOutput();
+    intermediateDiv.innerHTML = '';
 }
 
 function updateRealtimeOutput() {

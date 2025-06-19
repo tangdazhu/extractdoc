@@ -118,17 +118,12 @@ class RealtimeSpeechRecognizer:
             "[TEST] _process_audio_chunk called, data length: %d", len(audio_data)
         )
         try:
-            # In a real implementation, this would send audio to DashScope API
-            # For now, return a mock result
-            mock_result = {
-                "text": "这是模拟的识别结果",
-                "is_final": True,
-                "confidence": 0.95,
-                "timestamp": time.time(),
-            }
-
+            # 累积音频数据长度，但不立即返回识别结果
+            # 实际实现中，这里会发送音频到 DashScope API
             logger.debug(f"Audio chunk received, length: {len(audio_data)} bytes")
-            return mock_result
+
+            # 在 mock 模式下，我们不返回结果，只有在停止录音时才返回最终结果
+            return None
 
         except Exception as e:
             logger.error(f"Error processing audio chunk: {e}")
@@ -166,34 +161,30 @@ class RealtimeSpeechRecognizer:
             self._is_active = False
             return False
 
-    def stop_recognition(self) -> bool:
+    def stop_recognition(self) -> Dict[str, Any]:
+        """停止实时语音识别"""
         logger.info("[TEST] stop_recognition called")
-        if not self._is_active:
-            logger.warning("Recognition is not active")
-            return True
-
         try:
-            # Stop recognition
             self._is_active = False
-
-            # Send stop signal to worker thread
-            self._audio_queue.put(None)
-
-            # Wait for thread to finish
-            if self._recognition_thread and self._recognition_thread.is_alive():
-                self._recognition_thread.join(timeout=5.0)
-
-            # Close WebSocket connection
-            if self.ws:
-                self.ws.close()
-                self.ws = None
-
             logger.info("Real-time speech recognition stopped")
-            return True
 
+            # 在停止时模拟返回一条最终识别结果
+            final_result = {
+                "text": "这是一条完整的语音识别结果",
+                "is_final": True,
+                "confidence": 0.95,
+                "timestamp": time.time(),
+            }
+
+            # 调用结果处理器返回最终结果
+            if self.result_handler:
+                logger.info("[TEST] Calling result_handler with final result")
+                self.result_handler(final_result)
+
+            return {"status": "success", "message": "识别已停止，返回最终结果"}
         except Exception as e:
-            logger.error(f"Failed to stop recognition: {e}")
-            return False
+            logger.error(f"Error stopping recognition: {e}")
+            return {"status": "error", "message": str(e)}
 
     def send_audio_data(self, audio_data: bytes) -> bool:
         logger.info("[TEST] send_audio_data called, data length: %d", len(audio_data))
