@@ -3,23 +3,23 @@ Real-time Speech Recognition Processor using DashScope API
 实时语音识别处理器，使用阿里云DashScope API
 """
 
-import os
+import asyncio
+import base64
 import json
 import logging
+import os
 import threading
 import time
-from typing import Optional, Callable, Dict, Any, List
+import uuid
+import websockets
 from queue import Queue, Empty
-import dashscope
+from typing import Dict, Any, List, Optional, Callable
 
-# 条件导入 websocket-client
+# 尝试导入 dashscope，如果失败则不影响功能
 try:
-    import websocket
-    import ssl
-
-    WEBSOCKET_AVAILABLE = True
+    import dashscope
 except ImportError:
-    WEBSOCKET_AVAILABLE = False
+    dashscope = None
 
 # Configure logging
 LOG_FORMAT = "%(asctime)s [%(levelname)s] %(name)s %(process)d %(thread)d %(message)s"
@@ -36,251 +36,390 @@ logger.info("[TEST] === 这是realtime_speech_processor.py的顶层日志 ===")
 
 
 class RealtimeSpeechRecognizer:
-    """
-    Real-time speech recognition using DashScope WebSocket API
-    使用DashScope WebSocket API进行实时语音识别
-    """
+    """阿里云 DashScope Paraformer 实时语音识别器"""
 
     def __init__(self, api_key: str, result_handler: Callable[[Dict], None] = None):
-        """
-        Initialize the real-time speech recognizer
-
-        Args:
-            api_key: DashScope API key
-            result_handler: Callback function to handle recognition results
-        """
         self.api_key = api_key
         self.result_handler = result_handler or self._default_result_handler
+        self.websocket = None
+        self.task_id = None
+        self.is_active = False
+        self.audio_queue = Queue()
+        self.send_thread = None
+        self.receive_thread = None
 
-        # WebSocket connection
-        self.ws = None
-        self.ws_url = "wss://dashscope.aliyuncs.com/api/v1/services/aigc/text-generation/generation"
-
-        # Recognition state
-        self._is_active = False
-        self._recognition_thread = None
-        self._audio_queue = Queue()
-
-        # Configuration
-        self.config = {
-            "model": "paraformer-realtime-v1",
-            "language_hints": ["zh", "en"],
-            "audio_encoding": "pcm",
-            "sample_rate": 16000,
-            "enable_intermediate_result": True,
-            "enable_punctuation_prediction": True,
-            "enable_inverse_text_normalization": True,
+        # WebSocket URL and headers
+        self.ws_url = "wss://dashscope.aliyuncs.com/api-ws/v1/inference"
+        self.headers = {
+            "Authorization": f"bearer {self.api_key}",
+            "X-DashScope-DataInspection": "enable",
         }
 
-        logger.info(f"Recognizer created with config: {self.config}")
+        # Recognition configuration
+        self.config = {
+            "model": "paraformer-realtime-v2",
+            "format": "pcm",
+            "sample_rate": 16000,
+            "language_hints": ["zh", "en"],
+            "disfluency_removal_enabled": False,
+            "punctuation_prediction_enabled": True,
+            "inverse_text_normalization_enabled": True,
+        }
+
+        logger.info("实时语音识别器初始化完成")
 
     def _default_result_handler(self, result: Dict[str, Any]):
-        logger.info("[TEST] _default_result_handler called, result: %s", result)
-        logger.info(f"Recognition result: {result}")
+        """默认结果处理器"""
+        logger.info(f"识别结果: {result}")
 
-    def _create_websocket_connection(self):
-        """Create WebSocket connection to DashScope"""
+    async def _connect_websocket(self):
+        """建立 WebSocket 连接"""
         try:
-            # Note: DashScope uses HTTP API, not WebSocket for real-time recognition
-            # This is a simplified implementation for demonstration
-            logger.info("WebSocket connection would be established here")
+            logger.info("正在连接到 DashScope WebSocket 服务...")
+
+            # 将 self.headers 作为 extra_headers 参数传递
+            self.websocket = await websockets.connect(
+                self.ws_url, extra_headers=self.headers
+            )
+            logger.info("WebSocket 连接建立成功")
             return True
+
         except Exception as e:
-            logger.error(f"Failed to create WebSocket connection: {e}")
+            logger.error(f"WebSocket 连接失败: {e}")
             return False
 
-    def _recognition_worker(self):
-        logger.info("[TEST] _recognition_worker started")
-        while self._is_active:
-            try:
-                audio_data = self._audio_queue.get(timeout=1.0)
-                logger.info(
-                    "[TEST] _recognition_worker got audio_data, len=%d",
-                    len(audio_data) if audio_data else -1,
-                )
+    async def _send_run_task_command(self):
+        """发送 run-task 指令"""
+        self.task_id = str(uuid.uuid4())
 
-                if audio_data is None:  # Stop signal
-                    break
+        run_task_cmd = {
+            "header": {
+                "action": "run-task",
+                "task_id": self.task_id,
+                "streaming": "duplex",
+            },
+            "payload": {
+                "task_group": "audio",
+                "task": "asr",
+                "function": "recognition",
+                "model": self.config["model"],
+                "parameters": {
+                    "format": self.config["format"],
+                    "sample_rate": self.config["sample_rate"],
+                    "language_hints": self.config["language_hints"],
+                    "disfluency_removal_enabled": self.config[
+                        "disfluency_removal_enabled"
+                    ],
+                    "punctuation_prediction_enabled": self.config[
+                        "punctuation_prediction_enabled"
+                    ],
+                    "inverse_text_normalization_enabled": self.config[
+                        "inverse_text_normalization_enabled"
+                    ],
+                },
+                "input": {},
+            },
+        }
 
-                # Process audio data (simplified)
-                result = self._process_audio_chunk(audio_data)
+        await self.websocket.send(json.dumps(run_task_cmd))
+        logger.info(f"已发送 run-task 指令，task_id: {self.task_id}")
 
-                if result and self.result_handler:
-                    self.result_handler(result)
+    async def _send_finish_task_command(self):
+        """发送 finish-task 指令"""
+        if not self.task_id:
+            return
 
-            except Empty:
-                continue
-            except Exception as e:
-                logger.error(f"Error in recognition worker: {e}")
+        finish_task_cmd = {
+            "header": {
+                "action": "finish-task",
+                "task_id": self.task_id,
+                "streaming": "duplex",
+            },
+            "payload": {"input": {}},
+        }
 
-    def _process_audio_chunk(self, audio_data: bytes) -> Optional[Dict[str, Any]]:
-        logger.info(
-            "[TEST] _process_audio_chunk called, data length: %d", len(audio_data)
-        )
+        await self.websocket.send(json.dumps(finish_task_cmd))
+        logger.info("已发送 finish-task 指令")
+
+    async def _handle_websocket_message(self, message):
+        """处理 WebSocket 消息"""
         try:
-            # 累积音频数据长度，但不立即返回识别结果
-            # 实际实现中，这里会发送音频到 DashScope API
-            logger.debug(f"Audio chunk received, length: {len(audio_data)} bytes")
+            data = json.loads(message)
+            event = data.get("header", {}).get("event")
 
-            # 在 mock 模式下，我们不返回结果，只有在停止录音时才返回最终结果
-            return None
+            if event == "task-started":
+                logger.info("任务已启动，可以开始发送音频数据")
+                self.is_active = True
+
+            elif event == "result-generated":
+                # 处理识别结果
+                sentence = data.get("payload", {}).get("output", {}).get("sentence", {})
+                if sentence:
+                    result = {
+                        "text": sentence.get("text", ""),
+                        "is_final": sentence.get("end_time") is not None,
+                        "begin_time": sentence.get("begin_time"),
+                        "end_time": sentence.get("end_time"),
+                        "confidence": 0.95,  # DashScope 不返回置信度，设置默认值
+                        "timestamp": time.time(),
+                    }
+
+                    # 只处理有文本内容的结果
+                    if result["text"].strip():
+                        logger.info(
+                            f"收到识别结果: {result['text']} (final: {result['is_final']})"
+                        )
+                        if self.result_handler:
+                            self.result_handler(result)
+
+            elif event == "task-finished":
+                logger.info("任务已完成")
+                self.is_active = False
+
+            elif event == "task-failed":
+                error_code = data.get("header", {}).get("error_code")
+                error_message = data.get("header", {}).get("error_message")
+                logger.error(f"任务失败: {error_code} - {error_message}")
+                self.is_active = False
 
         except Exception as e:
-            logger.error(f"Error processing audio chunk: {e}")
-            return None
+            logger.error(f"处理 WebSocket 消息时出错: {e}")
+
+    async def _receive_messages(self):
+        """接收 WebSocket 消息的协程"""
+        try:
+            async for message in self.websocket:
+                await self._handle_websocket_message(message)
+                if not self.is_active:
+                    break
+        except websockets.exceptions.ConnectionClosed as e:
+            logger.warning(f"WebSocket 连接已关闭: {e.code} {e.reason}")
+        except Exception as e:
+            logger.error(f"接收消息时出错: {e}")
+        finally:
+            logger.info("消息接收循环结束")
+            self.is_active = False  # 确保接收端关闭也停止整个任务
+
+    async def _send_audio_data_async(self):
+        """发送音频数据的协程"""
+        logger.info("音频发送循环启动")
+        try:
+            while self.is_active:
+                try:
+                    # 使用非阻塞的 get_nowait()
+                    audio_data = self.audio_queue.get_nowait()
+                    if audio_data is None:  # 停止信号
+                        logger.info("收到音频发送停止信号")
+                        break
+
+                    # 发送音频数据
+                    await self.websocket.send(audio_data)
+                    logger.debug(f"已发送音频数据: {len(audio_data)} 字节")
+
+                except Empty:
+                    # 当队列为空时，短暂休眠并让出控制权，以允许其他协程运行
+                    await asyncio.sleep(0.01)
+                    continue
+                except Exception as e:
+                    logger.error(f"发送音频数据时出错: {e}")
+                    self.is_active = False  # 发送出错时也停止任务
+                    break
+        finally:
+            logger.info("音频发送循环结束")
 
     def start_recognition(self, language_hints: List[str] = None) -> bool:
+        """启动实时语音识别"""
         logger.info(
-            "[TEST] start_recognition called, language_hints: %s", language_hints
+            f"[TEST] start_recognition called, language_hints: {language_hints}"
         )
-        if self._is_active:
-            logger.warning("Recognition is already active")
+
+        if self.is_active:
+            logger.warning("识别已经在运行中")
             return True
 
         try:
-            # Update configuration
+            # 更新语言配置
             if language_hints:
                 self.config["language_hints"] = language_hints
+                logger.info(f"配置已更新: {{'language_hints': {language_hints}}}")
 
-            # Create WebSocket connection
-            if not self._create_websocket_connection():
+            # 在新线程中运行异步识别
+            self.recognition_thread = threading.Thread(
+                target=self._run_recognition_async, daemon=True
+            )
+            self.recognition_thread.start()
+
+            # 等待连接建立
+            max_wait = 10  # 最多等待10秒
+            wait_time = 0
+            while not self.is_active and wait_time < max_wait:
+                time.sleep(0.1)
+                wait_time += 0.1
+
+            if self.is_active:
+                logger.info("实时语音识别启动成功")
+                return True
+            else:
+                logger.error("实时语音识别启动超时")
                 return False
 
-            # Start recognition thread
-            self._is_active = True
-            self._recognition_thread = threading.Thread(
-                target=self._recognition_worker, daemon=True
-            )
-            self._recognition_thread.start()
+        except Exception as e:
+            logger.error(f"启动实时语音识别失败: {e}")
+            return False
 
-            logger.info("Real-time speech recognition started")
-            return True
+    def _run_recognition_async(self):
+        """在新线程中运行异步识别逻辑"""
+        try:
+            asyncio.run(self._async_recognition_loop())
+        except Exception as e:
+            logger.error(f"异步识别循环出错: {e}")
+
+    async def _async_recognition_loop(self):
+        """异步识别主循环"""
+        try:
+            # 建立 WebSocket 连接
+            if not await self._connect_websocket():
+                return
+
+            # 发送 run-task 指令
+            await self._send_run_task_command()
+
+            # 启动接收消息和发送音频的协程
+            receive_task = asyncio.create_task(self._receive_messages())
+            send_task = asyncio.create_task(self._send_audio_data_async())
+
+            # 等待任务完成
+            await asyncio.gather(receive_task, send_task)
 
         except Exception as e:
-            logger.error(f"Failed to start recognition: {e}")
-            self._is_active = False
+            logger.error(f"异步识别循环出错: {e}")
+        finally:
+            # 确保在循环结束后，无论成功或失败，都尝试优雅关闭
+            logger.info("异步识别循环结束，正在进行清理...")
+            if self.websocket and self.websocket.open:
+                try:
+                    await self._send_finish_task_command()
+                    # 等待服务器响应 task-finished，或者超时关闭
+                    await asyncio.wait_for(self.websocket.close(), timeout=5.0)
+                    logger.info("WebSocket 连接已成功关闭")
+                except Exception as close_e:
+                    logger.error(f"关闭 WebSocket 时出错: {close_e}")
+            self.is_active = False
+
+    def send_audio_data(self, audio_data: bytes) -> bool:
+        """发送音频数据"""
+        logger.debug(f"[TEST] send_audio_data called, data length: {len(audio_data)}")
+
+        if not self.is_active:
+            logger.warning("识别服务未激活")
+            return False
+
+        try:
+            self.audio_queue.put(audio_data, timeout=1.0)
+            return True
+        except Exception as e:
+            logger.error(f"音频数据入队失败: {e}")
             return False
 
     def stop_recognition(self) -> Dict[str, Any]:
         """停止实时语音识别"""
         logger.info("[TEST] stop_recognition called")
+
+        if not self.is_active:
+            logger.warning("识别服务已经不在运行状态")
+            return {"status": "success", "message": "识别已停止"}
+
         try:
-            self._is_active = False
-            logger.info("Real-time speech recognition stopped")
+            # 发送停止信号到音频队列，让发送循环优雅退出
+            self.audio_queue.put(None)
+            # 等待识别线程结束
+            if self.recognition_thread and self.recognition_thread.is_alive():
+                self.recognition_thread.join(timeout=10.0)  # 增加超时时间
 
-            # 在停止时模拟返回一条最终识别结果
-            final_result = {
-                "text": "这是一条完整的语音识别结果",
-                "is_final": True,
-                "confidence": 0.95,
-                "timestamp": time.time(),
-            }
+            logger.info("实时语音识别已停止")
+            return {"status": "success", "message": "识别已停止"}
 
-            # 调用结果处理器返回最终结果
-            if self.result_handler:
-                logger.info("[TEST] Calling result_handler with final result")
-                self.result_handler(final_result)
-
-            return {"status": "success", "message": "识别已停止，返回最终结果"}
         except Exception as e:
-            logger.error(f"Error stopping recognition: {e}")
+            logger.error(f"停止识别时出错: {e}")
             return {"status": "error", "message": str(e)}
 
-    def send_audio_data(self, audio_data: bytes) -> bool:
-        logger.info("[TEST] send_audio_data called, data length: %d", len(audio_data))
-        if not self._is_active:
-            logger.warning("Recognition is not active")
-            return False
-
-        try:
-            self._audio_queue.put(audio_data, timeout=1.0)
-            return True
-
-        except Exception as e:
-            logger.error(f"Failed to queue audio data: {e}")
-            return False
-
     def is_recognition_active(self) -> bool:
-        """Check if recognition is currently active"""
-        return self._is_active
+        """检查识别是否处于激活状态"""
+        return self.is_active
 
     def get_configuration(self) -> Dict[str, Any]:
-        """Get current recognition configuration"""
+        """获取当前识别配置"""
         return self.config.copy()
 
     def update_configuration(self, **kwargs) -> bool:
-        """
-        Update recognition configuration
-
-        Args:
-            **kwargs: Configuration parameters to update
-
-        Returns:
-            True if updated successfully, False otherwise
-        """
+        """更新识别配置"""
         try:
             for key, value in kwargs.items():
                 if key in self.config:
                     self.config[key] = value
                 else:
-                    logger.warning(f"Unknown configuration key: {key}")
+                    logger.warning(f"未知的配置参数: {key}")
 
-            logger.info(f"Configuration updated: {kwargs}")
+            logger.info(f"配置已更新: {kwargs}")
             return True
 
         except Exception as e:
-            logger.error(f"Failed to update configuration: {e}")
+            logger.error(f"更新配置失败: {e}")
             return False
 
 
 def create_realtime_recognizer(
     result_handler: Callable[[Dict], None] = None, language_hints: List[str] = None
 ) -> Optional[RealtimeSpeechRecognizer]:
+    """创建实时语音识别器"""
     logger.info(
-        "[TEST] create_realtime_recognizer called, language_hints: %s", language_hints
+        f"[TEST] create_realtime_recognizer called, language_hints: {language_hints}"
     )
+
     try:
-        # 优先用环境变量
+        # 获取 API Key
         api_key = os.environ.get("DASHSCOPE_API_KEY")
-        # 如果环境变量没有，尝试 dashscope.api_key
         if not api_key and hasattr(dashscope, "api_key") and dashscope.api_key:
             api_key = dashscope.api_key
+
         if not api_key:
-            logger.error(
-                "DASHSCOPE_API_KEY environment variable not found and dashscope.api_key not set"
-            )
+            logger.error("未找到 DASHSCOPE_API_KEY 环境变量或 dashscope.api_key 配置")
             return None
-        # Create recognizer
+
+        # 创建识别器
         recognizer = RealtimeSpeechRecognizer(
             api_key=api_key, result_handler=result_handler
         )
-        # Set language hints if provided
+
+        # 设置语言提示
         if language_hints:
             recognizer.update_configuration(language_hints=language_hints)
-        logger.info("Real-time speech recognizer created successfully")
+
+        logger.info("实时语音识别器创建成功")
         return recognizer
+
     except Exception as e:
-        logger.error(f"Failed to create real-time recognizer: {e}")
+        logger.error(f"创建实时语音识别器失败: {e}")
         return None
 
 
-# Global recognizer instance for Django views
+# 全局识别器实例管理
 _global_recognizer: Optional[RealtimeSpeechRecognizer] = None
 
 
 def get_global_recognizer() -> Optional[RealtimeSpeechRecognizer]:
-    """Get the global recognizer instance"""
+    """获取全局识别器实例"""
     return _global_recognizer
 
 
 def set_global_recognizer(recognizer: RealtimeSpeechRecognizer):
-    """Set the global recognizer instance"""
+    """设置全局识别器实例"""
     global _global_recognizer
     _global_recognizer = recognizer
 
 
 def cleanup_global_recognizer():
-    """Clean up the global recognizer instance"""
+    """清理全局识别器实例"""
     global _global_recognizer
     if _global_recognizer:
         _global_recognizer.stop_recognition()
