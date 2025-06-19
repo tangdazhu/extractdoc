@@ -950,6 +950,10 @@
                                 <!-- Text Input Area (Full Width) -->
                                 <div id="ttsTextContainer" class="mb-3">
                                     <textarea class="form-control" id="ttsInputText" rows="8" placeholder="在此输入要转换为语音的文本..." style="width: 80%;"></textarea>
+                                    <div class="mt-2">
+                                        <span id="ttsTextCharCount" class="text-muted small">字数: 0</span>
+                                        <span id="ttsTextWarning" class="text-danger small ms-3 fw-bold" style="display: none; color: #dc3545 !important;">超过5000字限制</span>
+                                    </div>
                                 </div>
                                 
                                 <!-- Input Type: File -->
@@ -968,8 +972,11 @@
                                     </div>
                                     <ul id="ttsFileList" class="list-unstyled mt-3"></ul>
                                     <div class="mt-2">
-                                         <button type="button" class="btn btn-sm btn-outline-secondary" id="ttsAddFileBtn">添加文件</button>
-                                         <button type="button" class="btn btn-sm btn-outline-danger ml-2" id="ttsClearListBtn">清空列表</button>
+                                         <button type="button" class="btn btn-sm btn-outline-danger" id="ttsClearListBtn">清空列表</button>
+                                    </div>
+                                    <div class="mt-2">
+                                        <span id="ttsFileCharCount" class="text-muted small">字数: 0</span>
+                                        <span id="ttsFileWarning" class="text-danger small ms-3 fw-bold" style="display: none; color: #dc3545 !important;">超过5000字限制</span>
                                     </div>
                                 </div>
                                 

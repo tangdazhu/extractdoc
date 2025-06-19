@@ -1505,14 +1505,18 @@ function initializeTtsFunctionality() {
     
     // --- Text Input ---
     const ttsInputText = document.getElementById('ttsInputText');
+    const ttsTextCharCount = document.getElementById('ttsTextCharCount');
+    const ttsTextWarning = document.getElementById('ttsTextWarning');
 
     // --- File Upload Elements ---
     const ttsDropZone = document.getElementById('ttsDropZone');
     const ttsFileInput = document.getElementById('ttsFileInput');
     const ttsFileListUI = document.getElementById('ttsFileList');
-    const ttsAddFileBtn = document.getElementById('ttsAddFileBtn');
     const ttsClearListBtn = document.getElementById('ttsClearListBtn');
+    const ttsFileCharCount = document.getElementById('ttsFileCharCount');
+    const ttsFileWarning = document.getElementById('ttsFileWarning');
     let ttsUploadedFiles = []; // Array to hold file objects
+    let totalFileCharCount = 0; // Track total character count from files
 
     // --- Result Display Elements ---
     const ttsResultContainer = document.getElementById('ttsResultContainer');
@@ -1524,14 +1528,91 @@ function initializeTtsFunctionality() {
 
     // --- LOGIC ---
 
+    // 0. Character Count Functions
+    const updateTextCharCount = () => {
+        const text = ttsInputText.value;
+        const charCount = text.length;
+        ttsTextCharCount.textContent = `字数: ${charCount}`;
+        
+        if (charCount > 5000) {
+            ttsTextWarning.style.display = 'inline';
+            ttsTextWarning.style.color = '#dc3545'; // Force red color for warning
+            ttsTextWarning.style.fontWeight = 'bold'; // Make warning bold
+            ttsTextCharCount.className = 'text-danger small';
+            ttsTextCharCount.style.color = '#dc3545'; // Force red color
+            // Disable start button when text exceeds limit
+            if (startTtsBtn) {
+                startTtsBtn.disabled = true;
+                startTtsBtn.style.backgroundColor = '#6c757d';
+                startTtsBtn.style.borderColor = '#6c757d';
+                startTtsBtn.style.cursor = 'not-allowed';
+            }
+        } else {
+            ttsTextWarning.style.display = 'none';
+            ttsTextCharCount.className = 'text-muted small';
+            ttsTextCharCount.style.color = ''; // Reset to default
+            // Re-enable start button when text is within limit
+            if (startTtsBtn && radioText.checked) {
+                startTtsBtn.disabled = false;
+                startTtsBtn.style.backgroundColor = '#007bff';
+                startTtsBtn.style.borderColor = '#007bff';
+                startTtsBtn.style.cursor = 'pointer';
+            }
+        }
+    };
+
+    const updateFileCharCount = () => {
+        ttsFileCharCount.textContent = `字数: ${totalFileCharCount}`;
+        
+        if (totalFileCharCount > 5000) {
+            ttsFileWarning.style.display = 'inline';
+            ttsFileWarning.style.color = '#dc3545'; // Force red color for warning
+            ttsFileWarning.style.fontWeight = 'bold'; // Make warning bold
+            ttsFileCharCount.className = 'text-danger small';
+            ttsFileCharCount.style.color = '#dc3545'; // Force red color
+            // Disable start button when file content exceeds limit
+            if (startTtsBtn) {
+                startTtsBtn.disabled = true;
+                startTtsBtn.style.backgroundColor = '#6c757d';
+                startTtsBtn.style.borderColor = '#6c757d';
+                startTtsBtn.style.cursor = 'not-allowed';
+            }
+        } else {
+            ttsFileWarning.style.display = 'none';
+            ttsFileCharCount.className = 'text-muted small';
+            ttsFileCharCount.style.color = ''; // Reset to default
+            // Re-enable start button when file content is within limit
+            if (startTtsBtn && radioFile.checked) {
+                startTtsBtn.disabled = false;
+                startTtsBtn.style.backgroundColor = '#007bff';
+                startTtsBtn.style.borderColor = '#007bff';
+                startTtsBtn.style.cursor = 'pointer';
+            }
+        }
+    };
+
+    // Add real-time character counting for text input
+    if (ttsInputText) {
+        ttsInputText.addEventListener('input', updateTextCharCount);
+        ttsInputText.addEventListener('paste', () => {
+            setTimeout(updateTextCharCount, 10); // Delay to allow paste to complete
+        });
+        // Initial count
+        updateTextCharCount();
+    }
+
     // 1. Input Mode Switching
     const handleTtsInputSwitch = () => {
         if (radioText.checked) {
             ttsTextContainer.style.display = 'block';
             ttsFileContainer.style.display = 'none';
+            // Check text character count and update button state
+            updateTextCharCount();
         } else {
             ttsTextContainer.style.display = 'none';
             ttsFileContainer.style.display = 'block';
+            // Check file character count and update button state
+            updateFileCharCount();
         }
     };
     radioText.addEventListener('change', handleTtsInputSwitch);
@@ -1544,32 +1625,40 @@ function initializeTtsFunctionality() {
             if (['text/plain', 'application/pdf', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'].includes(file.type) || 
                 file.name.endsWith('.txt') || file.name.endsWith('.pdf') || file.name.endsWith('.docx')) {
                 ttsUploadedFiles.push(file);
+                
+                // Estimate character count based on file type and size
+                let estimatedChars = 0;
+                if (file.name.endsWith('.txt') || file.type === 'text/plain') {
+                    // For text files, assume 1 byte ≈ 1 character (rough estimate)
+                    estimatedChars = file.size;
+                } else if (file.name.endsWith('.pdf')) {
+                    // For PDF, estimate roughly 1 character per 2 bytes (very rough)
+                    estimatedChars = Math.floor(file.size / 2);
+                } else if (file.name.endsWith('.docx')) {
+                    // For DOCX, estimate roughly 1 character per 3 bytes (very rough)
+                    estimatedChars = Math.floor(file.size / 3);
+                }
+                
+                totalFileCharCount += estimatedChars;
             } else {
                 addNotification(`不支持的文件类型: ${file.name}`, 'warning');
             }
         });
         updateTtsFileList();
+        updateFileCharCount();
     };
 
     const updateTtsFileList = () => {
         ttsFileListUI.innerHTML = '';
         ttsUploadedFiles.forEach((file, index) => {
             const li = document.createElement('li');
-            li.className = 'list-group-item d-flex justify-content-between align-items-center';
-            li.innerHTML = `
-                <span>${escapeHtml(file.name)}</span>
-                <button type="button" class="btn-close" aria-label="Close"></button>
-            `;
-            li.querySelector('.btn-close').addEventListener('click', () => {
-                ttsUploadedFiles.splice(index, 1);
-                updateTtsFileList();
-            });
+            li.className = 'list-group-item';
+            li.innerHTML = `<span>${escapeHtml(file.name)}</span>`;
             ttsFileListUI.appendChild(li);
         });
     };
 
     ttsDropZone.addEventListener('click', () => ttsFileInput.click());
-    ttsAddFileBtn.addEventListener('click', () => ttsFileInput.click());
     ttsFileInput.addEventListener('change', (e) => handleTtsFiles(e.target.files));
     
     ['dragover', 'drop'].forEach(eventName => {
@@ -1584,8 +1673,10 @@ function initializeTtsFunctionality() {
 
     ttsClearListBtn.addEventListener('click', () => {
         ttsUploadedFiles = [];
+        totalFileCharCount = 0;
         ttsFileInput.value = ''; // Reset file input
         updateTtsFileList();
+        updateFileCharCount();
     });
 
     // 3. Main Action Buttons
@@ -1667,11 +1758,22 @@ function initializeTtsFunctionality() {
         clearTtsBtn.addEventListener('click', function() {
             ttsInputText.value = '';
             ttsUploadedFiles = [];
+            totalFileCharCount = 0;
             ttsFileInput.value = '';
             updateTtsFileList();
+            updateTextCharCount();
+            updateFileCharCount();
             ttsResultContainer.style.display = 'none';
             ttsErrorOutput.style.display = 'none';
             ttsResultsTableContainer.innerHTML = '';
+            
+            // Ensure button is re-enabled after clearing
+            if (startTtsBtn) {
+                startTtsBtn.disabled = false;
+                startTtsBtn.style.backgroundColor = '#007bff';
+                startTtsBtn.style.borderColor = '#007bff';
+                startTtsBtn.style.cursor = 'pointer';
+            }
         });
     }
 
