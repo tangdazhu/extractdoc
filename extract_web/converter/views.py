@@ -57,6 +57,12 @@ from .speech_processor import (
 from .text_to_voice import (
     get_predefined_tts_voices,
 )  # ADDED: Import for TTS voice list
+from .realtime_speech_view import (
+    start_realtime_recognition,
+    send_audio_data,
+    get_recognition_results,
+    stop_realtime_recognition,
+)  # ADDED: Import for real-time speech recognition
 
 # ADDED: For text extraction from PDF in TTS, make it an optional import
 try:

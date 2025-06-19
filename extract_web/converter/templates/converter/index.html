@@ -856,7 +856,7 @@
                 <div class="sub-tabs">
                     <button id="speechSubTabAsr" class="sub-tab-button active" onclick="showSpeechSubTab('asrContent', this)">语音转文字</button>
                     <button id="speechSubTabTts" class="sub-tab-button" onclick="showSpeechSubTab('ttsContent', this)">文字转语音</button>
-                    <button id="speechSubTabClone" class="sub-tab-button" onclick="showSpeechSubTab('voiceCloningContent', this)" title="功能开发中">声音克隆</button>
+                    <button id="speechSubTabRealtime" class="sub-tab-button" onclick="showSpeechSubTab('realtimeSpeechContent', this)">实时语音翻译</button>
                 </div>
             </div>
 
@@ -913,19 +913,72 @@
                 </div>
             </div>
 
-            <!-- Voice Cloning Sub-content (Placeholder) -->
-            <div id="voiceCloningContent" class="speech-sub-content" style="display: none;">
+            <!-- Real-time Speech Translation Sub-content -->
+            <div id="realtimeSpeechContent" class="speech-sub-content" style="display: none;">
                 <div class="card shadow-sm mb-4">
                     <div class="card-body">
-                        <h5 class="card-title" style="color: #34495e; font-weight: 500;">声音克隆 (Voice Cloning)</h5>
-                        <p class="card-text text-muted">上传一段或多段WAV格式的音频，训练你自己的声音模型。（功能开发中...）</p>
-                        <form id="voiceCloningForm">
-                            <div class="form-group">
-                                <label for="cloneAudioFiles">上传音频文件 (WAV):</label>
-                                <input type="file" class="form-control-file" id="cloneAudioFiles" name="cloneAudioFiles" multiple>
+                        <h5 class="card-title" style="color: #34495e; font-weight: 500;">实时语音翻译 (Real-time Speech Translation)</h5>
+                        <p class="card-text text-muted" style="font-size: 0.9em;">
+                            使用 Paraformer Real Time v2 模型进行实时语音识别。点击"开始录音"按钮，通过麦克风输入语音，系统将实时转换为文字。
+                        </p>
+                        
+                        <!-- Language Selection -->
+                        <div class="mb-3">
+                            <label class="form-label" style="font-weight: 500;">识别语言:</label>
+                            <div class="form-check form-check-inline">
+                                <input class="form-check-input" type="checkbox" id="langZh" value="zh" checked>
+                                <label class="form-check-label" for="langZh">中文</label>
                             </div>
-                            <button type="button" class="btn btn-primary" id="startCloningBtn">开始训练</button>
-                        </form>
+                            <div class="form-check form-check-inline">
+                                <input class="form-check-input" type="checkbox" id="langEn" value="en" checked>
+                                <label class="form-check-label" for="langEn">English</label>
+                            </div>
+                        </div>
+                        
+                        <!-- Microphone Control -->
+                        <div class="action-buttons mt-3 mb-3" style="border-top: none; padding-top: 0; justify-content: flex-start;">
+                            <button type="button" class="btn btn-primary" id="startRealtimeBtn" style="padding: 12px 24px; font-size: 1em; margin-right: 10px;">
+                                <i class="fas fa-microphone me-2"></i>开始录音
+                            </button>
+                            <button type="button" class="btn btn-danger" id="stopRealtimeBtn" style="padding: 12px 24px; font-size: 1em; margin-right: 10px; display: none;">
+                                <i class="fas fa-stop me-2"></i>停止录音
+                            </button>
+                            <button type="button" class="btn btn-outline-secondary" id="clearRealtimeBtn" style="padding: 12px 24px; font-size: 1em;">
+                                <i class="fas fa-eraser me-2"></i>清空结果
+                            </button>
+                        </div>
+                        
+                        <!-- Status Indicator -->
+                        <div id="realtimeStatus" class="mt-3 mb-3" style="display: none;">
+                            <div class="alert alert-info d-flex align-items-center" role="alert">
+                                <div class="spinner-border spinner-border-sm me-3" role="status" aria-hidden="true"></div>
+                                <div>
+                                    <strong id="realtimeStatusText">准备中...</strong>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- Audio Level Indicator -->
+                        <div id="audioLevelContainer" class="mb-3" style="display: none;">
+                            <label class="form-label" style="font-weight: 500;">音量水平:</label>
+                            <div class="progress" style="height: 10px;">
+                                <div id="audioLevelBar" class="progress-bar bg-primary" role="progressbar" style="width: 0%"></div>
+                            </div>
+                        </div>
+                        
+                        <!-- Real-time Results Display -->
+                        <div id="realtimeResultContainer" class="mt-3">
+                            <label for="realtimeTranscriptionOutput" class="form-label" style="font-weight: 500;">实时识别结果:</label>
+                            <div id="realtimeTranscriptionOutput" class="form-control bg-light" style="min-height: 200px; border: 1px solid #e9ecef; white-space: pre-wrap; word-wrap: break-word; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; font-size: 0.95em; width: 100%; padding: 15px; overflow-y: auto;">
+                                <div class="text-muted">实时识别的文本将显示在这里...</div>
+                            </div>
+                            <div id="realtimeErrorOutput" class="text-danger mt-2" style="font-size: 0.9em;"></div>
+                            
+                            <!-- Intermediate Results (smaller text) -->
+                            <div id="realtimeIntermediateResults" class="mt-2" style="font-size: 0.85em; color: #6c757d; font-style: italic;">
+                                <!-- Intermediate results will appear here -->
+                            </div>
+                        </div>
                     </div>
                 </div>
             </div>

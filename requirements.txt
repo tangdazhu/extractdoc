@@ -49,6 +49,11 @@ scenedetect==0.6.6 # video scene detection
 # Speech Synthesis
 edge-tts==7.0.2         # Microsoft Edge Text-to-Speech client
 
+# WebSocket Support for Real-time Speech Recognition
+websocket-client>=1.6.0 # WebSocket client for real-time communication
+channels>=4.0.0         # Django Channels for WebSocket support
+channels-redis>=4.1.0   # Redis backend for Django Channels
+
 # Notes on External Dependencies:
 # - LibreOffice: For Office document conversion (optional, requires separate installation)
 #   * Used for: PDF→Word, PDF→PPT (alternative methods)

@@ -770,6 +770,7 @@ function initializeSpeechTab() {
     // Initialize all speech processing functionalities
     initializeAsrFunctionality();
     initializeTtsFunctionality(); // Add TTS initialization
+    initializeRealtimeSpeechFunctionality(); // Add real-time speech recognition initialization
 }
 
 // Renamed from showSpeechProcessingSubTab for clarity if it's only for main speech tab
@@ -818,6 +819,18 @@ function showSpeechSubTab(subTabIdToShow, clickedButton) {
                 console.error("[showSpeechSubTab] TTS button not found, cannot initialize TTS functionality");
             }
         }, 200); // Increased delay
+    } else if (subTabIdToShow === 'realtimeSpeechContent') {
+        console.log("[showSpeechSubTab] Initializing real-time speech functionality");
+        // Ensure real-time speech functionality is initialized when the tab is shown
+        setTimeout(() => {
+            const startRealtimeBtn = document.getElementById('startRealtimeBtn');
+            if (startRealtimeBtn) {
+                console.log("[showSpeechSubTab] Real-time speech button found, initializing...");
+                initializeRealtimeSpeechFunctionality();
+            } else {
+                console.error("[showSpeechSubTab] Real-time speech button not found, cannot initialize functionality");
+            }
+        }, 200);
     }
     
     console.log(`[showSpeechSubTab] Current active speech sub-tab: ${currentSelectedSpeechSubTab}`);
@@ -1879,4 +1892,373 @@ function initializeTtsFunctionality() {
     ttsInitialized = true;
     console.log("[initializeTtsFunctionality] TTS functionality initialized successfully.");
 }
+
+// --- Real-time Speech Recognition Functionality ---
+let realtimeSpeechSession = null;
+let mediaRecorder = null;
+let audioChunks = [];
+let audioContext = null;
+let analyser = null;
+let microphone = null;
+let isRealtimeRecording = false;
+let recognitionResults = [];
+let pollingInterval = null;
+
+function initializeRealtimeSpeechFunctionality() {
+    console.log('Initializing real-time speech recognition functionality');
+    
+    const startBtn = document.getElementById('startRealtimeBtn');
+    const stopBtn = document.getElementById('stopRealtimeBtn');
+    const clearBtn = document.getElementById('clearRealtimeBtn');
+    
+    if (!startBtn || !stopBtn || !clearBtn) {
+        console.error('Real-time speech buttons not found');
+        return;
+    }
+    
+    // Event listeners
+    startBtn.addEventListener('click', startRealtimeRecognition);
+    stopBtn.addEventListener('click', stopRealtimeRecognition);
+    clearBtn.addEventListener('click', clearRealtimeResults);
+    
+    console.log('Real-time speech recognition functionality initialized');
+}
+
+async function startRealtimeRecognition() {
+    console.log('Starting real-time speech recognition');
+    
+    try {
+        // Check if already recording
+        if (isRealtimeRecording) {
+            console.log('Already recording');
+            return;
+        }
+        
+        // Get selected languages
+        const languageHints = getSelectedLanguages();
+        if (languageHints.length === 0) {
+            showRealtimeError('请至少选择一种识别语言');
+            return;
+        }
+        
+        // Update UI
+        updateRealtimeStatus('正在获取麦克风权限...', true);
+        
+        // Get microphone access
+        const stream = await navigator.mediaDevices.getUserMedia({ 
+            audio: {
+                sampleRate: 16000,
+                channelCount: 1,
+                echoCancellation: true,
+                noiseSuppression: true
+            } 
+        });
+        
+        // Initialize audio processing
+        audioContext = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 16000 });
+        analyser = audioContext.createAnalyser();
+        microphone = audioContext.createMediaStreamSource(stream);
+        microphone.connect(analyser);
+        
+        // Setup audio level monitoring
+        analyser.fftSize = 256;
+        const bufferLength = analyser.frequencyBinCount;
+        const dataArray = new Uint8Array(bufferLength);
+        
+        // Start recognition session
+        updateRealtimeStatus('正在启动识别服务...', true);
+        
+        const sessionResponse = await fetch('/api/realtime-speech/start/', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': getCookie('csrftoken')
+            },
+            body: JSON.stringify({
+                language_hints: languageHints
+            })
+        });
+        
+        if (!sessionResponse.ok) {
+            throw new Error(`HTTP error! status: ${sessionResponse.status}`);
+        }
+        
+        const sessionData = await sessionResponse.json();
+        if (sessionData.status !== 'success') {
+            throw new Error(sessionData.error || 'Failed to start recognition session');
+        }
+        
+        realtimeSpeechSession = sessionData.session_id;
+        console.log('Recognition session started:', realtimeSpeechSession);
+        
+        // Setup media recorder for audio data
+        mediaRecorder = new MediaRecorder(stream, {
+            mimeType: 'audio/webm;codecs=opus'
+        });
+        
+        mediaRecorder.ondataavailable = async (event) => {
+            if (event.data.size > 0) {
+                // Convert to ArrayBuffer and send to server
+                const arrayBuffer = await event.data.arrayBuffer();
+                await sendAudioData(arrayBuffer);
+            }
+        };
+        
+        // Start recording and update UI
+        mediaRecorder.start(100); // Collect data every 100ms
+        isRealtimeRecording = true;
+        
+        document.getElementById('startRealtimeBtn').style.display = 'none';
+        document.getElementById('stopRealtimeBtn').style.display = 'inline-block';
+        document.getElementById('audioLevelContainer').style.display = 'block';
+        
+        updateRealtimeStatus('正在录音中...', true);
+        clearRealtimeResults();
+        
+        // Start audio level monitoring
+        monitorAudioLevel(dataArray);
+        
+        // Start polling for results
+        startResultPolling();
+        
+        console.log('Real-time recognition started successfully');
+        
+    } catch (error) {
+        console.error('Error starting real-time recognition:', error);
+        showRealtimeError('启动实时识别失败: ' + error.message);
+        stopRealtimeRecognition();
+    }
+}
+
+async function stopRealtimeRecognition() {
+    console.log('Stopping real-time speech recognition');
+    
+    try {
+        isRealtimeRecording = false;
+        
+        // Stop polling
+        if (pollingInterval) {
+            clearInterval(pollingInterval);
+            pollingInterval = null;
+        }
+        
+        // Stop media recorder
+        if (mediaRecorder && mediaRecorder.state === 'recording') {
+            mediaRecorder.stop();
+        }
+        
+        // Stop audio context
+        if (audioContext) {
+            audioContext.close();
+            audioContext = null;
+        }
+        
+        // Stop recognition session
+        if (realtimeSpeechSession) {
+            updateRealtimeStatus('正在停止识别服务...', true);
+            
+            try {
+                const response = await fetch(`/api/realtime-speech/stop/${realtimeSpeechSession}/`, {
+                    method: 'POST',
+                    headers: {
+                        'X-CSRFToken': getCookie('csrftoken')
+                    }
+                });
+                
+                if (response.ok) {
+                    console.log('Recognition session stopped successfully');
+                } else {
+                    console.error('Failed to stop recognition session');
+                }
+            } catch (error) {
+                console.error('Error stopping recognition session:', error);
+            }
+            
+            realtimeSpeechSession = null;
+        }
+        
+        // Update UI
+        document.getElementById('startRealtimeBtn').style.display = 'inline-block';
+        document.getElementById('stopRealtimeBtn').style.display = 'none';
+        document.getElementById('audioLevelContainer').style.display = 'none';
+        document.getElementById('realtimeStatus').style.display = 'none';
+        
+        console.log('Real-time recognition stopped');
+        
+    } catch (error) {
+        console.error('Error stopping real-time recognition:', error);
+        showRealtimeError('停止实时识别时出错: ' + error.message);
+    }
+}
+
+function getSelectedLanguages() {
+    const languages = [];
+    
+    if (document.getElementById('langZh').checked) languages.push('zh');
+    if (document.getElementById('langEn').checked) languages.push('en');
+   
+    
+    return languages;
+}
+
+async function sendAudioData(arrayBuffer) {
+    if (!realtimeSpeechSession || !isRealtimeRecording) {
+        return;
+    }
+    
+    try {
+        const response = await fetch(`/api/realtime-speech/audio/${realtimeSpeechSession}/`, {
+            method: 'POST',
+            headers: {
+                'X-CSRFToken': getCookie('csrftoken'),
+                'Content-Type': 'application/octet-stream'
+            },
+            body: arrayBuffer
+        });
+        
+        if (!response.ok) {
+            console.error('Failed to send audio data:', response.status);
+        }
+        
+    } catch (error) {
+        console.error('Error sending audio data:', error);
+    }
+}
+
+function startResultPolling() {
+    if (pollingInterval) {
+        clearInterval(pollingInterval);
+    }
+    
+    pollingInterval = setInterval(async () => {
+        if (!realtimeSpeechSession || !isRealtimeRecording) {
+            clearInterval(pollingInterval);
+            pollingInterval = null;
+            return;
+        }
+        
+        try {
+            const response = await fetch(`/api/realtime-speech/results/${realtimeSpeechSession}/`, {
+                headers: {
+                    'X-CSRFToken': getCookie('csrftoken')
+                }
+            });
+            
+            if (response.ok) {
+                const data = await response.json();
+                if (data.status === 'success' && data.results.length > 0) {
+                    processRecognitionResults(data.results);
+                }
+            }
+            
+        } catch (error) {
+            console.error('Error polling results:', error);
+        }
+    }, 200); // Poll every 200ms
+}
+
+function processRecognitionResults(results) {
+    const outputDiv = document.getElementById('realtimeTranscriptionOutput');
+    const intermediateDiv = document.getElementById('realtimeIntermediateResults');
+    
+    results.forEach(result => {
+        if (result.type === 'result' && result.text) {
+            if (result.is_final) {
+                // Final result - add to main output
+                recognitionResults.push(result.text);
+                updateRealtimeOutput();
+                
+                // Clear intermediate results
+                intermediateDiv.innerHTML = '';
+            } else {
+                // Intermediate result - show in separate area
+                intermediateDiv.innerHTML = `<em>正在识别: ${result.text}</em>`;
+            }
+        } else if (result.type === 'error') {
+            showRealtimeError(result.message);
+        }
+    });
+}
+
+function updateRealtimeOutput() {
+    const outputDiv = document.getElementById('realtimeTranscriptionOutput');
+    const text = recognitionResults.join('\n');
+    
+    if (text.trim()) {
+        outputDiv.innerHTML = text.split('\n').map(line => 
+            `<div style="margin-bottom: 8px; padding: 4px 0;">${escapeHtml(line)}</div>`
+        ).join('');
+    } else {
+        outputDiv.innerHTML = '<div class="text-muted">实时识别的文本将显示在这里...</div>';
+    }
+    
+    // Auto-scroll to bottom
+    outputDiv.scrollTop = outputDiv.scrollHeight;
+}
+
+function clearRealtimeResults() {
+    recognitionResults = [];
+    updateRealtimeOutput();
+    document.getElementById('realtimeIntermediateResults').innerHTML = '';
+    document.getElementById('realtimeErrorOutput').innerHTML = '';
+}
+
+function monitorAudioLevel(dataArray) {
+    if (!analyser || !isRealtimeRecording) {
+        return;
+    }
+    
+    analyser.getByteFrequencyData(dataArray);
+    
+    // Calculate average volume
+    let sum = 0;
+    for (let i = 0; i < dataArray.length; i++) {
+        sum += dataArray[i];
+    }
+    const average = sum / dataArray.length;
+    const level = (average / 255) * 100;
+    
+    // Update audio level bar
+    const levelBar = document.getElementById('audioLevelBar');
+    if (levelBar) {
+        levelBar.style.width = level + '%';
+        
+        // Change color based on level
+        if (level > 70) {
+            levelBar.className = 'progress-bar bg-danger';
+        } else if (level > 30) {
+            levelBar.className = 'progress-bar bg-success';
+        } else {
+            levelBar.className = 'progress-bar bg-info';
+        }
+    }
+    
+    // Continue monitoring
+    if (isRealtimeRecording) {
+        requestAnimationFrame(() => monitorAudioLevel(dataArray));
+    }
+}
+
+function updateRealtimeStatus(message, show = true) {
+    const statusDiv = document.getElementById('realtimeStatus');
+    const statusText = document.getElementById('realtimeStatusText');
+    
+    if (statusDiv && statusText) {
+        statusText.textContent = message;
+        statusDiv.style.display = show ? 'block' : 'none';
+    }
+}
+
+function showRealtimeError(message) {
+    const errorDiv = document.getElementById('realtimeErrorOutput');
+    if (errorDiv) {
+        errorDiv.innerHTML = `<div class="alert alert-danger">${escapeHtml(message)}</div>`;
+    }
+    console.error('Real-time speech error:', message);
+    
+    // Hide status if showing error
+    updateRealtimeStatus('', false);
+}
+
+// --- Real-time Speech Recognition Functionality Ends Here ---
 

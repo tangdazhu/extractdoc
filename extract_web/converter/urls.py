@@ -33,6 +33,27 @@ urlpatterns = [
     path("api/speech-to-text/", views.speech_to_text_view, name="api_speech_to_text"),
     # API for text-to-speech (New)
     path("api/tts/", views.text_to_speech_view, name="api_tts"),
+    # Real-time speech recognition API endpoints
+    path(
+        "api/realtime-speech/start/",
+        views.start_realtime_recognition,
+        name="api_realtime_speech_start",
+    ),
+    path(
+        "api/realtime-speech/audio/<str:session_id>/",
+        views.send_audio_data,
+        name="api_realtime_speech_audio",
+    ),
+    path(
+        "api/realtime-speech/results/<str:session_id>/",
+        views.get_recognition_results,
+        name="api_realtime_speech_results",
+    ),
+    path(
+        "api/realtime-speech/stop/<str:session_id>/",
+        views.stop_realtime_recognition,
+        name="api_realtime_speech_stop",
+    ),
     # 旧的 process_images 端点 - 现在指向一个废弃提示视图
     # 客户端应更新为使用上述新的API端点。
     path("process-images/", views.process_images_view, name="process_images"),
