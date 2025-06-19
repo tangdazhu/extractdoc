@@ -19,14 +19,16 @@ import dashscope
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 # --- BEGIN ADDED: Load DashScope API Key from config.yaml ---
-CONFIG_YAML_PATH = BASE_DIR / 'config.yaml'
+CONFIG_YAML_PATH = BASE_DIR / "config.yaml"
 try:
-    with open(CONFIG_YAML_PATH, 'r') as f:
+    with open(CONFIG_YAML_PATH, "r") as f:
         config_data = yaml.safe_load(f)
-        DASHSCOPE_API_KEY = config_data.get('DASHSCOPE_API_KEY')
+        DASHSCOPE_API_KEY = config_data.get("DASHSCOPE_API_KEY")
         if DASHSCOPE_API_KEY:
             dashscope.api_key = DASHSCOPE_API_KEY
-            print(f"Successfully loaded DASHSCOPE_API_KEY from {CONFIG_YAML_PATH}") # For verification
+            print(
+                f"Successfully loaded DASHSCOPE_API_KEY from {CONFIG_YAML_PATH}"
+            )  # For verification
         else:
             print(f"DASHSCOPE_API_KEY not found in {CONFIG_YAML_PATH}")
 except FileNotFoundError:
@@ -139,7 +141,7 @@ USE_TZ = True
 STATIC_URL = "static/"
 
 STATICFILES_DIRS = [
-    os.path.join(BASE_DIR, 'converter/static/converter'),
+    os.path.join(BASE_DIR, "converter/static/converter"),
 ]
 
 # Default primary key field type
@@ -147,57 +149,62 @@ STATICFILES_DIRS = [
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
-LOGIN_REDIRECT_URL = '/'
-LOGOUT_REDIRECT_URL = '/'
+LOGIN_REDIRECT_URL = "/"
+LOGOUT_REDIRECT_URL = "/"
 
 # Media files (user-uploaded files)
-MEDIA_URL = '/media/'
-MEDIA_ROOT = BASE_DIR / 'his_pic'
+MEDIA_URL = "/media/"
+MEDIA_ROOT = BASE_DIR / "his_pic"
 
 # Logging Configuration
 LOGGING = {
-    'version': 1,
-    'disable_existing_loggers': False, # 保留 Django 已有的 logger
-    'formatters': {
-        'verbose': {
-            'format': '{levelname} {asctime} {module} {process:d} {thread:d} {message}',
-            'style': '{',
+    "version": 1,
+    "disable_existing_loggers": False,  # 保留 Django 已有的 logger
+    "formatters": {
+        "verbose": {
+            "format": "{levelname} {asctime} {module} {process:d} {thread:d} {message}",
+            "style": "{",
         },
-        'simple': {
-            'format': '{levelname} {asctime} {module} {message}',
-            'style': '{',
-        },
-    },
-    'handlers': {
-        'console': { # 保留控制台输出，方便开发时查看
-            'level': 'DEBUG', # 开发时控制台可以输出 DEBUG 级别
-            'class': 'logging.StreamHandler',
-            'formatter': 'simple',
-        },
-        'file': {
-            'level': 'DEBUG', # 文件中记录 INFO 级别及以上
-            'class': 'logging.handlers.RotatingFileHandler',
-            'filename': BASE_DIR / 'django.log', # 日志文件路径
-            'maxBytes': 1024 * 1024 * 5,  # 5 MB 文件大小上限
-            'backupCount': 2, # 保留2个备份文件
-            'formatter': 'verbose',
+        "simple": {
+            "format": "{levelname} {asctime} {module} {message}",
+            "style": "{",
         },
     },
-    'loggers': {
-        'django': { # Django 框架本身的 logger
-            'handlers': ['console', 'file'],
-            'level': 'INFO', # Django 框架的日志级别
-            'propagate': True,
+    "handlers": {
+        "console": {  # 保留控制台输出，方便开发时查看
+            "level": "DEBUG",  # 开发时控制台可以输出 DEBUG 级别
+            "class": "logging.StreamHandler",
+            "formatter": "simple",
         },
-        'converter': { # 我们 converter 应用的 logger
-            'handlers': ['console', 'file'],
-            'level': 'DEBUG', # 应用日志级别可以更详细
-            'propagate': False, # 不向上传播给 root logger，避免重复记录
+        "file": {
+            "level": "DEBUG",  # 文件中记录 INFO 级别及以上
+            "class": "logging.handlers.RotatingFileHandler",
+            "filename": BASE_DIR / "django.log",  # 日志文件路径
+            "maxBytes": 1024 * 1024 * 5,  # 5 MB 文件大小上限
+            "backupCount": 2,  # 保留2个备份文件
+            "formatter": "verbose",
+        },
+    },
+    "loggers": {
+        "django": {  # Django 框架本身的 logger
+            "handlers": ["console", "file"],
+            "level": "INFO",  # Django 框架的日志级别
+            "propagate": True,
+        },
+        "converter": {  # 我们 converter 应用的 logger
+            "handlers": ["console", "file"],
+            "level": "DEBUG",  # 应用日志级别可以更详细
+            "propagate": False,  # 不向上传播给 root logger，避免重复记录
+        },
+        "ocr_system": {  # 新增 ocr_system logger
+            "handlers": ["console", "file"],
+            "level": "DEBUG",
+            "propagate": False,
         },
         # 可以为其他应用配置 logger
     },
-    'root': { # 根 logger，捕获所有未被特定 logger 处理的日志
-        'handlers': ['console', 'file'],
-        'level': 'INFO', # 根 logger 默认级别
-    }
-} 
+    "root": {  # 根 logger，捕获所有未被特定 logger 处理的日志
+        "handlers": ["console", "file"],
+        "level": "INFO",  # 根 logger 默认级别
+    },
+}

@@ -2146,8 +2146,15 @@ function startResultPolling() {
             
             if (response.ok) {
                 const data = await response.json();
-                if (data.status === 'success' && data.results.length > 0) {
-                    processRecognitionResults(data.results);
+                // 兼容后端返回的 results 或 final_results 字段
+                let results = [];
+                if (Array.isArray(data.results) && data.results.length > 0) {
+                    results = data.results;
+                } else if (Array.isArray(data.final_results) && data.final_results.length > 0) {
+                    results = data.final_results;
+                }
+                if (data.status === 'success' && results.length > 0) {
+                    processRecognitionResults(results);
                 }
             }
             
@@ -2162,16 +2169,13 @@ function processRecognitionResults(results) {
     const intermediateDiv = document.getElementById('realtimeIntermediateResults');
     
     results.forEach(result => {
-        if (result.type === 'result' && result.text) {
+        // 兼容没有 type 字段但有 text 的情况
+        if ((result.type === 'result' || result.type === undefined) && result.text) {
             if (result.is_final) {
-                // Final result - add to main output
                 recognitionResults.push(result.text);
                 updateRealtimeOutput();
-                
-                // Clear intermediate results
                 intermediateDiv.innerHTML = '';
             } else {
-                // Intermediate result - show in separate area
                 intermediateDiv.innerHTML = `<em>正在识别: ${result.text}</em>`;
             }
         } else if (result.type === 'error') {

@@ -24,9 +24,7 @@ except ImportError:
 
 from .realtime_speech_processor import create_realtime_recognizer
 
-logger = logging.getLogger(__name__)
-logger.info("[TEST] === 这是realtime_speech_view.py的顶层日志 ===")
-
+logger = logging.getLogger("ocr_system")
 # 全局会话存储（简单实现，生产环境建议使用Redis等）
 _recognition_sessions = {}
 
@@ -272,6 +270,7 @@ else:
 @csrf_exempt
 @login_required
 def start_realtime_recognition(request):
+    logger.info("[TEST] start_realtime_recognition called, method=%s", request.method)
     """Start a real-time speech recognition session"""
     if request.method != "POST":
         return JsonResponse({"error": "Only POST method allowed"}, status=405)
@@ -332,6 +331,11 @@ def start_realtime_recognition(request):
 @csrf_exempt
 @login_required
 def send_audio_data(request, session_id):
+    logger.info(
+        "[TEST] send_audio_data view called, session_id=%s, method=%s",
+        session_id,
+        request.method,
+    )
     """Send audio data to recognition session"""
     if request.method != "POST":
         return JsonResponse({"error": "Only POST method allowed"}, status=405)
@@ -369,6 +373,11 @@ def send_audio_data(request, session_id):
 @csrf_exempt
 @login_required
 def get_recognition_results(request, session_id):
+    logger.info(
+        "[TEST] get_recognition_results called, session_id=%s, method=%s",
+        session_id,
+        request.method,
+    )
     """Get recognition results from session"""
     if request.method != "GET":
         return JsonResponse({"error": "Only GET method allowed"}, status=405)
@@ -394,6 +403,11 @@ def get_recognition_results(request, session_id):
 @csrf_exempt
 @login_required
 def stop_realtime_recognition(request, session_id):
+    logger.info(
+        "[TEST] stop_realtime_recognition called, session_id=%s, method=%s",
+        session_id,
+        request.method,
+    )
     """Stop a real-time speech recognition session"""
     if request.method != "POST":
         return JsonResponse({"error": "Only POST method allowed"}, status=405)

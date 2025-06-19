@@ -31,7 +31,7 @@ logging.basicConfig(
         logging.StreamHandler(),
     ],
 )
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("ocr_system")
 logger.info("[TEST] === 这是realtime_speech_processor.py的顶层日志 ===")
 
 
@@ -75,7 +75,7 @@ class RealtimeSpeechRecognizer:
         logger.info(f"Recognizer created with config: {self.config}")
 
     def _default_result_handler(self, result: Dict[str, Any]):
-        """Default result handler that just prints the result"""
+        logger.info("[TEST] _default_result_handler called, result: %s", result)
         logger.info(f"Recognition result: {result}")
 
     def _create_websocket_connection(self):
@@ -90,11 +90,14 @@ class RealtimeSpeechRecognizer:
             return False
 
     def _recognition_worker(self):
-        """Worker thread for handling real-time recognition"""
+        logger.info("[TEST] _recognition_worker started")
         while self._is_active:
             try:
-                # Get audio data from queue
                 audio_data = self._audio_queue.get(timeout=1.0)
+                logger.info(
+                    "[TEST] _recognition_worker got audio_data, len=%d",
+                    len(audio_data) if audio_data else -1,
+                )
 
                 if audio_data is None:  # Stop signal
                     break
@@ -111,21 +114,15 @@ class RealtimeSpeechRecognizer:
                 logger.error(f"Error in recognition worker: {e}")
 
     def _process_audio_chunk(self, audio_data: bytes) -> Optional[Dict[str, Any]]:
-        """
-        Process a chunk of audio data
-
-        Args:
-            audio_data: Raw audio bytes
-
-        Returns:
-            Recognition result or None
-        """
+        logger.info(
+            "[TEST] _process_audio_chunk called, data length: %d", len(audio_data)
+        )
         try:
             # In a real implementation, this would send audio to DashScope API
             # For now, return a mock result
             mock_result = {
                 "text": "这是模拟的识别结果",
-                "is_final": False,
+                "is_final": True,
                 "confidence": 0.95,
                 "timestamp": time.time(),
             }
@@ -138,15 +135,9 @@ class RealtimeSpeechRecognizer:
             return None
 
     def start_recognition(self, language_hints: List[str] = None) -> bool:
-        """
-        Start real-time speech recognition
-
-        Args:
-            language_hints: List of language codes (e.g., ['zh', 'en'])
-
-        Returns:
-            True if started successfully, False otherwise
-        """
+        logger.info(
+            "[TEST] start_recognition called, language_hints: %s", language_hints
+        )
         if self._is_active:
             logger.warning("Recognition is already active")
             return True
@@ -176,12 +167,7 @@ class RealtimeSpeechRecognizer:
             return False
 
     def stop_recognition(self) -> bool:
-        """
-        Stop real-time speech recognition
-
-        Returns:
-            True if stopped successfully, False otherwise
-        """
+        logger.info("[TEST] stop_recognition called")
         if not self._is_active:
             logger.warning("Recognition is not active")
             return True
@@ -210,15 +196,7 @@ class RealtimeSpeechRecognizer:
             return False
 
     def send_audio_data(self, audio_data: bytes) -> bool:
-        """
-        Send audio data for recognition
-
-        Args:
-            audio_data: Raw audio bytes (PCM format, 16kHz sample rate)
-
-        Returns:
-            True if data was queued successfully, False otherwise
-        """
+        logger.info("[TEST] send_audio_data called, data length: %d", len(audio_data))
         if not self._is_active:
             logger.warning("Recognition is not active")
             return False
@@ -267,9 +245,9 @@ class RealtimeSpeechRecognizer:
 def create_realtime_recognizer(
     result_handler: Callable[[Dict], None] = None, language_hints: List[str] = None
 ) -> Optional[RealtimeSpeechRecognizer]:
-    """
-    Factory function to create a real-time speech recognizer
-    """
+    logger.info(
+        "[TEST] create_realtime_recognizer called, language_hints: %s", language_hints
+    )
     try:
         # 优先用环境变量
         api_key = os.environ.get("DASHSCOPE_API_KEY")
