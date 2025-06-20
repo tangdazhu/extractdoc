@@ -32,6 +32,7 @@ logging.basicConfig(
     ],
 )
 logger = logging.getLogger("ocr_system")
+logger.setLevel(logging.DEBUG)
 logger.info("[TEST] === 这是realtime_speech_processor.py的顶层日志 ===")
 
 
@@ -145,8 +146,10 @@ class RealtimeSpeechRecognizer:
     async def _handle_websocket_message(self, message):
         """处理 WebSocket 消息"""
         try:
+            logger.debug(f"[DEBUG] Raw WebSocket message: {message}")
             data = json.loads(message)
             event = data.get("header", {}).get("event")
+            logger.debug(f"[DEBUG] WebSocket event type: {event}")
 
             if event == "task-started":
                 logger.info("任务已启动，可以开始发送音频数据")
@@ -155,6 +158,7 @@ class RealtimeSpeechRecognizer:
             elif event == "result-generated":
                 # 处理识别结果
                 sentence = data.get("payload", {}).get("output", {}).get("sentence", {})
+                logger.debug(f"[DEBUG] result-generated payload: {sentence}")
                 if sentence:
                     result = {
                         "text": sentence.get("text", ""),
@@ -173,6 +177,9 @@ class RealtimeSpeechRecognizer:
                         if result["is_final"]:
                             self.final_results.append(result)
                         if self.result_handler:
+                            logger.debug(
+                                f"[DEBUG] Calling result_handler with: {result}"
+                            )
                             self.result_handler(result)
 
             elif event == "task-finished":
@@ -184,9 +191,13 @@ class RealtimeSpeechRecognizer:
                 error_message = data.get("header", {}).get("error_message")
                 logger.error(f"任务失败: {error_code} - {error_message}")
                 self.is_active = False
+            else:
+                logger.warning(
+                    f"[DEBUG] Unhandled WebSocket event: {event}, data: {data}"
+                )
 
         except Exception as e:
-            logger.error(f"处理 WebSocket 消息时出错: {e}")
+            logger.error(f"处理 WebSocket 消消息时出错: {e}, message: {message}")
 
     async def _receive_messages(self):
         """接收 WebSocket 消息的协程"""
@@ -206,6 +217,9 @@ class RealtimeSpeechRecognizer:
     async def _send_audio_data_async(self):
         """发送音频数据的协程"""
         logger.info("音频发送循环启动")
+        # 修复：等待 is_active 变为 True 再进入主循环
+        while not self.is_active:
+            await asyncio.sleep(0.01)
         try:
             while self.is_active:
                 try:

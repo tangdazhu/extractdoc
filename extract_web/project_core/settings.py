@@ -184,6 +184,14 @@ LOGGING = {
             "backupCount": 2,  # 保留2个备份文件
             "formatter": "verbose",
         },
+        "app_file": {  # 新增 app.log handler
+            "level": "DEBUG",
+            "class": "logging.handlers.RotatingFileHandler",
+            "filename": BASE_DIR / "app.log",
+            "maxBytes": 1024 * 1024 * 5,
+            "backupCount": 2,
+            "formatter": "verbose",
+        },
     },
     "loggers": {
         "django": {  # Django 框架本身的 logger
@@ -197,7 +205,7 @@ LOGGING = {
             "propagate": False,  # 不向上传播给 root logger，避免重复记录
         },
         "ocr_system": {  # 新增 ocr_system logger
-            "handlers": ["console", "file"],
+            "handlers": ["console", "app_file"],  # 只写 app.log
             "level": "DEBUG",
             "propagate": False,
         },

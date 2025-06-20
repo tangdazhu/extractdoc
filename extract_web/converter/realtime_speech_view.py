@@ -123,7 +123,18 @@ if CHANNELS_AVAILABLE:
 
                 # Create result handler that sends results back via WebSocket
                 def result_handler(result: dict):
-                    # Schedule the coroutine to send the message
+                    logger.info(
+                        f"[DEBUG] WebSocket result_handler called, result={result}"
+                    )
+                    # 对最终的识别结果进行翻译
+                    if result.get("is_final") and result.get("text"):
+                        original_text = result["text"]
+                        # 如果包含中文字符，则翻译成英文，否则翻译成中文
+                        target_lang = "en" if contains_chinese(original_text) else "zh"
+                        translated_text = translate_text(original_text, target_lang)
+                        result["translated_text"] = translated_text
+                        logger.info(f"Translated result for WebSocket: {result}")
+                    # 无论什么结果都推送到前端
                     asyncio.create_task(self.send_recognition_result(result))
 
                 # Create and start recognizer in a thread
@@ -224,6 +235,9 @@ if CHANNELS_AVAILABLE:
                     return
 
                 audio_data = base64.b64decode(audio_data_b64)
+                logger.info(
+                    f"[DEBUG] WebSocket received audio_data, length={len(audio_data)}, hex={audio_data[:16].hex()}"
+                )
 
                 # Send audio data to recognizer in a thread
                 success = await asyncio.get_event_loop().run_in_executor(
@@ -240,6 +254,9 @@ if CHANNELS_AVAILABLE:
         async def send_recognition_result(self, result: dict):
             """Send recognition result to client"""
             try:
+                logger.info(
+                    f"Sending WebSocket recognition result: {json.dumps(result, ensure_ascii=False)}"
+                )
                 await self.send(text_data=json.dumps(result))
             except Exception as e:
                 logger.error(f"Error sending recognition result: {e}", exc_info=True)
@@ -349,6 +366,10 @@ def send_audio_data(request, session_id):
     if request.method == "POST":
         logger.debug(
             f"[TEST] send_audio_data view called, session_id={session_id}, method=POST"
+        )
+        # 新增日志，记录收到的原始音频包长度和部分内容
+        logger.info(
+            f"[DEBUG] HTTP received audio_data, length={len(request.body)}, hex={request.body[:16].hex()}"
         )
         session = _recognition_sessions.get(session_id)
         if not session:
