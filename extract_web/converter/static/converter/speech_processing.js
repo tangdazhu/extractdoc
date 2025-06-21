@@ -798,7 +798,7 @@ function processRecognitionResults(results) {
     results.forEach(result => {
         if ((result.type === 'result' || result.type === undefined) && result.text) {
             if (result.is_final) {
-                const cleanText = result.text.trim();
+                const cleanText = result.text.replace(/\r/g, '').trim();
                 if (cleanText && !recognitionResults.some(r => r.text === cleanText)) {
                     recognitionResults.push({
                         text: cleanText,
@@ -810,13 +810,15 @@ function processRecognitionResults(results) {
             }
         }
     });
-    // 只拼接非空内容
-    const filtered = recognitionResults.filter(r => r.text && r.text.trim() !== '');
-    outputDiv.innerHTML = filtered.map(r =>
-        `<span>${window.escapeHtml(r.text)}</span>${r.translation ? `<br><span style='color: #007bff;'>${window.escapeHtml(r.translation)}</span>` : ''}`
-    ).join('<br>');
+    // 合并所有文本为一个大段落，保留原有的换行
+    const allText = recognitionResults.map(r => r.text).join('');
+    // 只在遇到两个换行时才分段
+    const paragraphs = allText.split(/\n{2,}/).map(p => p.trim()).filter(Boolean);
+    outputDiv.innerHTML = paragraphs.map(p =>
+        `<div style="margin-bottom: 8px;">${window.escapeHtml(p)}</div>`
+    ).join('');
     if (latestIntermediate && latestIntermediate.trim() !== '') {
-        intermediateDiv.innerHTML = `<div class="text-info" style="color: #888; font-style: italic;">${window.escapeHtml(latestIntermediate.trim())}</div>`;
+        intermediateDiv.innerHTML = `<div class=\"text-info\" style=\"color: #888; font-style: italic;\">${window.escapeHtml(latestIntermediate.trim())}</div>`;
     } else {
         intermediateDiv.innerHTML = '';
     }
@@ -824,10 +826,11 @@ function processRecognitionResults(results) {
 }
 function updateRealtimeOutput() {
     const outputDiv = document.getElementById('realtimeTranscriptionOutput');
-    const filtered = recognitionResults.filter(r => r.text && r.text.trim() !== '');
-    outputDiv.innerHTML = filtered.map(r =>
-        `<span>${window.escapeHtml(r.text)}</span>${r.translation ? `<br><span style='color: #007bff;'>${window.escapeHtml(r.translation)}</span>` : ''}`
-    ).join('<br>');
+    const allText = recognitionResults.map(r => r.text).join('');
+    const paragraphs = allText.split(/\n{2,}/).map(p => p.trim()).filter(Boolean);
+    outputDiv.innerHTML = paragraphs.map(p =>
+        `<div style="margin-bottom: 8px;">${window.escapeHtml(p)}</div>`
+    ).join('');
     outputDiv.scrollTop = outputDiv.scrollHeight;
 }
 function clearRealtimeResults() {
