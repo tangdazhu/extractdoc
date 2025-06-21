@@ -1084,7 +1084,11 @@
 {% endblock %}
 
 {% block extra_js %}
-<script src="{% static 'converter/index.js' %}" defer></script>
+<script src="{% static 'converter/common.js' %}" defer></script>
+<script src="{% static 'converter/doc_conversion.js' %}" defer></script>
+<script src="{% static 'converter/video_analysis.js' %}" defer></script>
+<script src="{% static 'converter/speech_processing.js' %}" defer></script>
+<script src="{% static 'converter/main.js' %}" defer></script>
 <script>
 // 确保页面加载后激活导航功能
 document.addEventListener('DOMContentLoaded', function() {
