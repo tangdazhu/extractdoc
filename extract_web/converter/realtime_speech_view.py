@@ -403,7 +403,7 @@ def send_audio_data(request, session_id):
 @csrf_exempt
 @login_required
 def get_recognition_results(request, session_id):
-    """获取指定会话的当前识别结果"""
+    """获取指定会话的当前识别结果（统一返回所有临时+最终结果）"""
     if request.method == "GET":
         logger.info(
             f"[TEST] get_recognition_results called, session_id={session_id}, method=GET"
@@ -415,9 +415,12 @@ def get_recognition_results(request, session_id):
                 return JsonResponse(
                     {"status": "error", "message": "权限不足"}, status=403
                 )
-            # 返回当前所有的结果，并清空列表，避免重复发送
-            current_results = session["results"]
-            session["results"] = []  # 清空以避免下次重复获取
+            recognizer = session.get("recognizer")
+            if recognizer:
+                # 统一通过 recognizer.get_all_results() 获取所有结果
+                current_results = recognizer.get_all_results()
+            else:
+                current_results = []
             return JsonResponse({"status": "success", "results": current_results})
         else:
             return JsonResponse(

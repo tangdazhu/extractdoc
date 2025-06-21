@@ -50,6 +50,9 @@ class RealtimeSpeechRecognizer:
         self.receive_thread = None
         self.final_results = []
 
+        # 新增：存储所有识别结果（临时+最终）
+        self.all_results = []
+
         # WebSocket URL and headers
         self.ws_url = "wss://dashscope.aliyuncs.com/api-ws/v1/inference"
         self.headers = {
@@ -168,12 +171,12 @@ class RealtimeSpeechRecognizer:
                         "confidence": 0.95,  # DashScope 不返回置信度，设置默认值
                         "timestamp": time.time(),
                     }
-
-                    # 只处理有文本内容的结果
                     if result["text"].strip():
                         logger.info(
                             f"收到识别结果: {result['text']} (final: {result['is_final']})"
                         )
+                        # 新增：所有结果都存储
+                        self.all_results.append(result)
                         if result["is_final"]:
                             self.final_results.append(result)
                         if self.result_handler:
@@ -387,6 +390,12 @@ class RealtimeSpeechRecognizer:
         except Exception as e:
             logger.error(f"更新配置失败: {e}")
             return False
+
+    def get_all_results(self) -> List[Dict]:
+        """获取所有识别结果（临时+最终），并清空缓存（一次性返回给前端）"""
+        results = self.all_results.copy()
+        self.all_results.clear()
+        return results
 
 
 def create_realtime_recognizer(

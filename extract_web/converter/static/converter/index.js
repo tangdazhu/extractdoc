@@ -2100,6 +2100,8 @@ function startResultPolling() {
             
             if (response.ok) {
                 const data = await response.json();
+                // 新增详细 polled data 日志
+                console.log('[startResultPolling] polled data:', data);
                 // 兼容后端返回的 results 或 final_results 字段
                 let results = [];
                 if (Array.isArray(data.results) && data.results.length > 0) {
@@ -2121,29 +2123,48 @@ function startResultPolling() {
 function processRecognitionResults(results) {
     const outputDiv = document.getElementById('realtimeTranscriptionOutput');
     const intermediateDiv = document.getElementById('realtimeIntermediateResults');
-    
-    // 如果是在录音过程中，只添加新结果
-    // 如果是停止时的最终结果，直接添加所有结果
+    console.log('[processRecognitionResults] called, results:', results, 'isRealtimeRecording:', isRealtimeRecording);
+    console.log('[processRecognitionResults] outputDiv:', outputDiv);
+    console.log('[processRecognitionResults] intermediateDiv:', intermediateDiv);
+
     if (isRealtimeRecording) {
-        // 录音过程中：只添加还没显示过的新结果
+        // 录音过程中：处理临时和最终结果
         let startIdx = recognitionResults.length;
+        let latestIntermediate = '';
         for (let i = startIdx; i < results.length; i++) {
             const result = results[i];
-            if ((result.type === 'result' || result.type === undefined) && result.text && result.is_final) {
-                recognitionResults.push(result.text);
+            console.log('[processRecognitionResults] result:', result);
+            if ((result.type === 'result' || result.type === undefined) && result.text) {
+                if (result.is_final) {
+                    recognitionResults.push(result.text);
+                    console.log('[processRecognitionResults] push final:', result.text);
+                } else {
+                    latestIntermediate = result.text;
+                    console.log('[processRecognitionResults] latest intermediate:', latestIntermediate);
+                }
             }
         }
+        updateRealtimeOutput();
+        // 实时显示临时识别结果
+        if (latestIntermediate) {
+            intermediateDiv.innerHTML = `<div class="text-info">${escapeHtml(latestIntermediate)}</div>`;
+            console.log('[processRecognitionResults] intermediateDiv updated:', latestIntermediate);
+        } else {
+            intermediateDiv.innerHTML = '';
+            console.log('[processRecognitionResults] intermediateDiv cleared');
+        }
     } else {
-        // 停止时的最终结果：直接添加所有结果
+        // 停止时的最终结果：全部加入 recognitionResults，清空 intermediate
         results.forEach(result => {
             if ((result.type === 'result' || result.type === undefined) && result.text) {
                 recognitionResults.push(result.text);
+                console.log('[processRecognitionResults] push final (stopped):', result.text);
             }
         });
+        updateRealtimeOutput();
+        intermediateDiv.innerHTML = '';
+        console.log('[processRecognitionResults] intermediateDiv cleared (stopped)');
     }
-    
-    updateRealtimeOutput();
-    intermediateDiv.innerHTML = '';
 }
 
 function updateRealtimeOutput() {
