@@ -794,55 +794,40 @@ function startResultPolling() {
 function processRecognitionResults(results) {
     const outputDiv = document.getElementById('realtimeTranscriptionOutput');
     const intermediateDiv = document.getElementById('realtimeIntermediateResults');
-    console.log('[processRecognitionResults] called, results:', results, 'isRealtimeRecording:', isRealtimeRecording);
-    console.log('[processRecognitionResults] outputDiv:', outputDiv);
-    console.log('[processRecognitionResults] intermediateDiv:', intermediateDiv);
-    if (isRealtimeRecording) {
-        let startIdx = recognitionResults.length;
-        let latestIntermediate = '';
-        for (let i = startIdx; i < results.length; i++) {
-            const result = results[i];
-            console.log('[processRecognitionResults] result:', result);
-            if ((result.type === 'result' || result.type === undefined) && result.text) {
-                if (result.is_final) {
-                    recognitionResults.push(result.text);
-                    console.log('[processRecognitionResults] push final:', result.text);
-                } else {
-                    latestIntermediate = result.text;
-                    console.log('[processRecognitionResults] latest intermediate:', latestIntermediate);
+    let latestIntermediate = '';
+    results.forEach(result => {
+        if ((result.type === 'result' || result.type === undefined) && result.text) {
+            if (result.is_final) {
+                const cleanText = result.text.trim();
+                if (cleanText && !recognitionResults.some(r => r.text === cleanText)) {
+                    recognitionResults.push({
+                        text: cleanText,
+                        translation: result.translation || ''
+                    });
                 }
+            } else {
+                latestIntermediate = result.text;
             }
         }
-        updateRealtimeOutput();
-        if (latestIntermediate) {
-            intermediateDiv.innerHTML = `<div class="text-info">${window.escapeHtml(latestIntermediate)}</div>`;
-            console.log('[processRecognitionResults] intermediateDiv updated:', latestIntermediate);
-        } else {
-            intermediateDiv.innerHTML = '';
-            console.log('[processRecognitionResults] intermediateDiv cleared');
-        }
+    });
+    // 只拼接非空内容
+    const filtered = recognitionResults.filter(r => r.text && r.text.trim() !== '');
+    outputDiv.innerHTML = filtered.map(r =>
+        `<span>${window.escapeHtml(r.text)}</span>${r.translation ? `<br><span style='color: #007bff;'>${window.escapeHtml(r.translation)}</span>` : ''}`
+    ).join('<br>');
+    if (latestIntermediate && latestIntermediate.trim() !== '') {
+        intermediateDiv.innerHTML = `<div class="text-info" style="color: #888; font-style: italic;">${window.escapeHtml(latestIntermediate.trim())}</div>`;
     } else {
-        results.forEach(result => {
-            if ((result.type === 'result' || result.type === undefined) && result.text) {
-                recognitionResults.push(result.text);
-                console.log('[processRecognitionResults] push final (stopped):', result.text);
-            }
-        });
-        updateRealtimeOutput();
         intermediateDiv.innerHTML = '';
-        console.log('[processRecognitionResults] intermediateDiv cleared (stopped)');
     }
+    outputDiv.scrollTop = outputDiv.scrollHeight;
 }
 function updateRealtimeOutput() {
     const outputDiv = document.getElementById('realtimeTranscriptionOutput');
-    const text = recognitionResults.join('\n');
-    if (text.trim()) {
-        outputDiv.innerHTML = text.split('\n').map(line => 
-            `<div style="margin-bottom: 8px; padding: 4px 0;">${window.escapeHtml(line)}</div>`
-        ).join('');
-    } else {
-        outputDiv.innerHTML = '<div class="text-muted">实时识别的文本将显示在这里...</div>';
-    }
+    const filtered = recognitionResults.filter(r => r.text && r.text.trim() !== '');
+    outputDiv.innerHTML = filtered.map(r =>
+        `<span>${window.escapeHtml(r.text)}</span>${r.translation ? `<br><span style='color: #007bff;'>${window.escapeHtml(r.translation)}</span>` : ''}`
+    ).join('<br>');
     outputDiv.scrollTop = outputDiv.scrollHeight;
 }
 function clearRealtimeResults() {
