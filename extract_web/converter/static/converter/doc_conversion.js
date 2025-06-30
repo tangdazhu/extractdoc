@@ -150,14 +150,14 @@ window.renderFileList = renderFileList;
 
 function handleFiles(incomingFiles) {
     const maxFiles = 10;
-    const maxFileSize = 10 * 1024 * 1024;
+    const maxFileSize = 500 * 1024 * 1024;
     for (const file of incomingFiles) {
         if (window.uploadedFiles.length >= maxFiles) {
             alert(`最多只能上传 ${maxFiles} 个文件。`);
             break;
         }
         if (file.size > maxFileSize) {
-            alert(`文件 "${file.name}" (${(file.size / 1024 / 1024).toFixed(2)} MB) 超过了10MB的大小限制。`);
+            alert(`文件 "${file.name}" (${(file.size / 1024 / 1024).toFixed(2)} MB) 超过了500MB的大小限制。`);
             continue;
         }
         if (!window.uploadedFiles.some(f => f.name === file.name)) {

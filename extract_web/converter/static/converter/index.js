@@ -308,7 +308,7 @@ function renderFileList() {
 function handleFiles(incomingFiles) {
     const fileListUI = document.getElementById('fileList');
     const maxFiles = 10;
-    const maxFileSize = 10 * 1024 * 1024; // 10MB
+    const maxFileSize = 500 * 1024 * 1024; // 500MB
 
     for (const file of incomingFiles) {
         if (uploadedFiles.length >= maxFiles) {
@@ -316,7 +316,7 @@ function handleFiles(incomingFiles) {
             break;
         }
         if (file.size > maxFileSize) {
-            alert(`文件 "${file.name}" (${(file.size / 1024 / 1024).toFixed(2)} MB) 超过了10MB的大小限制。`);
+            alert(`文件 "${file.name}" (${(file.size / 1024 / 1024).toFixed(2)} MB) 超过了500MB的大小限制。`);
             continue;
         }
         // Check for duplicate file names before adding
