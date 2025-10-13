@@ -434,8 +434,10 @@ def file_to_pdf_view(request):
         font_name = request.POST.get("font_name_txt", "SimSun")
         if conversion_func:
             original_conversion_func = conversion_func
-            conversion_func = lambda input_path, output_path: original_conversion_func(
-                input_path, output_path, font_name=font_name
+            conversion_func = (
+                lambda input_path, output_path: original_conversion_func(
+                    input_path, output_path, font_name=font_name
+                )
             )
         logger.info(
             f"file_to_pdf_view: TXT to PDF mode selected with font: {font_name}. RequestID: {request_id}"

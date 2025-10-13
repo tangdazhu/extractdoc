@@ -57,13 +57,14 @@ def register_fonts_for_reportlab():
     return registered_cjk_font if registered_cjk_font else DEFAULT_FONT
 
 
-def convert_txt_to_pdf(input_txt_path, output_pdf_path):
+def convert_txt_to_pdf(input_txt_path, output_pdf_path, font_name=None):
     """
     Converts a TXT file to a PDF file using ReportLab.
 
     Args:
         input_txt_path (str): The path to the input TXT file.
         output_pdf_path (str): The path to save the output PDF file.
+        font_name (str, optional): The name of the font to use. Defaults to None.
 
     Returns:
         tuple: (success: bool, actual_output_path: str or None, error_message: str or None)
@@ -71,9 +72,25 @@ def convert_txt_to_pdf(input_txt_path, output_pdf_path):
     logger.info(f"Attempting to convert TXT '{input_txt_path}' to PDF '{output_pdf_path}'")
     
     try:
-        font_name_to_use = register_fonts_for_reportlab()
-        logger.info(f"Using font '{font_name_to_use}' for PDF generation.")
+        requested_font = font_name
+        font_name_to_use = None
+        if requested_font:
+            try:
+                pdfmetrics.getFont(requested_font)
+                font_name_to_use = requested_font
+                logger.info(
+                    f"Using requested font '{requested_font}' for PDF generation."
+                )
+            except KeyError:
+                logger.warning(
+                    f"Requested font '{requested_font}' not registered yet. Will attempt registration or fall back."
+                )
 
+        if not font_name_to_use:
+            font_name_to_use = register_fonts_for_reportlab()
+
+        logger.info(f"Using font '{font_name_to_use}' for PDF generation.")
+        
         try:
             with open(input_txt_path, 'r', encoding='utf-8') as f:
                 text_content = f.read()
