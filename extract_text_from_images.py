@@ -70,28 +70,32 @@ class ModularOCRSystem:
     def _setup_logging(self):
         logger = logging.getLogger("ocr_system")
         logger.setLevel(logging.DEBUG)
-        # 彻底移除所有旧的 handler
-        for handler in logger.handlers[:]:
-            logger.removeHandler(handler)
-            handler.close()
-        log_file = self.settings.get("log_file", "app.log")
-        if not log_file:
-            log_file = "app.log"
-        file_handler = logging.FileHandler(log_file, encoding="utf-8")
-        file_formatter = logging.Formatter(
-            "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-        )
-        file_handler.setFormatter(file_formatter)
-        file_handler.setLevel(logging.DEBUG)
-        logger.addHandler(file_handler)
-        console_handler = logging.StreamHandler()
-        console_formatter = logging.Formatter("%(levelname)s: %(message)s")
-        console_handler.setFormatter(console_formatter)
-        console_handler.setLevel(logging.INFO)
-        logger.addHandler(console_handler)
-        logger.propagate = False  # 禁止向上冒泡，防止被 root logger 过滤
+        log_file = self.settings.get("log_file", "app.log") or "app.log"
+
+        if not logger.handlers:
+            file_handler = logging.FileHandler(log_file, encoding="utf-8-sig")
+            file_formatter = logging.Formatter(
+                "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+            )
+            file_handler.setFormatter(file_formatter)
+            file_handler.setLevel(logging.DEBUG)
+            logger.addHandler(file_handler)
+
+            console_handler = logging.StreamHandler()
+            console_formatter = logging.Formatter("%(levelname)s: %(message)s")
+            console_handler.setFormatter(console_formatter)
+            console_handler.setLevel(logging.INFO)
+            logger.addHandler(console_handler)
+
+            logger.propagate = False  # 禁止向上冒泡，防止被 root logger 过滤
+            logger.debug(
+                "[DEBUG-INIT] Added fallback handlers for standalone execution."
+            )
+        else:
+            logger.propagate = False
+            logger.debug("[DEBUG-INIT] Reusing existing ocr_system handlers.")
+
         logger.info(f"Logger file path: {log_file}")
-        logger.debug("[DEBUG-INIT] Only my handlers should exist now.")
         return logger
 
     def _initialize_ocr(self):

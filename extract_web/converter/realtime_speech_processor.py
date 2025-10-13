@@ -55,17 +55,27 @@ except ImportError:
 
 # Configure logging
 LOG_FORMAT = "%(asctime)s [%(levelname)s] %(name)s %(process)d %(thread)d %(message)s"
-logging.basicConfig(
-    level=logging.DEBUG,
-    format=LOG_FORMAT,
-    handlers=[
-        logging.FileHandler("app.log", encoding="utf-8"),
-        logging.StreamHandler(),
-    ],
-)
-logger = logging.getLogger("ocr_system")
-logger.setLevel(logging.DEBUG)
-logger.info("[TEST] === 这是realtime_speech_processor.py的顶层日志 ===")
+
+
+def _get_logger():
+    logger = logging.getLogger("ocr_system")
+    if not logger.handlers:
+        formatter = logging.Formatter(LOG_FORMAT)
+        file_handler = logging.FileHandler("app.log", encoding="utf-8-sig")
+        file_handler.setFormatter(formatter)
+        logger.addHandler(file_handler)
+
+        stream_handler = logging.StreamHandler()
+        stream_handler.setFormatter(formatter)
+        logger.addHandler(stream_handler)
+
+        logger.propagate = False
+
+    logger.setLevel(logging.DEBUG)
+    return logger
+
+
+logger = _get_logger()
 
 
 class RealtimeSpeechRecognizer:

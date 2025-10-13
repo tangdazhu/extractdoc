@@ -10,31 +10,35 @@ from typing import List, Dict, Any
 log_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 log_file_path = os.path.join(log_dir, "app.log")
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("ocr_system")
 logger.setLevel(logging.INFO)
 
-# Prevent adding handlers multiple times
 if not logger.handlers:
-    # File handler
+    formatter = logging.Formatter(
+        "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
+    )
     try:
-        fh = logging.FileHandler(log_file_path, "a", "utf-8")
-        fh.setFormatter(
-            logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s")
-        )
+        fh = logging.FileHandler(log_file_path, "a", "utf-8-sig")
+        fh.setFormatter(formatter)
         logger.addHandler(fh)
     except Exception as e:
-        # Fallback to console if file logging fails
-        logging.basicConfig(
-            level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s"
+        fallback_formatter = logging.Formatter(
+            "%(asctime)s [%(levelname)s] %(message)s"
         )
+        fallback_handler = logging.StreamHandler()
+        fallback_handler.setFormatter(fallback_formatter)
+        logger.addHandler(fallback_handler)
         logger.error(
             f"Failed to set up file logger, falling back to console. Error: {e}"
         )
 
-    # Console handler (for direct script execution feedback)
     ch = logging.StreamHandler()
-    ch.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(message)s"))
+    ch.setFormatter(formatter)
     logger.addHandler(ch)
+
+    logger.propagate = False
+else:
+    logger.propagate = False
 # --- End New Logging Setup ---
 
 # --- Curated List of Predefined Voices ---

@@ -32,25 +32,29 @@ def load_config(config_path="config.yaml"):
 
 def setup_logging(log_file_path, logger_name="app_logger"):
     """Configure logging to file and console, and return the logger instance."""
-    logger = logging.getLogger(logger_name)
+    logger = logging.getLogger("ocr_system")
     logger.setLevel(logging.DEBUG)
-    logger.propagate = False
-    for handler in logger.handlers[:]:
-        logger.removeHandler(handler)
-        handler.close()
-    try:
-        file_handler = logging.FileHandler(log_file_path, encoding="utf-8")
-        file_formatter = logging.Formatter(
-            "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-        )
-        file_handler.setFormatter(file_formatter)
-        logger.addHandler(file_handler)
-    except Exception as e:
-        print(
-            f"Error setting up file logger for '{log_file_path}': {e}. Logging to console only for this handler."
-        )
-    console_handler = logging.StreamHandler()
-    console_formatter = logging.Formatter("%(levelname)s: %(message)s")
-    console_handler.setFormatter(console_formatter)
-    logger.addHandler(console_handler)
+
+    if not logger.handlers:
+        try:
+            file_handler = logging.FileHandler(log_file_path, encoding="utf-8-sig")
+            file_formatter = logging.Formatter(
+                "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+            )
+            file_handler.setFormatter(file_formatter)
+            logger.addHandler(file_handler)
+        except Exception as e:
+            print(
+                f"Error setting up file logger for '{log_file_path}': {e}. Logging to console only for this handler."
+            )
+
+        console_handler = logging.StreamHandler()
+        console_formatter = logging.Formatter("%(levelname)s: %(message)s")
+        console_handler.setFormatter(console_formatter)
+        logger.addHandler(console_handler)
+
+        logger.propagate = False
+    else:
+        logger.propagate = False
+
     return logger
