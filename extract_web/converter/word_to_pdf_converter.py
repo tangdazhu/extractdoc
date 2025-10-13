@@ -2,9 +2,10 @@ import os
 import logging
 from .libreoffice_converter import convert_to_pdf as lo_convert_to_pdf
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("converter")
 
-def convert_word_to_pdf(input_word_path, output_pdf_path):
+
+def convert_word_to_pdf(input_word_path, output_pdf_path, request_id=None):
     """
     Converts a Word document (.doc, .docx) to a PDF file using LibreOffice.
 
@@ -24,23 +25,33 @@ def convert_word_to_pdf(input_word_path, output_pdf_path):
                                                or an error message string if failed.
                - original_pdf_filename_or_None: The original filename of the PDF as created by LibreOffice.
     """
-    logger.info(f"Attempting to convert Word '{input_word_path}' to PDF using LibreOffice converter.")
+    logger.info(
+        f"convert_word_to_pdf: Attempting to convert '{input_word_path}' to '{output_pdf_path}'. RequestID: {request_id}"
+    )
 
     if not os.path.exists(input_word_path):
         return False, f"Input Word file not found: {input_word_path}", None
 
-    # The output_dir for LibreOffice should be the directory part of output_pdf_path
     output_dir = os.path.dirname(output_pdf_path)
-    
-    # Ensure output directory exists
     if not os.path.isdir(output_dir):
         try:
             os.makedirs(output_dir, exist_ok=True)
-            logger.info(f"Created output directory: {output_dir}")
+            logger.info(
+                f"convert_word_to_pdf: Created output directory '{output_dir}'. RequestID: {request_id}"
+            )
         except OSError as e:
-            return False, f"Failed to create output directory {output_dir}: {e}", None
+            error = f"Failed to create output directory {output_dir}: {e}"
+            logger.error(
+                f"convert_word_to_pdf: {error}. RequestID: {request_id}", exc_info=True
+            )
+            return False, error, None
 
-    success, lo_result_path_or_msg, lo_original_filename = lo_convert_to_pdf(input_word_path, output_dir)
+    logger.debug(
+        f"convert_word_to_pdf: Calling LibreOffice converter with output_dir='{output_dir}'. RequestID: {request_id}"
+    )
+    success, lo_result_path_or_msg, lo_original_filename = lo_convert_to_pdf(
+        input_word_path, output_dir
+    )
 
     if success:
         # LibreOffice creates a file like input_word_filename.pdf in output_dir.
@@ -53,21 +64,34 @@ def convert_word_to_pdf(input_word_path, output_pdf_path):
             try:
                 # Ensure the target path (output_pdf_path) doesn't already exist from a previous attempt or other file
                 if os.path.exists(output_pdf_path):
-                    logger.warning(f"Target output PDF path {output_pdf_path} already exists. Overwriting.")
+                    logger.warning(
+                        f"convert_word_to_pdf: Target output PDF path {output_pdf_path} already exists. Overwriting. RequestID: {request_id}"
+                    )
                     os.remove(output_pdf_path)
                 
                 os.rename(lo_result_path_or_msg, output_pdf_path)
-                logger.info(f"Successfully moved/renamed '{lo_result_path_or_msg}' to '{output_pdf_path}'")
+                logger.info(
+                    f"convert_word_to_pdf: Successfully moved '{lo_result_path_or_msg}' to '{output_pdf_path}'. RequestID: {request_id}"
+                )
                 return True, output_pdf_path, os.path.basename(output_pdf_path) # Return new name
             except Exception as e_move:
-                logger.error(f"LibreOffice Word to PDF conversion succeeded, but failed to move/rename PDF from '{lo_result_path_or_msg}' to '{output_pdf_path}': {e_move}", exc_info=True)
+                logger.error(
+                    f"convert_word_to_pdf: Move from '{lo_result_path_or_msg}' to '{output_pdf_path}' failed: {e_move}. RequestID: {request_id}",
+                    exc_info=True,
+                )
                 # Return success as true, but with the path where LO left the file, and an error message indicating move failure.
                 # Or, consider this a failure if the final path is critical. For now, let's say it's a partial success.
                 return True, lo_result_path_or_msg, f"Conversion OK, but move to final path failed: {e_move}. File at: {lo_result_path_or_msg}"
         else:
             # The file is already where we want it.
+            logger.info(
+                f"convert_word_to_pdf: LibreOffice output already at desired path '{output_pdf_path}'. RequestID: {request_id}"
+            )
             return True, output_pdf_path, lo_original_filename
     else:
+        logger.error(
+            f"convert_word_to_pdf: LibreOffice conversion failed. Message: {lo_result_path_or_msg}. RequestID: {request_id}"
+        )
         return False, lo_result_path_or_msg, None
 
 if __name__ == '__main__':

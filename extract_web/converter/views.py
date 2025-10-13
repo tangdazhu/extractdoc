@@ -407,16 +407,14 @@ def file_to_pdf_view(request):
         target_extension = ".pdf"
         if conversion_method == "docx2pdf" and DOCX2PDF_AVAILABLE_IN_VIEW:
             conversion_func = docx_to_pdf_converter_internal
-        elif conversion_method == "libreoffice":
-            conversion_func = convert_to_pdf_libreoffice
         else:
             if conversion_method == "docx2pdf" and not DOCX2PDF_AVAILABLE_IN_VIEW:
                 msg = "DOCX to PDF (docx2pdf)不可用，将尝试LibreOffice。如果问题持续，请联系管理员。"
                 logger.warning(f"file_to_pdf_view: {msg} RequestID: {request_id}")
                 errors_view.append(msg)
-            conversion_func = convert_to_pdf_libreoffice
+            conversion_func = convert_word_to_pdf
             logger.info(
-                f"file_to_pdf_view: Falling back/defaulting to LibreOffice for Word to PDF. RequestID: {request_id}"
+                f"file_to_pdf_view: 使用 convert_word_to_pdf 通过 LibreOffice 处理 Word 转 PDF。RequestID: {request_id}"
             )
     elif mode == "excel_to_pdf_mode":
         conversion_func = convert_excel_to_pdf
@@ -459,16 +457,30 @@ def file_to_pdf_view(request):
                 logger.error(
                     f"file_to_pdf_view: Temporary input file not found or path is invalid for {original_filename} at {temp_input_path}. RequestID: {request_id}"
                 )
-                errors_view.append(
-                    f"文件 '{original_filename}' 的临时路径无效或文件不存在，已跳过。"
+                error_message = f"文件 '{original_filename}' 的临时路径无效或文件不存在，已跳过。"
+                errors_view.append(error_message)
+                file_results.append(
+                    {
+                        "original_name": original_filename,
+                        "status": "error",
+                        "message": error_message,
+                    }
                 )
                 continue
             if not target_extension:
                 logger.error(
                     f"file_to_pdf_view: Target extension not set for mode {mode}. File: {original_filename}. RequestID: {request_id}"
                 )
-                errors_view.append(
+                error_message = (
                     f"模式 {mode} 的目标文件类型未设置，无法处理 '{original_filename}'。"
+                )
+                errors_view.append(error_message)
+                file_results.append(
+                    {
+                        "original_name": original_filename,
+                        "status": "error",
+                        "message": error_message,
+                    }
                 )
                 continue
 
@@ -513,8 +525,16 @@ def file_to_pdf_view(request):
                         logger.error(
                             f"file_to_pdf_view: Conversion did not produce expected file at {actual_output_path}. RequestID: {request_id}"
                         )
-                        errors_view.append(
+                        error_message = (
                             f"文件 '{original_filename}' 转换失败，未生成目标文件。"
+                        )
+                        errors_view.append(error_message)
+                        file_results.append(
+                            {
+                                "original_name": original_filename,
+                                "status": "error",
+                                "message": error_message,
+                            }
                         )
                         continue
 
@@ -543,20 +563,44 @@ def file_to_pdf_view(request):
                     logger.error(
                         f"file_to_pdf_view: NotImplementedError for {original_filename}: {e_ni}. RequestID: {request_id}"
                     )
-                    errors_view.append(
+                    error_message = (
                         f"'{original_filename}' 的转换功能未实现或不可用: {e_ni}"
+                    )
+                    errors_view.append(error_message)
+                    file_results.append(
+                        {
+                            "original_name": original_filename,
+                            "status": "error",
+                            "message": error_message,
+                        }
                     )
                 except Exception as e_conv:
                     logger.error(
                         f"file_to_pdf_view: Conversion error for {original_filename}: {e_conv}. Traceback: {traceback.format_exc()}. RequestID: {request_id}"
                     )
-                    errors_view.append(f"处理 '{original_filename}' 时出错: {e_conv}")
+                    error_message = f"处理 '{original_filename}' 时出错: {e_conv}"
+                    errors_view.append(error_message)
+                    file_results.append(
+                        {
+                            "original_name": original_filename,
+                            "status": "error",
+                            "message": error_message,
+                        }
+                    )
             else:
                 logger.error(
                     f"file_to_pdf_view: No conversion function resolved for mode {mode}, file {original_filename}. RequestID: {request_id}"
                 )
-                errors_view.append(
+                error_message = (
                     f"无法为 '{original_filename}' (模式: {mode}) 找到合适的转换器。"
+                )
+                errors_view.append(error_message)
+                file_results.append(
+                    {
+                        "original_name": original_filename,
+                        "status": "error",
+                        "message": error_message,
+                    }
                 )
 
     if (
@@ -697,33 +741,21 @@ def file_to_pdf_view(request):
         end_time_view - start_time_view, 2
     )  # ADDED: Calculate duration
 
+    error_summary = "; ".join(errors_view) if errors_view else None
     if errors_view:
-        # ADDED duration_seconds to error response and logger
         logger.error(
             f"file_to_pdf_view: Processing finished with errors. Duration: {duration_seconds_view}s. Errors: {errors_view}. RequestID: {request_id}"
         )
-        return format_error_response(
-            message="; ".join(errors_view),
-            merge_output=merge_output_flag,
-            request_id=request_id,
-            duration_seconds=duration_seconds_view,
-        )
 
-    final_result_payload = {
-        "results": file_results,
-        "request_id": request_id,
-        "merge_output": merge_output_flag,
-        "duration_seconds": duration_seconds_view,  # ADDED: duration
-    }
-    # ADDED duration_seconds to logger
     logger.info(
         f"file_to_pdf_view: Processing complete. Duration: {duration_seconds_view}s. RequestID: {request_id}"
     )
     return format_json_response(
-        results=final_result_payload["results"],
-        merge_output=final_result_payload["merge_output"],
-        request_id=final_result_payload["request_id"],
-        duration_seconds=final_result_payload["duration_seconds"],
+        results=file_results,
+        merge_output=merge_output_flag,
+        request_id=request_id,
+        duration_seconds=duration_seconds_view,
+        error_message=None if file_results else error_summary,
     )
 
 

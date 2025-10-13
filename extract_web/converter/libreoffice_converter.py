@@ -7,6 +7,65 @@ import re  # Add re import at module level
 logger = logging.getLogger("converter")
 
 
+def _candidate_paths_from_env():
+    env_keys = [
+        "SOFFICE_PATH",
+        "LIBREOFFICE_PATH",
+        "LIBREOFFICE_BIN",
+    ]
+    candidates = []
+    for key in env_keys:
+        value = os.environ.get(key)
+        if not value:
+            continue
+        normalized = value.strip().strip('"')
+        if os.path.isdir(normalized):
+            exe_name = "soffice.exe" if os.name == "nt" else "soffice"
+            candidates.append(os.path.join(normalized, exe_name))
+        else:
+            candidates.append(normalized)
+    return candidates
+
+
+def _default_soffice_locations():
+    defaults = []
+    if os.name == "nt":
+        defaults.extend(
+            [
+                r"C:\\Program Files\\LibreOffice\\program\\soffice.exe",
+                r"C:\\Program Files (x86)\\LibreOffice\\program\\soffice.exe",
+            ]
+        )
+    else:
+        defaults.extend(
+            [
+                "/usr/bin/soffice",
+                "/usr/local/bin/soffice",
+                "/snap/bin/soffice",
+                "/opt/libreoffice/program/soffice",
+                "/usr/lib/libreoffice/program/soffice",
+            ]
+        )
+    return defaults
+
+
+def _resolve_soffice_executable():
+    for candidate in _candidate_paths_from_env() + _default_soffice_locations():
+        if candidate and os.path.isfile(candidate):
+            return candidate
+    which_result = shutil.which("soffice")
+    if which_result:
+        return which_result
+    return None
+
+
+def _build_soffice_command():
+    soffice_path = _resolve_soffice_executable()
+    if not soffice_path:
+        return None
+    return soffice_path
+
+
 def convert_to_pdf(input_path, output_dir):
     """
     Converts a document to PDF using LibreOffice (soffice).
@@ -26,6 +85,14 @@ def convert_to_pdf(input_path, output_dir):
         return False, f"Input file not found: {input_path}", None
     if not os.path.isdir(output_dir):
         return False, f"Output directory not found: {output_dir}", None
+
+    soffice_executable = _build_soffice_command()
+    if not soffice_executable:
+        error_msg = (
+            "'soffice' executable not found. Set 'SOFFICE_PATH' environment variable or install LibreOffice."
+        )
+        logger.error(error_msg)
+        return False, error_msg, None
 
     input_filename_stem = os.path.splitext(os.path.basename(input_path))[0]
     expected_pdf_filename = f"{input_filename_stem}.pdf"
@@ -48,7 +115,7 @@ def convert_to_pdf(input_path, output_dir):
             )
 
     command = [
-        "soffice",
+        soffice_executable,
         "--headless",
         "--convert-to",
         "pdf",
@@ -176,8 +243,20 @@ def convert_to_pptx(input_path, output_dir, skip_default_content=False):
             )
 
     # Try LibreOffice conversion
+    soffice_executable = _build_soffice_command()
+    if not soffice_executable:
+        error_msg = (
+            "'soffice' executable not found. Set 'SOFFICE_PATH' environment variable or install LibreOffice."
+        )
+        logger.error(error_msg)
+        return (
+            False,
+            f"PPTX conversion failed. Python-pptx error: {result}. LibreOffice not found: {error_msg}",
+            None,
+        )
+
     command = [
-        "soffice",
+        soffice_executable,
         "--headless",
         "--convert-to",
         "pptx",
