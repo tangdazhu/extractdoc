@@ -487,33 +487,50 @@ def file_to_pdf_view(request):
                     logger.info(
                         f"file_to_pdf_view: Attempting conversion for {original_filename} to {output_filepath_server} using mode {mode}. RequestID: {request_id}"
                     )
-                    # 用实际的转换函数返回值
-                    pdf_success, actual_pdf_path, _ = convert_word_to_pdf(
+
+                    conversion_result = conversion_func(
                         temp_input_path, output_filepath_server
                     )
-                    if (
-                        not pdf_success
-                        or not actual_pdf_path
-                        or not os.path.exists(actual_pdf_path)
-                    ):
-                        logger.error(
-                            f"PDF conversion did not produce expected file: {actual_pdf_path}"
+
+                    if isinstance(conversion_result, tuple):
+                        # Some converters return (success, output_path, extra_info)
+                        if len(conversion_result) >= 2:
+                            conversion_success = bool(conversion_result[0])
+                            actual_output_path = conversion_result[1]
+                        else:
+                            conversion_success = bool(conversion_result[0])
+                            actual_output_path = output_filepath_server
+                    else:
+                        conversion_success = conversion_result is None or bool(
+                            conversion_result
                         )
-                        errors_view.append(f"PDF转换未生成目标文件: {actual_pdf_path}")
+                        actual_output_path = output_filepath_server
+
+                    if not actual_output_path:
+                        actual_output_path = output_filepath_server
+
+                    if not conversion_success or not os.path.exists(actual_output_path):
+                        logger.error(
+                            f"file_to_pdf_view: Conversion did not produce expected file at {actual_output_path}. RequestID: {request_id}"
+                        )
+                        errors_view.append(
+                            f"文件 '{original_filename}' 转换失败，未生成目标文件。"
+                        )
                         continue
+
                     logger.info(
-                        f"file_to_pdf_view: Conversion successful for {original_filename}. Output: {actual_pdf_path}. RequestID: {request_id}"
+                        f"file_to_pdf_view: Conversion successful for {original_filename}. Output: {actual_output_path}. RequestID: {request_id}"
                     )
                     file_results.append(
                         {
                             "original_name": original_filename,
-                            "converted_name": os.path.basename(actual_pdf_path),
+                            "converted_name": os.path.basename(actual_output_path),
                             "download_url": reverse(
                                 "converter:download_converted_file",
                                 args=[
                                     username,
                                     today_date_str,
-                                    os.path.basename(actual_pdf_path),
+                                    os.path.basename(actual_output_path),
                                 ],
                             ),
                             "status": "success",
@@ -521,7 +538,7 @@ def file_to_pdf_view(request):
                         }
                     )
                     if merge_output_flag and target_extension == ".pdf":
-                        converted_pdf_paths_for_merge.append(actual_pdf_path)
+                        converted_pdf_paths_for_merge.append(actual_output_path)
                 except NotImplementedError as e_ni:
                     logger.error(
                         f"file_to_pdf_view: NotImplementedError for {original_filename}: {e_ni}. RequestID: {request_id}"

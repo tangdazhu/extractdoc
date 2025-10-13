@@ -24,7 +24,9 @@ urlpatterns = [
         name="admin_delete_user",
     ),
     path(
-        "admin/users/edit/<int:user_id>/", views.admin_edit_user, name="admin_edit_user"
+        "admin-console/user/edit/<int:user_id>/",
+        views.admin_edit_user,
+        name="admin_edit_user",
     ),
     # 新的API端点
     path("api/file-to-pdf/", views.file_to_pdf_view, name="api_file_to_pdf"),
