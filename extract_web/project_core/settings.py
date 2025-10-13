@@ -190,6 +190,7 @@ LOGGING = {
             "filename": BASE_DIR / "app.log",
             "maxBytes": 1024 * 1024 * 5,
             "backupCount": 2,
+            "encoding": "utf-8-sig",
             "formatter": "verbose",
         },
     },
