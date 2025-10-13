@@ -25,7 +25,7 @@ echo Admin credentials: admin/admin
 echo Press Ctrl+C to stop the server.
 echo.
 
-python manage.py runserver
+python manage.py runserver 8080
 
 :restore
 set "PATH=%ORIGINAL_PATH%"
