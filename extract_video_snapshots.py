@@ -205,27 +205,33 @@ def deduplicate_slide_screenshots(screenshot_list, func_get_theme, func_get_orde
     """
     根据"幻灯片主题"对截图进行去重，并保留每个主题的"最后一张"。
     """
-    print(f"INFO: Starting deduplication for {len(screenshot_list)} screenshots.", flush=True) # ADDED
+    print(f"INFO: Starting deduplication for {len(screenshot_list)} screenshots.", flush=True)
     latest_screenshots_by_theme = {}
 
-    for i, screenshot_item in enumerate(screenshot_list): # ADDED: enumerate for progress
+    for i, screenshot_item in enumerate(screenshot_list):
         theme_id = func_get_theme(screenshot_item)
         order_key = func_get_order_key(screenshot_item)
 
         if theme_id is None:
-            print(f"WARNING: Could not determine theme for {screenshot_item}, skipping.", flush=True) # MODIFIED
+            print(f"WARNING: Could not determine theme for {screenshot_item}, skipping.", flush=True)
             continue
 
-        if (i + 1) % 20 == 0 or (i + 1) == len(screenshot_list): # ADDED: Log progress
-            print(f"INFO: Deduplicating screenshot {i+1}/{len(screenshot_list)}: {os.path.basename(screenshot_item)} -> Theme: {theme_id}, OrderKey: {order_key}", flush=True)
+        if (i + 1) % 20 == 0 or (i + 1) == len(screenshot_list):
+            print(
+                f"INFO: Deduplicating screenshot {i+1}/{len(screenshot_list)}: {os.path.basename(screenshot_item)} -> Theme: {theme_id}, OrderKey: {order_key}",
+                flush=True,
+            )
 
-        current_latest_order_key = latest_screenshots_by_theme.get(theme_id, (None, -1))[1] # Get current order key, default -1
+        current_latest_order_key = latest_screenshots_by_theme.get(theme_id, (None, -1))[1]
 
         if order_key > current_latest_order_key:
             latest_screenshots_by_theme[theme_id] = (screenshot_item, order_key)
-    
+
     deduplicated_list = [item for item, key in latest_screenshots_by_theme.values()]
-    print(f"INFO: Deduplication finished. Original: {len(screenshot_list)}, Deduplicated: {len(deduplicated_list)}.", flush=True) # ADDED
+    print(
+        f"INFO: Deduplication finished. Original: {len(screenshot_list)}, Deduplicated: {len(deduplicated_list)}.",
+        flush=True,
+    )
     return deduplicated_list
 
 def main(args):
@@ -257,13 +263,14 @@ def main(args):
         all_raw_snapshots = [os.path.join(raw_snapshot_dir, f) for f in os.listdir(raw_snapshot_dir) if f.lower().endswith('.jpg')]
         print(f"INFO: Found {len(all_raw_snapshots)} raw snapshots for deduplication.", flush=True) # ADDED
         
-        # Define the coarse theming function with the specified group_size
-        coarse_theming_func = lambda filepath: get_theme_from_snapshot_coarse(filepath, group_size=args.group_size)
+        coarse_theming_func = lambda filepath: get_theme_from_snapshot_coarse(
+            filepath, group_size=args.group_size
+        )
 
         deduplicated_files = deduplicate_slide_screenshots(
             all_raw_snapshots,
-            coarse_theming_func, 
-            get_order_key_from_snapshot
+            coarse_theming_func,
+            get_order_key_from_snapshot,
         )
         print(f"INFO: Found {len(deduplicated_files)} deduplicated files.", flush=True) # ADDED
 
@@ -282,7 +289,6 @@ def main(args):
                             shutil.rmtree(item_path)
                     except Exception as e_clean:
                         print(f"ERROR: Failed to delete {item_path}. Reason: {e_clean}", flush=True)
-
 
             print(f"INFO: Copying {len(deduplicated_files)} deduplicated files to {deduplicated_snapshot_dir}...", flush=True) # ADDED
             copied_count = 0 # ADDED
@@ -334,4 +340,4 @@ if __name__ == "__main__":
     #     sys.stderr = open(sys.stderr.fileno(), mode='w', encoding='utf-8', buffering=1)
 
     main(cli_args)
-    # No code should be here, main now calls sys.exit() 
+    # No code should be here, main now calls sys.exit()
