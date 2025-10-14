@@ -742,58 +742,96 @@ def _generate_ppt_from_pdf_pages(
                 logger.debug("已添加表格: 第 %d 页, %d 行 x %d 列", page_num, rows, cols)
         
         # 2. 添加图片（如果有，且空间足够）
-        # PPT标准页面高度7.5英寸,预留底部0.3英寸,可用高度约7.2英寸
-        max_content_height = Inches(7.2)
+        # PPT标准页面高度7.5英寸,预留底部1.5英寸给文本,可用高度约5.5英寸
+        max_content_height = Inches(5.5)
         
         if images and current_top < max_content_height:
-            for img_idx, img_data in enumerate(images, start=1):
-                # 检查是否还有足够空间添加图片(至少需要1英寸高度)
-                if current_top >= max_content_height - Inches(0.5):
-                    logger.warning("空间不足，跳过剩余 %d 张图片 (第 %d 页, current_top=%.2f英寸)", 
-                                  len(images) - img_idx + 1, page_num, current_top / 914400)
-                    break  # 空间不足，停止添加图片
+            # 如果有2张图片,左右并排显示
+            if len(images) == 2:
+                available_height = max_content_height - current_top
+                available_width_per_img = Inches(4.5)  # 每张图片最大宽度4.5英寸
                 
-                img_path = img_data["path"]
+                img_positions = []  # 存储每张图片的位置和尺寸
+                max_img_height = 0
                 
-                if img_path.exists():
+                for img_idx, img_data in enumerate(images):
+                    img_path = img_data["path"]
+                    if not img_path.exists():
+                        continue
+                    
                     try:
-                        # 计算可用空间
+                        img_width_px = img_data["width"]
+                        img_height_px = img_data["height"]
+                        
+                        # 将像素转换为英寸
+                        img_width_inch = img_width_px / 96.0
+                        img_height_inch = img_height_px / 96.0
+                        
+                        # 计算缩放比例
+                        width_ratio = available_width_per_img / Inches(img_width_inch)
+                        height_ratio = available_height / Inches(img_height_inch)
+                        scale_ratio = min(width_ratio, height_ratio, 1.0)
+                        
+                        final_width = Inches(img_width_inch * scale_ratio)
+                        final_height = Inches(img_height_inch * scale_ratio)
+                        
+                        # 计算水平位置(左右并排)
+                        if img_idx == 0:
+                            left = Inches(0.5)  # 左侧图片
+                        else:
+                            left = Inches(5.5)  # 右侧图片
+                        
+                        img_positions.append({
+                            "path": img_path,
+                            "left": left,
+                            "top": current_top,
+                            "width": final_width,
+                            "height": final_height
+                        })
+                        
+                        max_img_height = max(max_img_height, final_height)
+                        
+                    except Exception as e:
+                        logger.warning("图片尺寸计算失败: %s", e)
+                
+                # 添加所有图片
+                for img_pos in img_positions:
+                    slide.shapes.add_picture(
+                        str(img_pos["path"]),
+                        left=img_pos["left"],
+                        top=img_pos["top"],
+                        width=img_pos["width"],
+                        height=img_pos["height"]
+                    )
+                    logger.debug("已添加图片: 第 %d 页 (左右并排)")
+                
+                current_top += max_img_height + Inches(0.3)
+            else:
+                # 单张图片或多张图片,垂直排列
+                for img_idx, img_data in enumerate(images, start=1):
+                    if current_top >= max_content_height - Inches(0.5):
+                        logger.warning("空间不足，跳过剩余 %d 张图片", len(images) - img_idx + 1)
+                        break
+                    
+                    img_path = img_data["path"]
+                    if not img_path.exists():
+                        continue
+                    
+                    try:
                         available_height = max_content_height - current_top - Inches(0.2)
                         max_width = Inches(9)
                         
                         img_width_px = img_data["width"]
                         img_height_px = img_data["height"]
-                        
-                        # 将像素转换为英寸（假设96 DPI）
                         img_width_inch = img_width_px / 96.0
                         img_height_inch = img_height_px / 96.0
                         
-                        logger.debug("图片 %d/%d: 原始尺寸=%dx%d像素, 转换=%.2fx%.2f英寸, 可用高度=%.2f英寸", 
-                                    img_idx, len(images), img_width_px, img_height_px, 
-                                    img_width_inch, img_height_inch, available_height / 914400)
-                        
-                        # 计算缩放比例
-                        # 如果有多张图片,限制单张图片最大高度为可用高度的60%,为其他图片留空间
-                        if len(images) > 1:
-                            max_single_img_height = available_height * 0.6
-                        else:
-                            max_single_img_height = available_height
-                        
                         width_ratio = max_width / Inches(img_width_inch)
-                        height_ratio = max_single_img_height / Inches(img_height_inch)
-                        scale_ratio = min(width_ratio, height_ratio, 1.0)  # 不放大
+                        height_ratio = available_height / Inches(img_height_inch)
+                        scale_ratio = min(width_ratio, height_ratio, 1.0)
                         
-                        logger.debug("缩放比例: width_ratio=%.2f, height_ratio=%.2f, scale_ratio=%.2f", 
-                                    width_ratio, height_ratio, scale_ratio)
-                        
-                        # 计算最终尺寸（英寸对象）
                         final_width = Inches(img_width_inch * scale_ratio)
                         final_height = Inches(img_height_inch * scale_ratio)
-                        
-                        logger.debug("最终尺寸: %.2fx%.2f英寸", 
-                                    final_width / 914400, final_height / 914400)
-                        
-                        # 居中放置
                         left = (Inches(10) - final_width) / 2
                         
                         slide.shapes.add_picture(
@@ -804,14 +842,13 @@ def _generate_ppt_from_pdf_pages(
                             height=final_height
                         )
                         
-                        current_top += final_height + Inches(0.2)  # 图片后留间距
-                        logger.debug("已添加图片: 第 %d 页 (%dx%d)", 
-                                    page_num, img_width_px, img_height_px)
+                        current_top += final_height + Inches(0.2)
+                        logger.debug("已添加图片: 第 %d 页 (%dx%d)", page_num, img_width_px, img_height_px)
                     except Exception as img_error:
                         logger.error("插入图片失败: %s", img_error, exc_info=True)
         
-        # 3. 最后添加文本内容（如果有，且没有表格和图片）
-        if page_text.strip() and not tables and not images:
+        # 3. 添加文本内容（如果有）
+        if page_text.strip() and not tables:
             # 提取第一行作为标题（如果是纯大写或包含关键词）
             lines = [line.strip() for line in page_text.split('\n') if line.strip()]
             
