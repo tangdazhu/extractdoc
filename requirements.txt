@@ -25,6 +25,7 @@ openpyxl==3.1.5         # Read and write Excel files (.xlsx)
 # PowerPoint Processing
 python-pptx==0.6.23     # Create and modify PowerPoint presentations
 comtypes==1.4.11        # Windows COM interface, for Office automation (Windows only)
+pdf2image==1.17.0       # Convert PDF pages to images (requires poppler-utils)
 
 # PDF Generation and Reporting
 reportlab==4.2.0        # PDF generation, used for TXT→PDF and Excel→PDF conversion
@@ -66,8 +67,14 @@ channels-redis>=4.1.0   # Redis backend for Django Channels
 # Conversion Method Priorities:
 # - PDF→Excel: pdfplumber (primary), LibreOffice (fallback, often unavailable)
 # - PDF→Word: pdf2docx (primary), LibreOffice (fallback)
-# - PDF→PPT: python-pptx screenshot method (primary), LibreOffice (fallback)
-# - PDF→TXT: PyMuPDF (primary), LibreOffice (fallback, removed from UI) 
+# - PDF→PPT: PyMuPDF image conversion (primary), pdf2image (alternative), LibreOffice (fallback)
+# - PDF→TXT: PyMuPDF (primary), LibreOffice (fallback, removed from UI)
+#
+# Note: pdf2image requires poppler-utils to be installed separately:
+# - Windows: Download from https://github.com/oschwartz10612/poppler-windows/releases/
+#   Extract and add bin/ to PATH
+# - Linux: sudo apt-get install poppler-utils
+# - macOS: brew install poppler 
 
 # Optional: For development and testing
 # pytest

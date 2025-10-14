@@ -9,6 +9,7 @@ import json
 import logging
 import os
 import re
+import io
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
@@ -16,6 +17,9 @@ import requests
 from django.conf import settings
 from docx import Document as WordDocument
 from docx.shared import Pt
+from PIL import Image
+import dashscope
+from dashscope import Generation
 
 logger = logging.getLogger("converter")
 
@@ -27,6 +31,13 @@ try:
 except ImportError:
     PPTX_AVAILABLE = False
     logger.warning("python-pptx 未安装，PPT 生成功能不可用。")
+
+try:
+    import fitz  # PyMuPDF
+    PYMUPDF_AVAILABLE = True
+except ImportError:
+    PYMUPDF_AVAILABLE = False
+    logger.warning("PyMuPDF 未安装，PDF 转图片功能不可用。")
 
 TEMPLATES_CONFIG_PATH = Path(settings.BASE_DIR).parent / "config" / "document_generation_templates.json"
 
@@ -126,16 +137,124 @@ def _ensure_text_chunks(text: str) -> List[str]:
     current = []
     length = 0
     for para in paragraphs:
-        if length + len(para) > 800:
+        para_len = len(para)
+        if length + para_len > 500 and current:
             chunks.append("\n".join(current))
             current = [para]
-            length = len(para)
+            length = para_len
         else:
             current.append(para)
-            length += len(para)
+            length += para_len
     if current:
         chunks.append("\n".join(current))
-    return chunks
+    return chunks if chunks else [text]
+
+
+def _analyze_content_with_ai(text: str, request_id: str) -> Dict[str, any]:
+    """
+    使用 DashScope AI 分析文档内容，提取结构化信息。
+    
+    Args:
+        text: 原始文本内容
+        request_id: 请求 ID
+    
+    Returns:
+        结构化数据：
+        {
+            "title": "文档标题",
+            "subtitle": "副标题",
+            "sections": [
+                {
+                    "title": "章节标题",
+                    "points": ["要点1", "要点2", ...]
+                },
+                ...
+            ]
+        }
+    """
+    logger.info("开始 AI 内容分析，RequestID=%s", request_id)
+    
+    prompt = f"""请分析以下文档内容，提取结构化信息并以 JSON 格式返回。
+
+要求：
+1. 识别文档的主标题和副标题
+2. 将内容分为多个章节（每个章节包含标题和3-5个要点）
+3. 每个要点应简洁明了，适合在 PPT 中展示
+4. 返回格式必须是有效的 JSON
+
+文档内容：
+{text[:4000]}
+
+请返回 JSON 格式：
+{{
+  "title": "主标题",
+  "subtitle": "副标题",
+  "sections": [
+    {{
+      "title": "章节1标题",
+      "points": ["要点1", "要点2", "要点3"]
+    }}
+  ]
+}}"""
+    
+    try:
+        response = Generation.call(
+            model="qwen-plus",
+            prompt=prompt,
+            result_format="message"
+        )
+        
+        if response.status_code == 200:
+            ai_output = response.output.choices[0].message.content
+            logger.debug("AI 返回内容: %s", ai_output)
+            
+            # 提取 JSON 部分（去除可能的 Markdown 代码块标记）
+            json_match = re.search(r'```json\s*({.*?})\s*```', ai_output, re.DOTALL)
+            if json_match:
+                json_str = json_match.group(1)
+            else:
+                # 尝试直接解析
+                json_str = ai_output.strip()
+            
+            result = json.loads(json_str)
+            logger.info("AI 内容分析成功，提取 %d 个章节。", len(result.get("sections", [])))
+            return result
+        else:
+            logger.error("AI 调用失败: %s", response.message)
+            return _fallback_structure(text)
+    
+    except Exception as exc:
+        logger.error("AI 内容分析失败: %s", exc, exc_info=True)
+        return _fallback_structure(text)
+
+
+def _fallback_structure(text: str) -> Dict[str, any]:
+    """
+    当 AI 分析失败时的降级方案：简单分段。
+    """
+    logger.warning("使用降级方案进行内容结构化。")
+    
+    lines = [line.strip() for line in text.split("\n") if line.strip()]
+    
+    # 简单启发式：第一行作为标题
+    title = lines[0] if lines else "文档内容"
+    subtitle = lines[1] if len(lines) > 1 else "自动生成"
+    
+    # 将剩余内容分为若干段
+    sections = []
+    chunk_size = 5
+    for i in range(2, len(lines), chunk_size):
+        chunk = lines[i:i+chunk_size]
+        sections.append({
+            "title": f"内容概览 {len(sections) + 1}",
+            "points": chunk
+        })
+    
+    return {
+        "title": title,
+        "subtitle": subtitle,
+        "sections": sections if sections else [{"title": "内容", "points": lines[2:]}]
+    }
 
 
 def generate_word_document(
@@ -187,6 +306,8 @@ def generate_word_document(
     return output_filename, "Word 文档生成成功。"
 
 
+
+
 def generate_ppt_document(
     *,
     request_id: str,
@@ -201,10 +322,17 @@ def generate_ppt_document(
     if not PPTX_AVAILABLE:
         raise RuntimeError("python-pptx 未安装，无法生成 PPT。")
 
+    # 1. 提取文本内容
+    logger.info("开始提取文档内容，RequestID=%s", request_id)
     text = _collect_source_text(source_file_path, source_url)
     if not text:
         raise ValueError("未能从输入源提取到有效文本。")
-
+    
+    # 2. 使用 AI 分析内容结构
+    logger.info("使用 AI 分析文档结构...")
+    structure = _analyze_content_with_ai(text, request_id)
+    
+    # 3. 创建 PPT 并应用模板
     template_path = template_config.get("template_path")
     if template_path:
         tpl_path = Path(template_path)
@@ -216,73 +344,80 @@ def generate_ppt_document(
     else:
         presentation = Presentation()
 
-    title_text = template_config.get("title", "自动生成演示文稿")
-    subtitle_text = template_config.get("subtitle", "来源内容整理")
+    # 4. 创建标题页
+    title_text = structure.get("title", template_config.get("title", "文档演示"))
+    subtitle_text = structure.get("subtitle", template_config.get("subtitle", "AI 智能生成"))
+    
+    title_layout = presentation.slide_layouts[0]
+    title_slide = presentation.slides.add_slide(title_layout)
+    title_slide.shapes.title.text = title_text
+    if len(title_slide.placeholders) > 1:
+        title_slide.placeholders[1].text = subtitle_text
+    
+    logger.info("已创建标题页: %s", title_text)
 
-    if presentation.slides:
-        title_slide = presentation.slides[0]
-        if title_slide.shapes.title:
-            title_slide.shapes.title.text = title_text
-        if title_slide.placeholders and len(title_slide.placeholders) > 1:
-            try:
-                title_slide.placeholders[1].text = subtitle_text
-            except Exception:  # 某些模板索引不同
-                pass
-    else:
-        title_layout = presentation.slide_layouts[0]
-        slide = presentation.slides.add_slide(title_layout)
-        slide.shapes.title.text = title_text
-        if len(slide.placeholders) > 1:
-            slide.placeholders[1].text = subtitle_text
-
+    # 5. 为每个章节创建内容页
     bullet_layout_index = template_config.get("bullet_layout_index", 1)
     try:
         body_layout = presentation.slide_layouts[bullet_layout_index]
     except IndexError:
         body_layout = presentation.slide_layouts[1]
 
-    for idx, chunk in enumerate(_ensure_text_chunks(text), start=1):
-        slide = presentation.slides.add_slide(body_layout)
-        title = slide.shapes.title
-        content = chunk.split("\n")
-        if title:
-            title.text = f"内容概览 {idx}"
+    sections = structure.get("sections", [])
+    for idx, section in enumerate(sections, start=1):
+        section_title = section.get("title", f"章节 {idx}")
+        points = section.get("points", [])
         
-        # 尝试找到内容占位符
+        if not points:
+            continue
+        
+        slide = presentation.slides.add_slide(body_layout)
+        
+        # 设置章节标题
+        if slide.shapes.title:
+            slide.shapes.title.text = section_title
+        
+        # 查找内容占位符
         body_shape = None
         for shape in slide.shapes:
-            if shape.has_text_frame and shape != title:
+            if shape.has_text_frame and shape != slide.shapes.title:
                 body_shape = shape
                 break
         
         if not body_shape:
-            # 如果没有找到合适的占位符，跳过此页
-            logger.warning("幻灯片 %d 未找到内容占位符，已跳过内容填充。", idx)
+            logger.warning("幻灯片 %d 未找到内容占位符，已跳过。", idx)
             continue
         
+        # 填充要点
         text_frame = body_shape.text_frame
         text_frame.clear()
-        for line_idx, line in enumerate(content):
-            if not line.strip():
+        
+        for point_idx, point in enumerate(points):
+            if not point.strip():
                 continue
-            if line_idx == 0:
-                text_frame.text = line
+            
+            if point_idx == 0:
+                text_frame.text = point
                 if text_frame.paragraphs:
                     text_frame.paragraphs[0].font.size = PptPt(18)
             else:
                 p = text_frame.add_paragraph()
-                p.text = line
+                p.text = point
                 p.level = 0
                 p.font.size = PptPt(16)
+        
+        logger.debug("已创建章节页: %s (%d 个要点)", section_title, len(points))
 
+    # 6. 保存 PPT
     output_filename = f"{request_id}_slides.pptx"
     output_path = converted_dir / output_filename
-    presentation.save(output_path)
+    presentation.save(str(output_path))
 
     logger.info(
-        "PPT 文档生成完成: %s (user=%s, request=%s)",
+        "PPT 文档生成完成（AI 智能模式）: %s，共 %d 个章节 (user=%s, request=%s)",
         output_path,
+        len(sections),
         username,
         request_id,
     )
-    return output_filename, "PPT 文档生成成功。"
+    return output_filename, f"PPT 文档生成成功，共 {len(sections) + 1} 页（AI 智能模式）。"

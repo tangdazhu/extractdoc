@@ -4,6 +4,16 @@ setlocal
 echo Starting text converter project
 echo ================================
 
+REM Activate conda environment
+echo Activating conda environment 'extract'...
+call conda activate extract
+if errorlevel 1 (
+    echo [ERROR] Failed to activate conda environment 'extract'.
+    echo Please ensure Conda is installed and the 'extract' environment exists.
+    pause
+    exit /b 1
+)
+
 REM Temporarily remove LibreOffice path to avoid conflicts
 set "ORIGINAL_PATH=%PATH%"
 set "PATH=%PATH:C:\Program Files\LibreOffice\program;=%"
