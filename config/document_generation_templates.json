@@ -1,0 +1,42 @@
+{
+  "ppt": {
+    "style_a": {
+      "name": "简约商务风格",
+      "description": "适合商务汇报、项目展示",
+      "template_path": null,
+      "title": "自动生成演示文稿",
+      "subtitle": "基于内容智能整理",
+      "bullet_layout_index": 1,
+      "title_font_size": 44,
+      "content_font_size": 18
+    },
+    "style_b": {
+      "name": "学术报告风格",
+      "description": "适合学术论文、研究报告",
+      "template_path": null,
+      "title": "研究成果展示",
+      "subtitle": "数据驱动的内容呈现",
+      "bullet_layout_index": 1,
+      "title_font_size": 40,
+      "content_font_size": 16
+    }
+  },
+  "word": {
+    "style_a": {
+      "name": "标准文档",
+      "description": "通用文档格式",
+      "template_path": null,
+      "paragraph_style": null,
+      "font_name": "宋体",
+      "font_size": 12
+    },
+    "style_b": {
+      "name": "报告文档",
+      "description": "正式报告格式",
+      "template_path": null,
+      "paragraph_style": null,
+      "font_name": "微软雅黑",
+      "font_size": 11
+    }
+  }
+}

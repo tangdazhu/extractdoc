@@ -56,6 +56,11 @@ urlpatterns = [
         views.stop_realtime_recognition,
         name="api_realtime_speech_stop",
     ),
+    path(
+        "api/document-generation/",
+        views.document_generation_view,
+        name="api_document_generation",
+    ),
     # 旧的 process_images 端点 - 现在指向一个废弃提示视图
     # 客户端应更新为使用上述新的API端点。
     path("process-images/", views.process_images_view, name="process_images"),

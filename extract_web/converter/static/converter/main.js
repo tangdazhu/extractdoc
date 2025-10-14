@@ -34,6 +34,8 @@ function selectMainNavigation(navId, isInitialLoad = false) {
     document.getElementById('docConversionContent').style.display = 'none';
     document.getElementById('videoAnalysisContent').style.display = 'none';
     document.getElementById('speechProcessingContent').style.display = 'none';
+    var docGenContent = document.getElementById('documentGenerationContent');
+    if (docGenContent) docGenContent.style.display = 'none';
     document.querySelectorAll('.sidebar-nav li button').forEach(btn => btn.classList.remove('active'));
     let activeContentDiv = null;
     window.currentSelectedMainNavigation = navId;
@@ -53,6 +55,13 @@ function selectMainNavigation(navId, isInitialLoad = false) {
             document.getElementById('navSpeechProcessing').classList.add('active');
             if (typeof initializeSpeechTab === 'function') initializeSpeechTab();
             break;
+        case 'documentGeneration':
+            activeContentDiv = document.getElementById('documentGenerationContent');
+            document.getElementById('navDocumentGeneration').classList.add('active');
+            if (typeof window.initializeDocumentGenerationControls === 'function') {
+                window.initializeDocumentGenerationControls();
+            }
+            break;
         case 'imageAnalysis':
             break;
     }
@@ -70,5 +79,6 @@ function clearAllInputAreas() {
     if (typeof clearConvertedFilesList === 'function') clearConvertedFilesList();
     if (typeof clearVideoFileAndResults === 'function') clearVideoFileAndResults();
     if (typeof clearAudioFileAndResult === 'function') clearAudioFileAndResult();
+    if (typeof window.clearDocumentGenerationInputs === 'function') window.clearDocumentGenerationInputs();
 }
-window.clearAllInputAreas = clearAllInputAreas; 
+window.clearAllInputAreas = clearAllInputAreas;

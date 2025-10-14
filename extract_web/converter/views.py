@@ -85,6 +85,11 @@ from .services.response_formatters import (
     format_json_response,
     format_error_response,
 )  # Added import
+from .services.document_generation import (
+    generate_ppt_document,
+    generate_word_document,
+    load_generation_templates,
+)  # 新增导入
 
 # PDF to X Merge Converters
 from .pdf_to_word_converter import convert_and_merge_pdfs_to_docx
@@ -128,6 +133,7 @@ except ImportError:
         "PyPDF2 library is not installed. Merging multiple PPT/PPTX files into a single PDF will not be available."
     )
 
+
 # Create your views here.
 
 
@@ -145,6 +151,189 @@ def index(request):
 
     context = {"tts_voices": tts_voices}
     return render(request, "converter/index.html", context)
+
+
+def _resolve_doc_gen_paths(username: str, request_id: str):
+    today_date_str = datetime.now().strftime("%Y%m%d")
+    user_upload_dir, user_converted_dir = ensure_user_directories(
+        username, today_date_str
+    )
+    if not user_upload_dir or not user_converted_dir:
+        raise RuntimeError("无法创建用户目录。")
+
+    upload_dir_path = Path(user_upload_dir)
+    converted_dir_path = Path(user_converted_dir)
+    temp_dir = upload_dir_path / "doc_generation" / request_id
+    temp_dir.mkdir(parents=True, exist_ok=True)
+    return today_date_str, upload_dir_path, converted_dir_path, temp_dir
+
+
+def _handle_doc_gen_upload(file_obj, temp_dir: Path, request_id: str) -> Path | None:
+    if not file_obj:
+        return None
+    max_size = 500 * 1024 * 1024
+    if file_obj.size > max_size:
+        raise ValueError("本地文件不可超过500MB。")
+
+    safe_name = Path(file_obj.name).name
+    target_path = temp_dir / f"{request_id}_{safe_name}"
+    with target_path.open("wb") as dest:
+        for chunk in file_obj.chunks():
+            dest.write(chunk)
+    return target_path
+
+
+@login_required
+@require_POST
+def document_generation_view(request):
+    request_id = generate_request_id()
+    logger.info("document_generation_view: 收到请求，RequestID=%s", request_id)
+    start_time = time.perf_counter()
+
+    mode = request.POST.get("mode", "ppt").lower()
+    source_url = (request.POST.get("source_url") or "").strip()
+    template_key = request.POST.get("template", "style_a").strip() or "style_a"
+    uploaded_file = request.FILES.get("source_file")
+
+    if mode not in {"ppt", "word"}:
+        return format_error_response(
+            message="不支持的生成模式。",
+            merge_output=False,
+            request_id=request_id,
+            duration_seconds=round(time.perf_counter() - start_time, 2),
+        )
+
+    if not uploaded_file and not source_url:
+        return format_error_response(
+            message="请至少提供本地文件或网络文章URL之一。",
+            merge_output=False,
+            request_id=request_id,
+            duration_seconds=round(time.perf_counter() - start_time, 2),
+        )
+
+    if source_url and not re.match(r"^https?://", source_url, re.IGNORECASE):
+        return format_error_response(
+            message="URL 格式无效，需以 http 或 https 开头。",
+            merge_output=False,
+            request_id=request_id,
+            duration_seconds=round(time.perf_counter() - start_time, 2),
+        )
+
+    try:
+        today_date_str, upload_dir, converted_dir, temp_dir = _resolve_doc_gen_paths(
+            request.user.username, request_id
+        )
+    except Exception as dir_error:
+        logger.error(
+            "document_generation_view: 初始化目录失败。RequestID=%s, Error=%s",
+            request_id,
+            dir_error,
+            exc_info=True,
+        )
+        return format_error_response(
+            message="服务器初始化目录失败，请稍后再试。",
+            merge_output=False,
+            request_id=request_id,
+            duration_seconds=round(time.perf_counter() - start_time, 2),
+        )
+
+    local_file_path = None
+    try:
+        if uploaded_file:
+            local_file_path = _handle_doc_gen_upload(uploaded_file, temp_dir, request_id)
+    except Exception as save_error:
+        logger.error(
+            "document_generation_view: 保存上传文件失败。RequestID=%s, Error=%s",
+            request_id,
+            save_error,
+            exc_info=True,
+        )
+        return format_error_response(
+            message=str(save_error),
+            merge_output=False,
+            request_id=request_id,
+            duration_seconds=round(time.perf_counter() - start_time, 2),
+        )
+
+    results = []
+    template_config = {}
+    try:
+        templates = load_generation_templates()
+        if mode == "ppt":
+            template_config = templates.get("ppt", {}).get(template_key, {})
+            if not template_config:
+                raise ValueError("未找到指定的 PPT 模板配置。")
+        else:
+            template_config = templates.get("word", {}).get(template_key, {})
+
+        generation_kwargs = {
+            "request_id": request_id,
+            "username": request.user.username,
+            "upload_dir": upload_dir,
+            "converted_dir": converted_dir,
+            "temp_dir": temp_dir,
+            "source_file_path": local_file_path,
+            "source_url": source_url,
+            "template_config": template_config,
+        }
+
+        if mode == "ppt":
+            output_filename, message = generate_ppt_document(**generation_kwargs)
+        else:
+            output_filename, message = generate_word_document(**generation_kwargs)
+
+        download_url = reverse(
+            "converter:download_converted_file",
+            args=[request.user.username, today_date_str, output_filename],
+        )
+        results.append(
+            {
+                "original_name": (
+                    uploaded_file.name if uploaded_file else source_url or "未指定来源"
+                ),
+                "status": "success",
+                "message": message or "生成成功。",
+                "download_url": download_url,
+            }
+        )
+    except ValueError as user_error:
+        logger.warning(
+            "document_generation_view: 参数错误。RequestID=%s, Error=%s",
+            request_id,
+            user_error,
+        )
+        cleanup_temp_files([str(temp_dir)], request_id, remove_dirs=True)
+        return format_error_response(
+            message=str(user_error),
+            merge_output=False,
+            request_id=request_id,
+            duration_seconds=round(time.perf_counter() - start_time, 2),
+        )
+    except Exception as exc:
+        logger.error(
+            "document_generation_view: 文档生成失败。RequestID=%s, Error=%s",
+            request_id,
+            exc,
+            exc_info=True,
+        )
+        cleanup_temp_files([str(temp_dir)], request_id, remove_dirs=True)
+        return format_error_response(
+            message="文档生成过程中出现异常，请稍后再试。",
+            merge_output=False,
+            request_id=request_id,
+            duration_seconds=round(time.perf_counter() - start_time, 2),
+        )
+    else:
+        cleanup_temp_files([str(temp_dir)], request_id, remove_dirs=True)
+
+    duration_seconds = round(time.perf_counter() - start_time, 2)
+    return format_json_response(
+        results=results,
+        merge_output=False,
+        overall_status=200,
+        request_id=request_id,
+        duration_seconds=duration_seconds,
+    )
 
 
 @login_required

@@ -6,6 +6,15 @@ let isConverting = false; // General flag for any background process
 const uploadedFiles = [];  // For document conversion multi-file
 let uploadedVideoFile = null; // For single video file in video analysis
 let uploadedAudioFile = null; // For single audio file in speech processing
+let docGenInitialized = false;
+let currentSelectedDocGenMode = 'ppt';
+const docGenState = {
+    useLocalFile: false,
+    useUrl: false,
+    localFile: null,
+    url: '',
+    template: 'style_a'
+};
 
 // Global flag to prevent multiple TTS initializations
 let ttsInitialized = false;
@@ -31,6 +40,317 @@ function updateMainNavigationButtonStates(disableNonActive) {
             }
         }
     });
+}
+
+function initializeDocumentGenerationControls() {
+    if (docGenInitialized) return;
+    const docGenContainer = document.getElementById('documentGenerationContent');
+    if (!docGenContainer) return;
+    const tabButtons = docGenContainer.querySelectorAll('.tabs .tab-button');
+    tabButtons.forEach(button => {
+        button.addEventListener('click', () => {
+            if (isConverting) {
+                addNotification('当前有任务执行中，暂不可切换模式。', 'warning');
+                return;
+            }
+            switchDocumentGenerationMode(button.dataset.mode);
+        });
+    });
+    const localCheckbox = document.getElementById('docGenUseLocalFile');
+    const localFileInput = document.getElementById('docGenLocalFile');
+    const urlCheckbox = document.getElementById('docGenUseUrl');
+    const urlInput = document.getElementById('docGenUrlInput');
+    const startBtn = document.getElementById('docGenStartBtn');
+    const templateRadios = document.querySelectorAll('input[name="docGenTemplate"]');
+    const urlDebouncedHandler = debounce(() => {
+        docGenState.url = urlInput ? urlInput.value.trim() : '';
+        updateDocumentGenerationSubmitState();
+    }, 300);
+    if (localCheckbox && localFileInput) {
+        localCheckbox.addEventListener('change', () => {
+            docGenState.useLocalFile = localCheckbox.checked;
+            if (!localCheckbox.checked) {
+                localFileInput.value = '';
+                docGenState.localFile = null;
+                const nameEl = document.getElementById('docGenLocalFileName');
+                if (nameEl) nameEl.textContent = '未选择任何文件';
+            }
+            localFileInput.disabled = !localCheckbox.checked;
+            updateDocumentGenerationSubmitState();
+        });
+        localFileInput.addEventListener('change', () => {
+            const file = localFileInput.files && localFileInput.files[0] ? localFileInput.files[0] : null;
+            const nameEl = document.getElementById('docGenLocalFileName');
+            if (!file) {
+                docGenState.localFile = null;
+                if (nameEl) nameEl.textContent = '未选择任何文件';
+            } else {
+                if (file.size > 500 * 1024 * 1024) {
+                    addNotification('本地文件不可超过500MB。', 'error');
+                    localFileInput.value = '';
+                    docGenState.localFile = null;
+                    if (nameEl) nameEl.textContent = '未选择任何文件';
+                } else {
+                    docGenState.localFile = file;
+                    if (nameEl) nameEl.textContent = `${file.name} (${(file.size / 1024 / 1024).toFixed(2)} MB)`;
+                }
+            }
+            updateDocumentGenerationSubmitState();
+        });
+    }
+    if (urlCheckbox && urlInput) {
+        urlCheckbox.addEventListener('change', () => {
+            docGenState.useUrl = urlCheckbox.checked;
+            if (!urlCheckbox.checked) {
+                urlInput.value = '';
+                docGenState.url = '';
+            }
+            urlInput.disabled = !urlCheckbox.checked;
+            updateDocumentGenerationSubmitState();
+        });
+        urlInput.addEventListener('input', urlDebouncedHandler);
+    }
+    if (templateRadios.length > 0) {
+        templateRadios.forEach(radio => {
+            radio.addEventListener('change', () => {
+                if (radio.checked) {
+                    docGenState.template = radio.value;
+                }
+            });
+        });
+    }
+    if (startBtn) {
+        startBtn.addEventListener('click', startDocumentGeneration);
+    }
+    switchDocumentGenerationMode(currentSelectedDocGenMode);
+    docGenInitialized = true;
+    updateDocumentGenerationSubmitState();
+}
+
+function switchDocumentGenerationMode(mode) {
+    if (!mode) return;
+    currentSelectedDocGenMode = mode;
+    const pptBtn = document.getElementById('docGenTabPpt');
+    const wordBtn = document.getElementById('docGenTabWord');
+    if (pptBtn && wordBtn) {
+        pptBtn.classList.toggle('active', mode === 'ppt');
+        wordBtn.classList.toggle('active', mode === 'word');
+    }
+    const templateSection = document.getElementById('docGenTemplateSection');
+    if (templateSection) {
+        templateSection.style.display = mode === 'ppt' ? 'block' : 'none';
+    }
+    updateDocumentGenerationSubmitState();
+}
+
+function updateDocumentGenerationSubmitState() {
+    const startBtn = document.getElementById('docGenStartBtn');
+    if (!startBtn) return;
+    const hasLocal = docGenState.useLocalFile && !!docGenState.localFile;
+    const hasUrl = docGenState.useUrl && !!docGenState.url;
+    const validUrl = !docGenState.useUrl || /^https?:\/\//i.test(docGenState.url);
+    const ready = (hasLocal || hasUrl) && validUrl;
+    startBtn.disabled = !ready;
+    if (!validUrl && docGenState.useUrl) {
+        addNotification('请输入有效的URL，需以http或https开头。', 'warning');
+    }
+}
+
+function startDocumentGeneration() {
+    const startBtn = document.getElementById('docGenStartBtn');
+    if (!startBtn || startBtn.disabled) {
+        return;
+    }
+    const hasLocal = docGenState.useLocalFile && !!docGenState.localFile;
+    const hasUrl = docGenState.useUrl && !!docGenState.url;
+    if (!hasLocal && !hasUrl) {
+        addNotification('请选择至少一种内容来源。', 'warning');
+        return;
+    }
+    const apiInput = document.getElementById('docGenApiUrl');
+    const apiUrl = apiInput ? apiInput.value : '';
+    if (!apiUrl) {
+        addNotification('未配置文档生成功能的接口地址。', 'error');
+        return;
+    }
+    const formData = new FormData();
+    formData.append('mode', currentSelectedDocGenMode);
+    if (hasLocal && docGenState.localFile) {
+        formData.append('source_file', docGenState.localFile);
+    }
+    if (hasUrl) {
+        formData.append('source_url', docGenState.url);
+    }
+    if (currentSelectedDocGenMode === 'ppt' && docGenState.template) {
+        formData.append('template', docGenState.template);
+    }
+    const csrfToken = getCookie('csrftoken');
+    startBtn.disabled = true;
+    if (!startBtn.dataset.originalText) {
+        startBtn.dataset.originalText = startBtn.textContent;
+    }
+    startBtn.textContent = '生成中...';
+    isConverting = true;
+    updateMainNavigationButtonStates(true);
+    updateMainTabButtonsState(true);
+    toggleDocumentGenerationLoading(true);
+    fetch(apiUrl, {
+        method: 'POST',
+        headers: {
+            'X-CSRFToken': csrfToken
+        },
+        body: formData
+    }).then(async (response) => {
+        const text = await response.text();
+        let data;
+        try {
+            data = text ? JSON.parse(text) : {};
+        } catch (error) {
+            addNotification('返回数据无法解析。', 'error');
+            renderDocumentGenerationResult({ message: '返回数据无法解析。' });
+            return;
+        }
+        if (!response.ok) {
+            const message = data && data.message ? data.message : `请求失败，状态码 ${response.status}`;
+            addNotification(message, 'error');
+            renderDocumentGenerationResult({ message });
+            return;
+        }
+        renderDocumentGenerationResult(data);
+        addNotification('文档生成任务已完成。', 'success');
+    }).catch(error => {
+        console.error('Document generation request failed:', error);
+        addNotification('文档生成请求发生异常，请稍后重试。', 'error');
+        renderDocumentGenerationResult({ message: '文档生成请求发生异常。' });
+    }).finally(() => {
+        isConverting = false;
+        updateMainNavigationButtonStates(false);
+        updateMainTabButtonsState(false);
+        toggleDocumentGenerationLoading(false);
+        if (startBtn.dataset.originalText) {
+            startBtn.textContent = startBtn.dataset.originalText;
+        }
+        updateDocumentGenerationSubmitState();
+    });
+}
+
+function toggleDocumentGenerationLoading(isLoading) {
+    const startBtn = document.getElementById('docGenStartBtn');
+    if (startBtn) {
+        startBtn.disabled = isLoading;
+    }
+    const resultContainer = document.getElementById('docGenResult');
+    if (!resultContainer) return;
+    if (isLoading) {
+        resultContainer.innerHTML = '<div class="doc-gen-message">文档生成中，请稍候...</div>';
+    }
+}
+
+function renderDocumentGenerationResult(data) {
+    const resultContainer = document.getElementById('docGenResult');
+    if (!resultContainer) return;
+    resultContainer.innerHTML = '';
+    if (!data) {
+        resultContainer.innerHTML = '<div class="doc-gen-message error">未收到返回结果。</div>';
+        return;
+    }
+    const results = Array.isArray(data.results) ? data.results : [];
+    if (results.length === 0) {
+        const message = data.message || '文档生成未返回可用结果。';
+        resultContainer.innerHTML = `<div class="doc-gen-message error">${escapeHtml(message)}</div>`;
+        return;
+    }
+    const table = document.createElement('table');
+    table.className = 'doc-gen-result-table';
+    const thead = document.createElement('thead');
+    const headerRow = document.createElement('tr');
+    ['源名称', '状态', '说明', '下载'].forEach(text => {
+        const th = document.createElement('th');
+        th.textContent = text;
+        headerRow.appendChild(th);
+    });
+    thead.appendChild(headerRow);
+    table.appendChild(thead);
+    const tbody = document.createElement('tbody');
+    results.forEach(item => {
+        const tr = document.createElement('tr');
+        const nameTd = document.createElement('td');
+        nameTd.textContent = item.original_name || item.generated_name || '-';
+        const statusTd = document.createElement('td');
+        statusTd.textContent = item.status || '-';
+        const messageTd = document.createElement('td');
+        messageTd.textContent = item.message || '-';
+        const actionTd = document.createElement('td');
+        if (item.download_url) {
+            const link = document.createElement('a');
+            link.href = item.download_url;
+            link.textContent = '下载';
+            link.className = 'doc-gen-download-link';
+            link.target = '_blank';
+            actionTd.appendChild(link);
+        } else {
+            actionTd.textContent = '-';
+        }
+        tr.appendChild(nameTd);
+        tr.appendChild(statusTd);
+        tr.appendChild(messageTd);
+        tr.appendChild(actionTd);
+        tbody.appendChild(tr);
+    });
+    table.appendChild(tbody);
+    resultContainer.appendChild(table);
+}
+
+function clearDocumentGenerationInputs() {
+    const localCheckbox = document.getElementById('docGenUseLocalFile');
+    const localFileInput = document.getElementById('docGenLocalFile');
+    const urlCheckbox = document.getElementById('docGenUseUrl');
+    const urlInput = document.getElementById('docGenUrlInput');
+    const nameEl = document.getElementById('docGenLocalFileName');
+    if (localCheckbox) localCheckbox.checked = false;
+    if (localFileInput) {
+        localFileInput.value = '';
+        localFileInput.disabled = true;
+    }
+    if (urlCheckbox) urlCheckbox.checked = false;
+    if (urlInput) {
+        urlInput.value = '';
+        urlInput.disabled = true;
+    }
+    if (nameEl) nameEl.textContent = '未选择任何文件';
+    docGenState.useLocalFile = false;
+    docGenState.useUrl = false;
+    docGenState.localFile = null;
+    docGenState.url = '';
+    docGenState.template = 'style_a';
+    const templateRadios = document.querySelectorAll('input[name="docGenTemplate"]');
+    templateRadios.forEach(radio => {
+        radio.checked = radio.value === 'style_a';
+    });
+    currentSelectedDocGenMode = 'ppt';
+    const pptBtn = document.getElementById('docGenTabPpt');
+    const wordBtn = document.getElementById('docGenTabWord');
+    if (pptBtn && wordBtn) {
+        pptBtn.classList.add('active');
+        wordBtn.classList.remove('active');
+    }
+    const templateSection = document.getElementById('docGenTemplateSection');
+    if (templateSection) templateSection.style.display = 'block';
+    const resultContainer = document.getElementById('docGenResult');
+    if (resultContainer) resultContainer.innerHTML = '';
+    updateDocumentGenerationSubmitState();
+}
+
+function debounce(fn, delay) {
+    let timer = null;
+    return function(...args) {
+        if (timer) {
+            clearTimeout(timer);
+        }
+        timer = setTimeout(() => {
+            fn.apply(this, args);
+        }, delay);
+    };
 }
 
 // --- NEW --- Helper function to disable/enable main tab buttons
@@ -635,6 +955,7 @@ document.addEventListener('DOMContentLoaded', function() {
     
     // Initialize the view based on currentSelectedMainNavigation
     selectMainNavigation(currentSelectedMainNavigation, true);
+    initializeDocumentGenerationControls();
 
     // Bind the document conversion button
     const convertBtn = document.getElementById('startConversionBtn');
@@ -726,6 +1047,11 @@ function selectMainNavigation(navId, isInitialLoad = false) {
             document.getElementById('navSpeechProcessing').classList.add('active');
             initializeSpeechTab(); // This will also call showSpeechProcessingSubTab
             break;
+        case 'documentGeneration':
+            activeContentDiv = document.getElementById('documentGenerationContent');
+            document.getElementById('navDocumentGeneration').classList.add('active');
+            initializeDocumentGenerationControls();
+            break;
         case 'imageAnalysis': // Placeholder for when image analysis is enabled
             // activeContentDiv = document.getElementById('imageAnalysisContent');
             // document.getElementById('navImageAnalysis').classList.add('active');
@@ -755,6 +1081,9 @@ function clearAllInputAreas() {
 
     // Speech Processing
     clearAudioFileAndResult(); // Clears audio file selection and results
+
+    // Document Generation
+    clearDocumentGenerationInputs();
 }
 
 // --- Speech Processing Section JS ---

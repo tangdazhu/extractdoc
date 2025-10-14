@@ -111,6 +111,177 @@
         max-width: 1000px; /* Constrain width for better readability */
     }
 
+    .doc-gen-form {
+        background-color: #f8f9fa;
+        border: 1px solid #dee2e6;
+        border-radius: 8px;
+        padding: 24px 28px;
+        display: flex;
+        flex-direction: column;
+        gap: 20px;
+    }
+
+    .doc-gen-section-title {
+        font-size: 16px;
+        font-weight: 600;
+        color: #2c3e50;
+        margin-bottom: 12px;
+    }
+
+    .doc-gen-source {
+        display: flex;
+        flex-direction: column;
+        gap: 14px;
+    }
+
+    .doc-gen-source-item {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 12px;
+    }
+
+    .doc-gen-checkbox-label {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        font-weight: 500;
+        color: #34495e;
+        white-space: nowrap;
+    }
+
+    .doc-gen-input {
+        min-width: 320px;
+        max-width: 100%;
+        padding: 8px 12px;
+        border: 1px solid #ced4da;
+        border-radius: 4px;
+        font-size: 14px;
+    }
+
+    .doc-gen-input:disabled {
+        background-color: #e9ecef;
+        cursor: not-allowed;
+    }
+
+    .doc-gen-file-name {
+        font-size: 13px;
+        color: #6c757d;
+    }
+
+    .doc-gen-template {
+        margin-top: 8px;
+    }
+
+    .doc-gen-template-list {
+        display: flex;
+        gap: 16px;
+        flex-wrap: wrap;
+    }
+
+    .doc-gen-template-option {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        padding: 10px 18px;
+        border: 1px solid #dee2e6;
+        border-radius: 6px;
+        background-color: #fff;
+        font-size: 14px;
+        color: #2c3e50;
+        cursor: pointer;
+        transition: border-color 0.2s, box-shadow 0.2s;
+    }
+
+    .doc-gen-template-option input {
+        transform: scale(1.1);
+    }
+
+    .doc-gen-template-option:hover {
+        border-color: #007bff;
+        box-shadow: 0 0 0 2px rgba(0, 123, 255, 0.15);
+    }
+
+    .doc-gen-actions {
+        display: flex;
+        justify-content: flex-end;
+    }
+
+    .doc-gen-submit {
+        background-color: #007bff;
+        color: #fff;
+        border: none;
+        border-radius: 6px;
+        padding: 12px 32px;
+        font-size: 16px;
+        font-weight: 600;
+        cursor: pointer;
+        transition: background-color 0.2s;
+    }
+
+    .doc-gen-submit:hover:not(:disabled) {
+        background-color: #0056b3;
+    }
+
+    .doc-gen-submit:disabled {
+        background-color: #adb5bd;
+        cursor: not-allowed;
+    }
+
+    .doc-gen-result {
+        margin-top: 24px;
+    }
+
+    .doc-gen-result-table {
+        width: 100%;
+        border-collapse: collapse;
+        margin-top: 12px;
+    }
+
+    .doc-gen-result-table th,
+    .doc-gen-result-table td {
+        border: 1px solid #dee2e6;
+        padding: 10px 12px;
+        font-size: 14px;
+        color: #2c3e50;
+    }
+
+    .doc-gen-result-table th {
+        background-color: #f8f9fa;
+        font-weight: 600;
+    }
+
+    .doc-gen-download-link {
+        display: inline-block;
+        padding: 6px 12px;
+        border-radius: 4px;
+        background-color: #28a745;
+        color: #fff;
+        text-decoration: none;
+        font-size: 13px;
+    }
+
+    .doc-gen-download-link:hover {
+        background-color: #218838;
+    }
+
+    .doc-gen-message {
+        margin-top: 12px;
+        padding: 12px 16px;
+        border-radius: 6px;
+        font-size: 14px;
+    }
+
+    .doc-gen-message.success {
+        background-color: #d4edda;
+        color: #155724;
+    }
+
+    .doc-gen-message.error {
+        background-color: #f8d7da;
+        color: #721c24;
+    }
+
     /* Main Tabs Container */
     .main-tabs-container {
         display: flex;
@@ -655,6 +826,7 @@
                 <li><button id="navVideoAnalysis" onclick="selectMainNavigation('videoAnalysis')">视频分析</button></li>
                 <li><button id="navImageAnalysis" class="disabled" onclick="selectMainNavigation('imageAnalysis')" disabled>图像分析</button></li>
                 <li><button id="navSpeechProcessing" onclick="selectMainNavigation('speechProcessing')">语音处理</button></li>
+                <li><button id="navDocumentGeneration" onclick="selectMainNavigation('documentGeneration')">文档生成</button></li>
             </ul>
         </nav>
     </div>
@@ -962,7 +1134,7 @@
                         <div id="audioLevelContainer" class="mb-3" style="display: none;">
                             <label class="form-label" style="font-weight: 500;">音量水平:</label>
                             <div class="progress" style="height: 10px;">
-                                <div id="audioLevelBar" class="progress-bar bg-primary" role="progressbar" style="width: 0%"></div>
+                                <div id="audioLevelBar" class="progress-bar bg-primary" role="progressbar" style="width: 0%" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100"></div>
                             </div>
                         </div>
                         
@@ -1078,6 +1250,57 @@
             </div>
         </div>
 
+        <div id="documentGenerationContent" class="converter-container" style="display: none;">
+            <div class="main-tabs-container">
+                <h1 class="page-title">文档生成</h1>
+                <div class="tabs">
+                    <button id="docGenTabPpt" class="tab-button active" data-mode="ppt">PPT生成</button>
+                    <button id="docGenTabWord" class="tab-button" data-mode="word">Word生成</button>
+                </div>
+            </div>
+
+            <div class="doc-gen-form">
+                <input type="hidden" id="docGenApiUrl" value="{% url 'converter:api_document_generation' %}">
+                <div class="doc-gen-source">
+                    <h2 class="doc-gen-section-title">选择文件来源</h2>
+                    <div class="doc-gen-source-item">
+                        <label class="doc-gen-checkbox-label">
+                            <input type="checkbox" id="docGenUseLocalFile">
+                            选择文件
+                        </label>
+                        <input type="file" id="docGenLocalFile" class="doc-gen-input" disabled>
+                        <span class="doc-gen-file-name" id="docGenLocalFileName">未选择任何文件</span>
+                    </div>
+                    <div class="doc-gen-source-item">
+                        <label class="doc-gen-checkbox-label">
+                            <input type="checkbox" id="docGenUseUrl">
+                            网络文章URL
+                        </label>
+                        <input type="url" id="docGenUrlInput" class="doc-gen-input" placeholder="例如：https://your-bucket.oss-cn-beijing.aliyuncs.com/article.html" disabled>
+                    </div>
+                </div>
+
+                <div class="doc-gen-template" id="docGenTemplateSection">
+                    <h2 class="doc-gen-section-title">PPT 模板选择</h2>
+                    <div class="doc-gen-template-list">
+                        <label class="doc-gen-template-option">
+                            <input type="radio" name="docGenTemplate" value="style_a" checked>
+                            简约商务风格
+                        </label>
+                        <label class="doc-gen-template-option">
+                            <input type="radio" name="docGenTemplate" value="style_b">
+                            学术报告风格
+                        </label>
+                    </div>
+                </div>
+
+                <div class="doc-gen-actions">
+                    <button type="button" id="docGenStartBtn" class="doc-gen-submit" disabled>开始生成</button>
+                </div>
+            </div>
+
+            <div class="doc-gen-result" id="docGenResult"></div>
+        </div>
     </div> <!-- main-content-wrapper -->
 </div> <!-- page-layout-container -->
 
@@ -1088,6 +1311,7 @@
 <script src="{% static 'converter/doc_conversion.js' %}" defer></script>
 <script src="{% static 'converter/video_analysis.js' %}" defer></script>
 <script src="{% static 'converter/speech_processing.js' %}" defer></script>
+<script src="{% static 'converter/doc_generation.js' %}" defer></script>
 <script src="{% static 'converter/main.js' %}" defer></script>
 <script>
 // 确保页面加载后激活导航功能
