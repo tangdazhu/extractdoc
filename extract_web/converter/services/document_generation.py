@@ -492,6 +492,36 @@ def generate_ppt_document(
         title_slide.placeholders[1].text = subtitle_text
     
     logger.info("已创建标题页: %s", title_text)
+    
+    # 如果是PDF且第1页有小表格(<=3行),将其添加到标题页
+    if is_pdf and multimodal_data:
+        first_page_tables = [t for t in multimodal_data.get("tables", []) if t["page"] == 1]
+        if first_page_tables and len(first_page_tables) == 1:
+            table_data = first_page_tables[0]["data"]
+            if len(table_data) <= 3:
+                # 在标题页底部添加小表格
+                from pptx.util import Inches, Pt as PptPt
+                rows = len(table_data)
+                cols = len(table_data[0]) if table_data else 0
+                
+                if rows > 0 and cols > 0:
+                    left = Inches(3.0)  # 居中
+                    top = Inches(5.5)   # 底部
+                    width = Inches(4.0)
+                    height = Inches(0.4 * rows)
+                    
+                    table = title_slide.shapes.add_table(rows, cols, left, top, width, height).table
+                    
+                    # 填充表格数据
+                    for row_idx, row_data in enumerate(table_data):
+                        for col_idx, cell_value in enumerate(row_data):
+                            cell = table.cell(row_idx, col_idx)
+                            cell.text = str(cell_value) if cell_value else ""
+                            cell.text_frame.paragraphs[0].font.size = PptPt(11)
+                            if row_idx == 0:
+                                cell.text_frame.paragraphs[0].font.bold = True
+                    
+                    logger.info("已将第1页小表格添加到标题页")
 
     # 5. 根据文件类型选择生成模式
     if is_pdf and multimodal_data:
@@ -598,12 +628,25 @@ def _generate_ppt_from_pdf_pages(
             "images": []
         }
     
-    # 收集表格
+    # 收集表格(智能合并连续小表格页)
+    # 如果连续两页都只有表格且第一页是小表格,则合并到第一页
+    tables_by_page = {}
     for table_data in multimodal_data["tables"]:
         page_num = table_data["page"]
+        if page_num not in tables_by_page:
+            tables_by_page[page_num] = []
+        tables_by_page[page_num].append(table_data)
+        logger.debug("收集表格: 第 %d 页, %d 行 x %d 列", 
+                    page_num, len(table_data["data"]), len(table_data["data"][0]) if table_data["data"] else 0)
+    
+    # 不进行表格合并,保持PDF原始页面结构
+    # (之前的合并逻辑导致错误地将两个独立页面的表格合并)
+    
+    # 将修正后的表格分配到页面
+    for page_num, tables in tables_by_page.items():
         if page_num not in pages_with_content:
             pages_with_content[page_num] = {"text": "", "tables": [], "images": []}
-        pages_with_content[page_num]["tables"].append(table_data)
+        pages_with_content[page_num]["tables"].extend(tables)
     
     # 收集图片（过滤背景装饰图 + 智能去重）
     import hashlib
@@ -686,208 +729,252 @@ def _generate_ppt_from_pdf_pages(
                 logger.debug("跳过重复图片: %dx%d (hash=%s, 首次出现于第 %d 页，当前第 %d 页)", 
                             img_data["width"], img_data["height"], img_hash[:8], target_page, page_num)
     
-    # 按页面顺序处理（每页创建一个综合页面）
-    for page_num in sorted(pages_with_content.keys()):
+    # 按页面顺序处理,支持智能合并小内容页面
+    sorted_pages = sorted(pages_with_content.keys())
+    i = 0
+    while i < len(sorted_pages):
+        page_num = sorted_pages[i]
         page_content = pages_with_content[page_num]
         page_text = page_content.get("text", "")
         tables = page_content["tables"]
         images = page_content["images"]
         
+        # 跳过第1页(如果只有小表格,已添加到标题页)
+        if page_num == 1 and len(tables) == 1 and len(tables[0]["data"]) <= 3 and not images:
+            logger.debug("跳过第 1 页(小表格已添加到标题页)")
+            i += 1
+            continue
+        
         # 跳过完全空白的页面
         if not page_text.strip() and not tables and not images:
             logger.debug("跳过空白页面: 第 %d 页", page_num)
+            i += 1
             continue
         
-        # 创建一个页面，包含该页的所有内容
+        # 判断当前页面是否为"小内容页"(可以与下一页合并)
+        # 条件: 只有一个小表格(<=3行),无图片
+        # 注意:不检查文本,因为pdfplumber会把表格内容也提取为文本
+        is_small_content = (
+            len(tables) == 1 and 
+            len(tables[0]["data"]) <= 3 and 
+            not images
+        )
+        
+        logger.debug("第 %d 页判断: 表格数=%d, 表格行数=%d, 图片数=%d, 是否小内容页=%s",
+                    page_num, len(tables), 
+                    len(tables[0]["data"]) if tables else 0,
+                    len(images), is_small_content)
+        
+        # 不进行页面合并,保持PDF原始页面结构
+        pages_to_merge = [page_num]
+        
+        # 创建一个PPT页面,包含合并后的所有内容
         slide = presentation.slides.add_slide(blank_layout)
         
-        # 添加标题
+        # 添加标题(如果合并了多页,显示页面范围)
         title_box = slide.shapes.add_textbox(
             Inches(0.5), Inches(0.3), Inches(9), Inches(0.5)
         )
         title_frame = title_box.text_frame
-        title_frame.text = f"第 {page_num} 页"
+        if len(pages_to_merge) > 1:
+            title_frame.text = f"第 {pages_to_merge[0]}-{pages_to_merge[-1]} 页"
+        else:
+            title_frame.text = f"第 {page_num} 页"
         title_frame.paragraphs[0].font.size = PptPt(24)
         title_frame.paragraphs[0].font.bold = True
         
         current_top = Inches(1.0)  # 当前垂直位置
         
-        # 1. 优先添加表格（如果有）
-        for table_data in tables:
-            rows_data = table_data["data"]
-            rows = len(rows_data)
-            cols = len(rows_data[0]) if rows_data else 0
+        # 处理所有合并的页面内容
+        for merge_page_num in pages_to_merge:
+            merge_content = pages_with_content[merge_page_num]
+            merge_tables = merge_content["tables"]
+            merge_images = merge_content["images"]
+            merge_text = merge_content.get("text", "")
             
-            if rows > 0 and cols > 0:
-                left = Inches(0.5)
-                width = Inches(9)
-                # 根据行数动态计算高度
-                row_height = min(0.4, 2.5 / rows)  # 每行最多 0.4 英寸，总高度不超过 2.5 英寸
-                height = Inches(row_height * rows)
+            # 1. 添加表格（如果有）
+            for table_data in merge_tables:
+                rows_data = table_data["data"]
+                rows = len(rows_data)
+                cols = len(rows_data[0]) if rows_data else 0
                 
-                table = slide.shapes.add_table(rows, cols, left, current_top, width, height).table
-                
-                # 填充表格数据
-                for row_idx, row_data in enumerate(rows_data):
-                    for col_idx, cell_value in enumerate(row_data):
-                        cell = table.cell(row_idx, col_idx)
-                        cell.text = str(cell_value) if cell_value else ""
-                        cell.text_frame.paragraphs[0].font.size = PptPt(11)
-                        
-                        # 标题行加粗
-                        if row_idx == 0:
-                            cell.text_frame.paragraphs[0].font.bold = True
-                
-                current_top += height + Inches(0.3)  # 表格后留间距
-                logger.debug("已添加表格: 第 %d 页, %d 行 x %d 列", page_num, rows, cols)
-        
-        # 2. 添加图片（如果有，且空间足够）
-        # PPT标准页面高度7.5英寸,预留底部1.5英寸给文本,可用高度约5.5英寸
-        max_content_height = Inches(5.5)
-        
-        if images and current_top < max_content_height:
-            # 如果有2张图片,左右并排显示
-            if len(images) == 2:
-                available_height = max_content_height - current_top
-                available_width_per_img = Inches(4.5)  # 每张图片最大宽度4.5英寸
-                
-                img_positions = []  # 存储每张图片的位置和尺寸
-                max_img_height = 0
-                
-                for img_idx, img_data in enumerate(images):
-                    img_path = img_data["path"]
-                    if not img_path.exists():
-                        continue
+                if rows > 0 and cols > 0:
+                    left = Inches(0.5)
+                    width = Inches(9)
+                    # 根据行数动态计算高度
+                    row_height = min(0.4, 2.5 / rows)  # 每行最多 0.4 英寸，总高度不超过 2.5 英寸
+                    height = Inches(row_height * rows)
                     
-                    try:
-                        img_width_px = img_data["width"]
-                        img_height_px = img_data["height"]
-                        
-                        # 将像素转换为英寸
-                        img_width_inch = img_width_px / 96.0
-                        img_height_inch = img_height_px / 96.0
-                        
-                        # 计算缩放比例
-                        width_ratio = available_width_per_img / Inches(img_width_inch)
-                        height_ratio = available_height / Inches(img_height_inch)
-                        scale_ratio = min(width_ratio, height_ratio, 1.0)
-                        
-                        final_width = Inches(img_width_inch * scale_ratio)
-                        final_height = Inches(img_height_inch * scale_ratio)
-                        
-                        # 计算水平位置(左右并排)
-                        if img_idx == 0:
-                            left = Inches(0.5)  # 左侧图片
-                        else:
-                            left = Inches(5.5)  # 右侧图片
-                        
-                        img_positions.append({
-                            "path": img_path,
-                            "left": left,
-                            "top": current_top,
-                            "width": final_width,
-                            "height": final_height
-                        })
-                        
-                        max_img_height = max(max_img_height, final_height)
-                        
-                    except Exception as e:
-                        logger.warning("图片尺寸计算失败: %s", e)
-                
-                # 添加所有图片
-                for img_pos in img_positions:
-                    slide.shapes.add_picture(
-                        str(img_pos["path"]),
-                        left=img_pos["left"],
-                        top=img_pos["top"],
-                        width=img_pos["width"],
-                        height=img_pos["height"]
-                    )
-                    logger.debug("已添加图片: 第 %d 页 (左右并排)")
-                
-                current_top += max_img_height + Inches(0.3)
-            else:
-                # 单张图片或多张图片,垂直排列
-                for img_idx, img_data in enumerate(images, start=1):
-                    if current_top >= max_content_height - Inches(0.5):
-                        logger.warning("空间不足，跳过剩余 %d 张图片", len(images) - img_idx + 1)
-                        break
+                    table = slide.shapes.add_table(rows, cols, left, current_top, width, height).table
                     
-                    img_path = img_data["path"]
-                    if not img_path.exists():
-                        continue
+                    # 填充表格数据
+                    for row_idx, row_data in enumerate(rows_data):
+                        for col_idx, cell_value in enumerate(row_data):
+                            cell = table.cell(row_idx, col_idx)
+                            cell.text = str(cell_value) if cell_value else ""
+                            cell.text_frame.paragraphs[0].font.size = PptPt(11)
+                            
+                            # 标题行加粗
+                            if row_idx == 0:
+                                cell.text_frame.paragraphs[0].font.bold = True
                     
-                    try:
-                        available_height = max_content_height - current_top - Inches(0.2)
-                        max_width = Inches(9)
+                    current_top += height + Inches(0.3)  # 表格后留间距
+                    logger.debug("已添加表格: 第 %d 页, %d 行 x %d 列, 位置=%.2f英寸, 高度=%.2f英寸", 
+                                merge_page_num, rows, cols, (current_top - height - Inches(0.3)) / 914400, height / 914400)
+            
+            # 2. 添加图片（如果有，且空间足够）
+            # PPT标准页面高度7.5英寸,预留底部1.5英寸给文本,可用高度约5.5英寸
+            max_content_height = Inches(5.5)
+            
+            if merge_images and current_top < max_content_height:
+                # 如果有2张图片,左右并排显示
+                if len(merge_images) == 2:
+                    available_height = max_content_height - current_top
+                    available_width_per_img = Inches(4.5)  # 每张图片最大宽度4.5英寸
+                    
+                    img_positions = []  # 存储每张图片的位置和尺寸
+                    max_img_height = 0
+                    
+                    for img_idx, img_data in enumerate(merge_images):
+                        img_path = img_data["path"]
+                        if not img_path.exists():
+                            continue
                         
-                        img_width_px = img_data["width"]
-                        img_height_px = img_data["height"]
-                        img_width_inch = img_width_px / 96.0
-                        img_height_inch = img_height_px / 96.0
-                        
-                        width_ratio = max_width / Inches(img_width_inch)
-                        height_ratio = available_height / Inches(img_height_inch)
-                        scale_ratio = min(width_ratio, height_ratio, 1.0)
-                        
-                        final_width = Inches(img_width_inch * scale_ratio)
-                        final_height = Inches(img_height_inch * scale_ratio)
-                        left = (Inches(10) - final_width) / 2
-                        
+                        try:
+                            img_width_px = img_data["width"]
+                            img_height_px = img_data["height"]
+                            
+                            # 将像素转换为英寸
+                            img_width_inch = img_width_px / 96.0
+                            img_height_inch = img_height_px / 96.0
+                            
+                            # 计算缩放比例
+                            width_ratio = available_width_per_img / Inches(img_width_inch)
+                            height_ratio = available_height / Inches(img_height_inch)
+                            scale_ratio = min(width_ratio, height_ratio, 1.0)
+                            
+                            final_width = Inches(img_width_inch * scale_ratio)
+                            final_height = Inches(img_height_inch * scale_ratio)
+                            
+                            # 计算水平位置(左右并排)
+                            if img_idx == 0:
+                                left = Inches(0.5)  # 左侧图片
+                            else:
+                                left = Inches(5.5)  # 右侧图片
+                            
+                            img_positions.append({
+                                "path": img_path,
+                                "left": left,
+                                "top": current_top,
+                                "width": final_width,
+                                "height": final_height
+                            })
+                            
+                            max_img_height = max(max_img_height, final_height)
+                            
+                        except Exception as e:
+                            logger.warning("图片尺寸计算失败: %s", e)
+                    
+                    # 添加所有图片
+                    for img_pos in img_positions:
                         slide.shapes.add_picture(
-                            str(img_path),
-                            left=left,
-                            top=current_top,
-                            width=final_width,
-                            height=final_height
+                            str(img_pos["path"]),
+                            left=img_pos["left"],
+                            top=img_pos["top"],
+                            width=img_pos["width"],
+                            height=img_pos["height"]
                         )
+                        logger.debug("已添加图片: 第 %d 页 (左右并排)")
+                    
+                    current_top += max_img_height + Inches(0.3)
+                else:
+                    # 单张图片或多张图片,垂直排列
+                    for img_idx, img_data in enumerate(merge_images, start=1):
+                        if current_top >= max_content_height - Inches(0.5):
+                            logger.warning("空间不足，跳过剩余 %d 张图片", len(merge_images) - img_idx + 1)
+                            break
                         
-                        current_top += final_height + Inches(0.2)
-                        logger.debug("已添加图片: 第 %d 页 (%dx%d)", page_num, img_width_px, img_height_px)
-                    except Exception as img_error:
-                        logger.error("插入图片失败: %s", img_error, exc_info=True)
-        
-        # 3. 添加文本内容（如果有）
-        if page_text.strip() and not tables:
-            # 提取第一行作为标题（如果是纯大写或包含关键词）
-            lines = [line.strip() for line in page_text.split('\n') if line.strip()]
+                        img_path = img_data["path"]
+                        if not img_path.exists():
+                            continue
+                        
+                        try:
+                            available_height = max_content_height - current_top - Inches(0.2)
+                            max_width = Inches(9)
+                            
+                            img_width_px = img_data["width"]
+                            img_height_px = img_data["height"]
+                            img_width_inch = img_width_px / 96.0
+                            img_height_inch = img_height_px / 96.0
+                            
+                            width_ratio = max_width / Inches(img_width_inch)
+                            height_ratio = available_height / Inches(img_height_inch)
+                            scale_ratio = min(width_ratio, height_ratio, 1.0)
+                            
+                            final_width = Inches(img_width_inch * scale_ratio)
+                            final_height = Inches(img_height_inch * scale_ratio)
+                            left = (Inches(10) - final_width) / 2
+                            
+                            slide.shapes.add_picture(
+                                str(img_path),
+                                left=left,
+                                top=current_top,
+                                width=final_width,
+                                height=final_height
+                            )
+                            
+                            current_top += final_height + Inches(0.2)
+                            logger.debug("已添加图片: 第 %d 页 (%dx%d)", merge_page_num, img_width_px, img_height_px)
+                        except Exception as img_error:
+                            logger.error("插入图片失败: %s", img_error, exc_info=True)
             
-            # 检查是否有明显的标题行
-            first_line = lines[0] if lines else ""
-            if first_line and (first_line.isupper() or len(first_line) < 50):
-                # 使用第一行作为标题
-                title_frame.text = first_line
-                content_lines = lines[1:]
-            else:
-                content_lines = lines
-            
-            # 添加文本内容
-            if content_lines:
-                text_box = slide.shapes.add_textbox(
-                    Inches(0.5), current_top, Inches(9), Inches(4.0)
-                )
-                text_frame = text_box.text_frame
-                text_frame.word_wrap = True
+            # 3. 添加文本内容（如果有）
+            if merge_text.strip() and not merge_tables:
+                # 提取第一行作为标题（如果是纯大写或包含关键词）
+                lines = [line.strip() for line in merge_text.split('\n') if line.strip()]
                 
-                # 添加内容（限制行数，避免溢出）
-                max_lines = 15
-                for idx, line in enumerate(content_lines[:max_lines]):
-                    if idx == 0:
-                        text_frame.text = line
-                        text_frame.paragraphs[0].font.size = PptPt(14)
-                    else:
-                        p = text_frame.add_paragraph()
-                        p.text = line
-                        p.font.size = PptPt(12)
-                        p.level = 0
+                # 检查是否有明显的标题行
+                first_line = lines[0] if lines else ""
+                if first_line and (first_line.isupper() or len(first_line) < 50):
+                    # 使用第一行作为标题
+                    title_frame.text = first_line
+                    content_lines = lines[1:]
+                else:
+                    content_lines = lines
                 
-                current_top += Inches(4.2)
-                logger.debug("已添加文本内容: 第 %d 页, %d 行", page_num, min(len(content_lines), max_lines))
+                # 添加文本内容
+                if content_lines:
+                    text_box = slide.shapes.add_textbox(
+                        Inches(0.5), current_top, Inches(9), Inches(4.0)
+                    )
+                    text_frame = text_box.text_frame
+                    text_frame.word_wrap = True
+                    
+                    # 添加内容（限制行数，避免溢出）
+                    max_lines = 15
+                    for idx, line in enumerate(content_lines[:max_lines]):
+                        if idx == 0:
+                            text_frame.text = line
+                            text_frame.paragraphs[0].font.size = PptPt(14)
+                        else:
+                            p = text_frame.add_paragraph()
+                            p.text = line
+                            p.font.size = PptPt(12)
+                            p.level = 0
+                    
+                    current_top += Inches(4.2)
+                    logger.debug("已添加文本内容: 第 %d 页, %d 行", merge_page_num, min(len(content_lines), max_lines))
         
         pages_added += 1
-        has_text = 1 if (page_text.strip() and not tables and not images) else 0
-        logger.debug("已创建综合页面: 第 %d 页 (文本:%d, 表格:%d, 图片:%d)", 
-                    page_num, has_text, len(tables), len(images))
+        # 统计合并页面的内容
+        total_tables = sum(len(pages_with_content[p]["tables"]) for p in pages_to_merge)
+        total_images = sum(len(pages_with_content[p]["images"]) for p in pages_to_merge)
+        total_text = sum(1 if pages_with_content[p].get("text", "").strip() else 0 for p in pages_to_merge)
+        logger.debug("已创建综合页面: 第 %s 页 (文本:%d, 表格:%d, 图片:%d)", 
+                    "-".join(map(str, pages_to_merge)) if len(pages_to_merge) > 1 else str(pages_to_merge[0]),
+                    total_text, total_tables, total_images)
+        
+        i += 1  # 移动到下一个未处理的页面
     
     return pages_added
 
