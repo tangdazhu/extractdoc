@@ -467,31 +467,41 @@ def generate_ppt_document(
         else:
             logger.info("加载预定义模板: %s", tpl_path)
             presentation = Presentation(str(tpl_path))
-            # 删除模板中的示例页面（保留布局和主题）
+            # 删除模板中除第一页外的示例页面
             slide_count = len(presentation.slides)
             if slide_count > 1:
-                # 删除除第一页外的所有示例页面,保留第一页以维持主题样式
                 xml_slides = presentation.slides._sldIdLst
-                slides_to_delete = list(range(1, len(xml_slides)))  # 保留第一页(索引0)
-                for idx in reversed(slides_to_delete):  # 从后往前删除
+                slides_to_delete = list(range(1, len(xml_slides)))
+                for idx in reversed(slides_to_delete):
                     rId = xml_slides[idx].rId
                     presentation.part.drop_rel(rId)
                     del xml_slides[idx]
-                logger.debug("已清除模板示例页面(保留第一页)，主题样式已保留")
+                logger.debug("已清除模板示例页面(保留第一页)")
     else:
         presentation = Presentation()
 
-    # 4. 创建标题页
+    # 4. 修改模板第一页的内容为实际文档内容
     title_text = structure.get("title", template_config.get("title", "文档演示"))
     subtitle_text = structure.get("subtitle", template_config.get("subtitle", "AI 智能生成"))
     
-    title_layout = presentation.slide_layouts[0]
-    title_slide = presentation.slides.add_slide(title_layout)
-    title_slide.shapes.title.text = title_text
-    if len(title_slide.placeholders) > 1:
-        title_slide.placeholders[1].text = subtitle_text
-    
-    logger.info("已创建标题页: %s", title_text)
+    if len(presentation.slides) > 0:
+        # 使用模板第一页,只修改文字内容
+        title_slide = presentation.slides[0]
+        # 修改标题
+        if title_slide.shapes.title:
+            title_slide.shapes.title.text = title_text
+        # 修改副标题
+        if len(title_slide.placeholders) > 1:
+            title_slide.placeholders[1].text = subtitle_text
+        logger.info("已修改模板第一页内容为: %s", title_text)
+    else:
+        # 如果没有模板页面,创建新的标题页
+        title_layout = presentation.slide_layouts[0]
+        title_slide = presentation.slides.add_slide(title_layout)
+        title_slide.shapes.title.text = title_text
+        if len(title_slide.placeholders) > 1:
+            title_slide.placeholders[1].text = subtitle_text
+        logger.info("已创建标题页: %s", title_text)
     
     # 如果是PDF且第1页有小表格(<=3行),将其添加到标题页
     if is_pdf and multimodal_data:
