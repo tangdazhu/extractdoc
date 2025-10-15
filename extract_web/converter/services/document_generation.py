@@ -468,16 +468,16 @@ def generate_ppt_document(
             logger.info("加载预定义模板: %s", tpl_path)
             presentation = Presentation(str(tpl_path))
             # 删除模板中的示例页面（保留布局和主题）
-            # 注意：不删除所有页面，保留第一页以维持主题样式
             slide_count = len(presentation.slides)
-            if slide_count > 0:
-                # 只删除示例页面，保留布局定义
+            if slide_count > 1:
+                # 删除除第一页外的所有示例页面,保留第一页以维持主题样式
                 xml_slides = presentation.slides._sldIdLst
-                while len(xml_slides) > 0:
-                    rId = xml_slides[0].rId
+                slides_to_delete = list(range(1, len(xml_slides)))  # 保留第一页(索引0)
+                for idx in reversed(slides_to_delete):  # 从后往前删除
+                    rId = xml_slides[idx].rId
                     presentation.part.drop_rel(rId)
-                    del xml_slides[0]
-                logger.debug("已清除模板示例页面，保留布局和主题")
+                    del xml_slides[idx]
+                logger.debug("已清除模板示例页面(保留第一页)，主题样式已保留")
     else:
         presentation = Presentation()
 
@@ -613,7 +613,12 @@ def _generate_ppt_from_pdf_pages(
     Returns:
         生成的页面数量
     """
-    blank_layout = presentation.slide_layouts[6]  # 空白布局
+    # 使用模板的内容布局(通常是索引1或5),而非空白布局(索引6)
+    # 索引1通常是"标题和内容"布局,有模板样式
+    try:
+        content_layout = presentation.slide_layouts[1]  # 标题和内容布局
+    except IndexError:
+        content_layout = presentation.slide_layouts[0]  # 回退到标题布局
     pages_added = 0
     
     # 按页面分组
@@ -769,7 +774,7 @@ def _generate_ppt_from_pdf_pages(
         pages_to_merge = [page_num]
         
         # 创建一个PPT页面,包含合并后的所有内容
-        slide = presentation.slides.add_slide(blank_layout)
+        slide = presentation.slides.add_slide(content_layout)
         
         # 添加标题(如果合并了多页,显示页面范围)
         title_box = slide.shapes.add_textbox(
