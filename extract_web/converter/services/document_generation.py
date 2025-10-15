@@ -786,17 +786,36 @@ def _generate_ppt_from_pdf_pages(
         # 创建一个PPT页面,包含合并后的所有内容
         slide = presentation.slides.add_slide(content_layout)
         
-        # 添加标题(如果合并了多页,显示页面范围)
-        title_box = slide.shapes.add_textbox(
-            Inches(0.5), Inches(0.3), Inches(9), Inches(0.5)
-        )
-        title_frame = title_box.text_frame
-        if len(pages_to_merge) > 1:
-            title_frame.text = f"第 {pages_to_merge[0]}-{pages_to_merge[-1]} 页"
-        else:
-            title_frame.text = f"第 {page_num} 页"
-        title_frame.paragraphs[0].font.size = PptPt(24)
-        title_frame.paragraphs[0].font.bold = True
+        # 从PDF文本中提取页面标题
+        page_title = None
+        if page_text:
+            lines = [line.strip() for line in page_text.split('\n') if line.strip()]
+            if lines:
+                # 查找可能的标题(长度<50字符,不包含过多标点)
+                for line in lines[:5]:  # 检查前5行
+                    # 过滤掉页眉页脚特征的文本
+                    line_lower = line.lower()
+                    is_header_footer = (
+                        'proprietary' in line_lower or
+                        'confidential' in line_lower or
+                        'content' in line_lower or
+                        line.startswith('第') and '页' in line or  # "第X页"
+                        line.isdigit() or  # 纯数字(页码)
+                        len(line) < 3  # 太短
+                    )
+                    
+                    if not is_header_footer and len(line) < 50 and line.count(',') < 3 and line.count('，') < 3:
+                        page_title = line
+                        break
+        
+        # 使用模板的标题占位符(而不是创建新textbox)
+        if slide.shapes.title:
+            if page_title:
+                slide.shapes.title.text = page_title
+            elif len(pages_to_merge) > 1:
+                slide.shapes.title.text = f"第 {pages_to_merge[0]}-{pages_to_merge[-1]} 页"
+            else:
+                slide.shapes.title.text = f"第 {page_num} 页"
         
         current_top = Inches(1.0)  # 当前垂直位置
         
@@ -951,8 +970,9 @@ def _generate_ppt_from_pdf_pages(
                 # 检查是否有明显的标题行
                 first_line = lines[0] if lines else ""
                 if first_line and (first_line.isupper() or len(first_line) < 50):
-                    # 使用第一行作为标题
-                    title_frame.text = first_line
+                    # 使用第一行作为标题(如果之前没有设置标题)
+                    if slide.shapes.title and not slide.shapes.title.text:
+                        slide.shapes.title.text = first_line
                     content_lines = lines[1:]
                 else:
                     content_lines = lines
