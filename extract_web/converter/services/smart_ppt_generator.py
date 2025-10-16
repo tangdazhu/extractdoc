@@ -280,6 +280,44 @@ class SmartPPTGenerator:
         if not valid_images:
             return current_top
         
+        # 过滤多页重复的装饰图
+        # 统计每张图片在多少页出现
+        all_images = multimodal_data.get("images", [])
+        image_page_count = {}
+        for img in all_images:
+            img_path = str(img.get("path", ""))
+            if img_path:
+                # 提取图片的xref作为唯一标识
+                img_name = img_path.split('/')[-1] if '/' in img_path else img_path.split('\\')[-1]
+                # 提取xref编号(如page1_img1.jpeg中的img1)
+                if '_img' in img_name:
+                    xref_part = img_name.split('_img')[1].split('.')[0]
+                    img_key = f"img{xref_part}"
+                    image_page_count[img_key] = image_page_count.get(img_key, 0) + 1
+        
+        # 过滤在3页以上出现的图片(装饰图)
+        filtered_images = []
+        for img in valid_images:
+            img_path = str(img.get("path", ""))
+            img_name = img_path.split('/')[-1] if '/' in img_path else img_path.split('\\')[-1]
+            
+            if '_img' in img_name:
+                xref_part = img_name.split('_img')[1].split('.')[0]
+                img_key = f"img{xref_part}"
+                repeat_count = image_page_count.get(img_key, 1)
+                
+                # 如果图片在3页以上重复出现,跳过
+                if repeat_count >= 3:
+                    logger.debug("跳过第%d页的多页重复装饰图: %s (出现%d次)", page_num, img_name, repeat_count)
+                    continue
+            
+            filtered_images.append(img)
+        
+        valid_images = filtered_images
+        
+        if not valid_images:
+            return current_top
+        
         # 如果有2张图片,左右并排
         if len(valid_images) == 2:
             available_height = max_height - current_top

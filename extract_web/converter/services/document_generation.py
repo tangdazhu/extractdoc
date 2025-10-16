@@ -123,13 +123,43 @@ def _extract_pdf_multimodal(pdf_path: Path, temp_dir: Path) -> Dict[str, any]:
                             logger.debug("检测到空表头行,使用第二行作为表头,页面=%d", page_num)
                             table = table[1:]  # 跳过空的第一行
                         
+                        # 处理单元格中的换行符(表头和数据可能在同一单元格)
+                        processed_table = []
+                        for row_idx, row in enumerate(table):
+                            # 检查是否有单元格包含换行符
+                            has_newline = any('\n' in str(cell) for cell in row if cell)
+                            
+                            if has_newline and row_idx == 0:
+                                # 第一行包含换行符,可能是表头和数据合并
+                                # 尝试分离表头和数据
+                                header_row = []
+                                data_row = []
+                                for cell in row:
+                                    if cell and '\n' in str(cell):
+                                        parts = str(cell).split('\n', 1)
+                                        header_row.append(parts[0].strip())
+                                        data_row.append(parts[1].strip() if len(parts) > 1 else '')
+                                    else:
+                                        header_row.append(str(cell) if cell else '')
+                                        data_row.append('')
+                                
+                                # 检查是否成功分离
+                                if any(data_row):
+                                    processed_table.append(header_row)
+                                    processed_table.append(data_row)
+                                    logger.debug("分离表头和数据行,页面=%d", page_num)
+                                else:
+                                    processed_table.append(row)
+                            else:
+                                processed_table.append(row)
+                        
                         result["tables"].append({
                             "page": page_num,
-                            "data": table
+                            "data": processed_table
                         })
                         logger.debug("提取表格: 页面=%d, 行数=%d, 列数=%d, 首行=%s", 
-                                   page_num, len(table), len(table[0]) if table else 0, 
-                                   table[0] if table else [])
+                                   page_num, len(processed_table), len(processed_table[0]) if processed_table else 0, 
+                                   processed_table[0] if processed_table else [])
             
             result["text"] = "\n".join(text_parts)
         
