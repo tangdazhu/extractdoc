@@ -375,28 +375,67 @@ class SmartPPTGenerator:
         if not lines:
             return current_top
         
-        # 添加文本框
-        text_box = slide.shapes.add_textbox(
-            Inches(0.5),
-            current_top,
-            Inches(9.0),
-            max_height - current_top
-        )
-        text_frame = text_box.text_frame
+        # 过滤掉页眉页脚
+        filtered_lines = []
+        for line in lines:
+            line_lower = line.lower()
+            # 跳过页眉页脚
+            if 'proprietary and confidential' in line_lower:
+                continue
+            if line.isdigit() and len(line) <= 2:  # 跳过单独的页码
+                continue
+            filtered_lines.append(line)
+        
+        if not filtered_lines:
+            return current_top
+        
+        # 查找内容占位符
+        body_shape = None
+        for shape in slide.shapes:
+            if shape.has_text_frame and shape != slide.shapes.title:
+                # 检查是否是内容占位符
+                if hasattr(shape, 'placeholder_format'):
+                    body_shape = shape
+                    break
+        
+        # 如果找到占位符,使用它;否则创建文本框
+        if body_shape:
+            text_frame = body_shape.text_frame
+            text_frame.clear()
+        else:
+            text_box = slide.shapes.add_textbox(
+                Inches(0.5),
+                current_top,
+                Inches(9.0),
+                max_height - current_top
+            )
+            text_frame = text_box.text_frame
+        
         text_frame.word_wrap = True
         
-        # 添加内容(限制行数)
-        max_lines = 15
-        for idx, line in enumerate(lines[:max_lines]):
+        # 智能识别列表结构
+        for idx, line in enumerate(filtered_lines):
+            # 检查是否是编号列表(1. 2. 3. 等)
+            is_numbered = line and len(line) > 2 and line[0].isdigit() and line[1] in '.、'
+            # 检查是否是子项(以•或-开头,或有缩进)
+            is_bullet = line.startswith('•') or line.startswith('-') or line.startswith('  ')
+            
             if idx == 0:
                 text_frame.text = line
-                text_frame.paragraphs[0].font.size = PptPt(14)
+                p = text_frame.paragraphs[0]
             else:
                 p = text_frame.add_paragraph()
                 p.text = line
+            
+            # 设置层级
+            if is_bullet or (is_numbered and '  ' in line):
+                p.level = 1  # 子项
+                p.font.size = PptPt(12)
+            else:
+                p.level = 0  # 主项
                 p.font.size = PptPt(14)
         
-        logger.debug("已添加文本内容: 第%d页, %d行", page_num, min(len(lines), max_lines))
+        logger.debug("已添加文本内容: 第%d页, %d行", page_num, len(filtered_lines))
         
         return max_height  # 文本占满剩余空间
     

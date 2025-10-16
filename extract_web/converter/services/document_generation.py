@@ -114,10 +114,22 @@ def _extract_pdf_multimodal(pdf_path: Path, temp_dir: Path) -> Dict[str, any]:
                 tables = page.extract_tables()
                 for table in tables:
                     if table and len(table) > 1:  # 至少有标题行和一行数据
+                        # 检查第一行是否为空(可能是纯背景色的表头)
+                        first_row = table[0]
+                        first_row_empty = all(not cell or not str(cell).strip() for cell in first_row)
+                        
+                        if first_row_empty and len(table) > 2:
+                            # 第一行为空,使用第二行作为表头
+                            logger.debug("检测到空表头行,使用第二行作为表头,页面=%d", page_num)
+                            table = table[1:]  # 跳过空的第一行
+                        
                         result["tables"].append({
                             "page": page_num,
                             "data": table
                         })
+                        logger.debug("提取表格: 页面=%d, 行数=%d, 列数=%d, 首行=%s", 
+                                   page_num, len(table), len(table[0]) if table else 0, 
+                                   table[0] if table else [])
             
             result["text"] = "\n".join(text_parts)
         
