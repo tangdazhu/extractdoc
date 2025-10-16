@@ -1,0 +1,36 @@
+# AI驱动的PPT生成配置
+
+# AI模型配置
+ai_model:
+  provider: "dashscope"
+  model: "qwen-max"
+  temperature: 0.1
+  max_tokens: 4000
+
+# 生成偏好
+generation_preferences:
+  # 内容偏好
+  prefer_original_title: true      # 优先使用原文标题
+  prefer_concise_content: false    # 不简化内容,保留完整性
+  skip_low_importance: false       # 不跳过低重要度内容
+  
+  # 布局偏好
+  max_elements_per_slide: 5        # 每页最多元素数
+  prefer_layouts:                  # 布局优先级
+    - title_and_table
+    - title_and_image
+    - title_and_text
+
+# 物理布局配置(用于实际渲染)
+physical_layout:
+  slide_size:
+    width: 10.0   # 英寸
+    height: 7.5
+  
+  margins: 0.5
+  spacing: 0.3
+  
+  font_sizes:
+    title: 24
+    body: 14
+    table: 11

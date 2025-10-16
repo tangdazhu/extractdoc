@@ -21,6 +21,9 @@ from PIL import Image
 import dashscope
 from dashscope import Generation
 
+from .ai_document_analyzer import AIDocumentAnalyzer
+from .smart_ppt_generator import SmartPPTGenerator
+
 logger = logging.getLogger("converter")
 
 try:
@@ -438,112 +441,104 @@ def generate_ppt_document(
     multimodal_data = None
     
     if is_pdf:
-        logger.info("检测到 PDF 文件，使用页面保留模式生成PPT...")
+        logger.info("检测到 PDF 文件，使用AI智能分析模式...")
         multimodal_data = _extract_pdf_multimodal(source_file_path, temp_dir)
         text = multimodal_data["text"]
-        
-        # 使用 AI 提取标题和副标题
-        logger.info("使用 AI 提取文档标题...")
-        structure = _analyze_content_with_ai(text, request_id)
     else:
         logger.info("提取文本内容...")
         text = _collect_source_text(source_file_path, source_url)
         
         if not text:
             raise ValueError("未能从输入源提取到有效文本。")
+    
+    # 2. 使用AI分析文档结构(所有文件类型统一使用AI)
+    logger.info("使用AI分析文档结构...")
+    
+    # 初始化AI分析器
+    ai_analyzer = AIDocumentAnalyzer(model="qwen-max")
+    
+    # 如果是PDF,使用AI分析整体结构
+    if is_pdf and multimodal_data:
+        document_structure = ai_analyzer.analyze_document_structure(multimodal_data, request_id)
         
-        # 非 PDF 文件使用 AI 分析模式
-        logger.info("使用 AI 分析文档结构...")
+        # 分析每一页的内容
+        page_analyses = []
+        for page_data in multimodal_data.get("pages", []):
+            page_num = page_data["page"]
+            page_text = page_data.get("text", "")
+            page_tables = [t for t in multimodal_data.get("tables", []) if t["page"] == page_num]
+            page_images = [i for i in multimodal_data.get("images", []) if i["page"] == page_num]
+            
+            page_analysis = ai_analyzer.analyze_page_content(
+                page_num, page_text, page_tables, page_images, request_id
+            )
+            page_analyses.append(page_analysis)
+    else:
+        # 非PDF文件,使用传统AI分析
         structure = _analyze_content_with_ai(text, request_id)
+        document_structure = None
+        page_analyses = None
     
     # 3. 加载预定义模板
     template_path = template_config.get("template_path")
     if template_path:
-        # 转换为绝对路径
         tpl_path = Path(settings.BASE_DIR).parent / template_path
         if not tpl_path.exists():
             logger.warning("PPT 模板 %s 不存在，使用空白模板。", tpl_path)
-            presentation = Presentation()
-        else:
-            logger.info("加载预定义模板: %s", tpl_path)
+            tpl_path = None
+    else:
+        tpl_path = None
+    
+    # 4. 根据文件类型选择生成模式
+    if is_pdf and multimodal_data and document_structure and page_analyses:
+        # PDF 文件：使用AI智能生成器
+        logger.info("使用AI智能生成器生成PPT...")
+        
+        smart_generator = SmartPPTGenerator()
+        presentation = smart_generator.generate_ppt(
+            tpl_path if tpl_path else Path(settings.BASE_DIR).parent / "config" / "templates" / "academic_template.pptx",
+            document_structure,
+            page_analyses,
+            multimodal_data,
+            request_id
+        )
+    else:
+        # 非 PDF 文件：传统AI分析模式
+        logger.info("使用传统AI分析模式生成PPT...")
+        
+        # 加载模板
+        if tpl_path and tpl_path.exists():
             presentation = Presentation(str(tpl_path))
-            # 删除模板中除第一页外的示例页面
-            slide_count = len(presentation.slides)
-            if slide_count > 1:
+            # 删除模板示例页
+            if len(presentation.slides) > 1:
                 xml_slides = presentation.slides._sldIdLst
-                slides_to_delete = list(range(1, len(xml_slides)))
-                for idx in reversed(slides_to_delete):
+                for idx in reversed(range(1, len(xml_slides))):
                     rId = xml_slides[idx].rId
                     presentation.part.drop_rel(rId)
                     del xml_slides[idx]
-                logger.debug("已清除模板示例页面(保留第一页)")
-    else:
-        presentation = Presentation()
-
-    # 4. 修改模板第一页的内容为实际文档内容
-    title_text = structure.get("title", template_config.get("title", "文档演示"))
-    subtitle_text = structure.get("subtitle", template_config.get("subtitle", "AI 智能生成"))
-    
-    if len(presentation.slides) > 0:
-        # 使用模板第一页,只修改文字内容
-        title_slide = presentation.slides[0]
-        # 修改标题
-        if title_slide.shapes.title:
+        else:
+            presentation = Presentation()
+        
+        # 创建标题页
+        title_text = structure.get("title", template_config.get("title", "文档演示"))
+        subtitle_text = structure.get("subtitle", template_config.get("subtitle", "AI 智能生成"))
+        
+        if len(presentation.slides) > 0:
+            title_slide = presentation.slides[0]
+            if title_slide.shapes.title:
+                title_slide.shapes.title.text = title_text
+            if len(title_slide.placeholders) > 1:
+                title_slide.placeholders[1].text = subtitle_text
+        else:
+            title_layout = presentation.slide_layouts[0]
+            title_slide = presentation.slides.add_slide(title_layout)
             title_slide.shapes.title.text = title_text
-        # 修改副标题
-        if len(title_slide.placeholders) > 1:
-            title_slide.placeholders[1].text = subtitle_text
-        logger.info("已修改模板第一页内容为: %s", title_text)
-    else:
-        # 如果没有模板页面,创建新的标题页
-        title_layout = presentation.slide_layouts[0]
-        title_slide = presentation.slides.add_slide(title_layout)
-        title_slide.shapes.title.text = title_text
-        if len(title_slide.placeholders) > 1:
-            title_slide.placeholders[1].text = subtitle_text
+            if len(title_slide.placeholders) > 1:
+                title_slide.placeholders[1].text = subtitle_text
+        
         logger.info("已创建标题页: %s", title_text)
-    
-    # 如果是PDF且第1页有小表格(<=3行),将其添加到标题页
-    if is_pdf and multimodal_data:
-        first_page_tables = [t for t in multimodal_data.get("tables", []) if t["page"] == 1]
-        if first_page_tables and len(first_page_tables) == 1:
-            table_data = first_page_tables[0]["data"]
-            if len(table_data) <= 3:
-                # 在标题页底部添加小表格
-                from pptx.util import Inches, Pt as PptPt
-                rows = len(table_data)
-                cols = len(table_data[0]) if table_data else 0
-                
-                if rows > 0 and cols > 0:
-                    left = Inches(3.0)  # 居中
-                    top = Inches(5.5)   # 底部
-                    width = Inches(4.0)
-                    height = Inches(0.4 * rows)
-                    
-                    table = title_slide.shapes.add_table(rows, cols, left, top, width, height).table
-                    
-                    # 填充表格数据
-                    for row_idx, row_data in enumerate(table_data):
-                        for col_idx, cell_value in enumerate(row_data):
-                            cell = table.cell(row_idx, col_idx)
-                            cell.text = str(cell_value) if cell_value else ""
-                            cell.text_frame.paragraphs[0].font.size = PptPt(11)
-                            if row_idx == 0:
-                                cell.text_frame.paragraphs[0].font.bold = True
-                    
-                    logger.info("已将第1页小表格添加到标题页")
-
-    # 5. 根据文件类型选择生成模式
-    if is_pdf and multimodal_data:
-        # PDF 文件：页面保留模式
-        logger.info("使用页面保留模式生成PPT...")
-        pages_added = _generate_ppt_from_pdf_pages(
-            presentation, multimodal_data, template_config
-        )
-        logger.info("已生成 %d 页内容（页面保留模式）", pages_added)
-    else:
-        # 非 PDF 文件：AI 分析模式
-        logger.info("使用 AI 分析模式生成PPT...")
+        
+        # 创建内容页
         sections = structure.get("sections", [])
         bullet_layout_index = template_config.get("bullet_layout_index", 1)
         try:
@@ -560,11 +555,9 @@ def generate_ppt_document(
             
             slide = presentation.slides.add_slide(body_layout)
             
-            # 设置章节标题
             if slide.shapes.title:
                 slide.shapes.title.text = section_title
             
-            # 查找内容占位符
             body_shape = None
             for shape in slide.shapes:
                 if shape.has_text_frame and shape != slide.shapes.title:
@@ -575,7 +568,6 @@ def generate_ppt_document(
                 logger.warning("幻灯片 %d 未找到内容占位符，已跳过。", idx)
                 continue
             
-            # 填充要点
             text_frame = body_shape.text_frame
             text_frame.clear()
             
