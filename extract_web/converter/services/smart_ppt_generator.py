@@ -197,23 +197,14 @@ class SmartPPTGenerator:
         for element in page_analysis.get("elements", []):
             element_type = element.get("type")
             
-            # 对于图片元素,基于尺寸进行二次判断(覆盖AI的错误判断)
+            # 完全信任AI判断,不再覆盖
+            # 只输出AI的判断结果用于调试
             if element_type == "image":
                 size_str = element.get("size", "")
-                # 解析尺寸字符串(如"1263x1153")
-                if "x" in size_str:
-                    try:
-                        width, height = map(int, size_str.split("x"))
-                        # 只过滤1920x1080的全屏背景图,其他图片都保留
-                        if width == 1920 and height == 1080:
-                            logger.debug("跳过元素: image (原因: 全屏背景图 %s)", size_str)
-                            continue
-                        else:
-                            # 覆盖AI判断,强制保留内容图
-                            element["should_keep"] = True
-                            logger.debug("保留图片元素: %s (尺寸判断覆盖AI)", size_str)
-                    except ValueError:
-                        pass
+                should_keep = element.get("should_keep", True)
+                reason = element.get("reason", "未提供原因")
+                logger.debug("AI判断图片元素: %s, should_keep=%s, reason=%s", 
+                           size_str, should_keep, reason)
             
             # 检查是否应该保留该元素
             if not element.get("should_keep", True):
@@ -236,52 +227,13 @@ class SmartPPTGenerator:
         
         # 处理image元素:只在AI布局包含image且有剩余空间时添加
         layout = page_analysis.get("suggested_layout", "")
-        theme = page_analysis.get("theme", "").lower()
-        page_title = title.lower()
         
-        # 判断是否应该显示图片:基于页面主题
-        should_show_images = False
-        if "image" in layout and current_top < max_height:
-            # 组合文本用于匹配
-            combined_text = f"{theme} {page_title}"
-            
-            # 只在特定主题的页面显示架构图
-            # 使用组合关键词避免误匹配(如"模型"会匹配到"大语言模型基础")
-            image_related_patterns = [
-                "background",
-                "架构",
-                "模型分类",
-                "模型架构", 
-                "流程图",
-                "transform",
-                "encoder",
-                "decoder"
-            ]
-            
-            # 排除关键词:包含这些词的页面不显示图片
-            exclude_patterns = [
-                "基础及实践",
-                "实践案例",
-                "应用案例"
-            ]
-            
-            # 检查是否匹配排除模式
-            is_excluded = any(pattern in combined_text for pattern in exclude_patterns)
-            
-            if not is_excluded:
-                # 检查是否匹配图片相关模式
-                if any(pattern in combined_text for pattern in image_related_patterns):
-                    should_show_images = True
-                    logger.debug("第%d页主题相关,允许显示图片: theme=%s, title=%s", page_num, theme, title)
-                else:
-                    logger.debug("第%d页主题不相关,跳过图片: theme=%s, title=%s", page_num, theme, title)
-            else:
-                logger.debug("第%d页匹配排除规则,跳过图片: theme=%s, title=%s", page_num, theme, title)
+        # 完全信任AI判断,不再使用硬编码规则
+        # image_elements 中的图片已经过AI的 should_keep 判断
+        logger.debug("第%d页图片处理检查: image_elements=%d, layout=%s, current_top=%.2f", 
+                    page_num, len(image_elements), layout, current_top)
         
-        logger.debug("第%d页图片处理检查: image_elements=%d, layout=%s, should_show=%s, current_top=%.2f", 
-                    page_num, len(image_elements), layout, should_show_images, current_top)
-        
-        if image_elements and should_show_images:
+        if image_elements and "image" in layout and current_top < max_height:
             logger.debug("尝试为第%d页添加图片(布局=%s,剩余空间=%.2f)", page_num, layout, max_height - current_top)
             current_top = self._add_images(slide, page_num, multimodal_data, current_top, max_height)
             has_content = True
