@@ -191,37 +191,123 @@ class SmartPPTGenerator:
         
         has_content = False  # 跟踪是否添加了任何内容
         
+        # 先处理table和text元素,最后处理image
+        image_elements = []
+        
         for element in page_analysis.get("elements", []):
+            element_type = element.get("type")
+            
+            # 对于图片元素,基于尺寸进行二次判断(覆盖AI的错误判断)
+            if element_type == "image":
+                size_str = element.get("size", "")
+                # 解析尺寸字符串(如"1263x1153")
+                if "x" in size_str:
+                    try:
+                        width, height = map(int, size_str.split("x"))
+                        # 只过滤1920x1080的全屏背景图,其他图片都保留
+                        if width == 1920 and height == 1080:
+                            logger.debug("跳过元素: image (原因: 全屏背景图 %s)", size_str)
+                            continue
+                        else:
+                            # 覆盖AI判断,强制保留内容图
+                            element["should_keep"] = True
+                            logger.debug("保留图片元素: %s (尺寸判断覆盖AI)", size_str)
+                    except ValueError:
+                        pass
+            
+            # 检查是否应该保留该元素
             if not element.get("should_keep", True):
-                logger.debug("跳过元素: %s (原因: %s)", element.get("type"), element.get("reason"))
+                logger.debug("跳过元素: %s (原因: %s)", element_type, element.get("reason"))
                 continue
             
             if current_top >= max_height:
                 logger.warning("第%d页空间不足,跳过剩余元素", page_num)
                 break
             
-            element_type = element.get("type")
-            
             if element_type == "table":
                 current_top = self._add_table(slide, page_num, multimodal_data, current_top)
-                has_content = True
-            elif element_type == "image":
-                # 检查是否为背景图
-                if page_num in bg_image_pages:
-                    logger.debug("跳过第%d页的背景图", page_num)
-                    continue
-                current_top = self._add_images(slide, page_num, multimodal_data, current_top, max_height)
                 has_content = True
             elif element_type == "text":
                 current_top = self._add_text(slide, page_num, multimodal_data, current_top, max_height)
                 has_content = True
+            elif element_type == "image":
+                # 收集image元素,稍后处理
+                image_elements.append(element)
         
-        # 如果没有添加任何内容,尝试添加文本
-        if not has_content:
-            logger.warning("第%d页没有添加任何元素,尝试添加文本内容", page_num)
-            page_data = next((p for p in multimodal_data.get("pages", []) if p["page"] == page_num), None)
-            if page_data and page_data.get("text", "").strip():
-                current_top = self._add_text(slide, page_num, multimodal_data, current_top, max_height)
+        # 处理image元素:只在AI布局包含image且有剩余空间时添加
+        layout = page_analysis.get("suggested_layout", "")
+        theme = page_analysis.get("theme", "").lower()
+        page_title = title.lower()
+        
+        # 判断是否应该显示图片:基于页面主题
+        should_show_images = False
+        if "image" in layout and current_top < max_height:
+            # 组合文本用于匹配
+            combined_text = f"{theme} {page_title}"
+            
+            # 只在特定主题的页面显示架构图
+            # 使用组合关键词避免误匹配(如"模型"会匹配到"大语言模型基础")
+            image_related_patterns = [
+                "background",
+                "架构",
+                "模型分类",
+                "模型架构", 
+                "流程图",
+                "transform",
+                "encoder",
+                "decoder"
+            ]
+            
+            # 排除关键词:包含这些词的页面不显示图片
+            exclude_patterns = [
+                "基础及实践",
+                "实践案例",
+                "应用案例"
+            ]
+            
+            # 检查是否匹配排除模式
+            is_excluded = any(pattern in combined_text for pattern in exclude_patterns)
+            
+            if not is_excluded:
+                # 检查是否匹配图片相关模式
+                if any(pattern in combined_text for pattern in image_related_patterns):
+                    should_show_images = True
+                    logger.debug("第%d页主题相关,允许显示图片: theme=%s, title=%s", page_num, theme, title)
+                else:
+                    logger.debug("第%d页主题不相关,跳过图片: theme=%s, title=%s", page_num, theme, title)
+            else:
+                logger.debug("第%d页匹配排除规则,跳过图片: theme=%s, title=%s", page_num, theme, title)
+        
+        logger.debug("第%d页图片处理检查: image_elements=%d, layout=%s, should_show=%s, current_top=%.2f", 
+                    page_num, len(image_elements), layout, should_show_images, current_top)
+        
+        if image_elements and should_show_images:
+            logger.debug("尝试为第%d页添加图片(布局=%s,剩余空间=%.2f)", page_num, layout, max_height - current_top)
+            current_top = self._add_images(slide, page_num, multimodal_data, current_top, max_height)
+            has_content = True
+        
+        # 添加文本内容(即使已经添加了图片)
+        page_data = next((p for p in multimodal_data.get("pages", []) if p["page"] == page_num), None)
+        page_text = page_data.get("text", "") if page_data else ""
+        
+        if page_text.strip() and current_top < max_height:
+            logger.debug("为第%d页添加文本内容(%d字符)", page_num, len(page_text.strip()))
+            current_top = self._add_text(slide, page_num, multimodal_data, current_top, max_height)
+            has_content = True
+        
+        # 如果仍然没有添加任何内容,尝试兜底(添加图片)
+        if not has_content and current_top < max_height:
+            logger.warning("第%d页没有添加任何元素,尝试添加图片作为兜底", page_num)
+            
+            page_images = [i for i in multimodal_data.get("images", []) if i["page"] == page_num]
+            valid_imgs = [img for img in page_images if img.get("path") and img["path"].exists()]
+            # 过滤背景图
+            content_imgs = [img for img in valid_imgs 
+                          if not (img.get("width") == 1920 and img.get("height") == 1080)]
+            
+            if content_imgs:
+                logger.debug("兜底:为第%d页添加图片(%d张)", page_num, len(content_imgs))
+                current_top = self._add_images(slide, page_num, multimodal_data, current_top, max_height)
         
         logger.debug("已创建内容页: 第%d页 - %s", page_num, title)
     
@@ -295,23 +381,22 @@ class SmartPPTGenerator:
                     img_key = f"img{xref_part}"
                     image_page_count[img_key] = image_page_count.get(img_key, 0) + 1
         
-        # 过滤在3页以上出现的图片(装饰图)
+        # 过滤装饰图
         filtered_images = []
         for img in valid_images:
             img_path = str(img.get("path", ""))
             img_name = img_path.split('/')[-1] if '/' in img_path else img_path.split('\\')[-1]
+            img_width = img.get("width", 0)
+            img_height = img.get("height", 0)
             
-            if '_img' in img_name:
-                xref_part = img_name.split('_img')[1].split('.')[0]
-                img_key = f"img{xref_part}"
-                repeat_count = image_page_count.get(img_key, 1)
-                
-                # 如果图片在3页以上重复出现,跳过
-                if repeat_count >= 3:
-                    logger.debug("跳过第%d页的多页重复装饰图: %s (出现%d次)", page_num, img_name, repeat_count)
-                    continue
+            # 只过滤1920x1080的全屏背景图
+            if img_width == 1920 and img_height == 1080:
+                logger.debug("跳过第%d页的全屏背景图: %s (%dx%d)", page_num, img_name, img_width, img_height)
+                continue
             
+            # 保留其他所有图片(包括1263x1153和1246x707)
             filtered_images.append(img)
+            logger.debug("保留第%d页的图片: %s (%dx%d)", page_num, img_name, img_width, img_height)
         
         valid_images = filtered_images
         
