@@ -287,6 +287,7 @@ class AIDocumentAnalyzer:
    - **特别注意**:如果列表项格式为"• Encoder Bert 架构",这是错误的
    - 正确格式应该是:"• Encoder 架构:... 典型模型如 Bert"
    - 如果发现此类问题,在 formatted_content 字段中提供重新组织后的文本
+   - **重要**:重新组织时必须保留所有原始内容,包括标题、段落、列表项等,只调整顺序,不要删除任何内容
    - 如果文本顺序正常,不需要提供 formatted_content 字段
 4. 如果有表格,表格的作用是什么? (元数据表/数据表/内容表)
 5. 如果有图片,图片是否应该在PPT中显示? **请基于以下原则智能判断**:
@@ -341,6 +342,30 @@ class AIDocumentAnalyzer:
   
 - 不要因为"多页重复"就过滤内容图,只过滤装饰性背景图
 
+【文本重组示例】
+如果原始文本是:
+```
+Transform
+模型分类
+• Encoder Bert
+架构：不适合做生成...典型模型如 。
+• Decoder LLM GPT Llama
+架构：适合生成任务...
+```
+
+正确的 formatted_content 应该是:
+```
+Transform 模型分类
+• Encoder 架构：不适合做生成，在任务理解上性价比较高，如句子分类、命名实体识别等。典型模型如 Bert。
+• Decoder 架构：适合生成任务，大模型 LLM 的主流结构，典型模型有 GPT、Llama 等。
+• Encoder-Decoder 架构：理论上结合了 GPT 和 Bert 的优点，训练成本很高，典型模型是 T5、BART。
+```
+
+注意:
+1. 保留"Transform 模型分类"标题
+2. 将关键词(Bert, LLM, GPT, Llama)移到正确位置
+3. 保持完整的列表结构
+
 【输出格式】
 必须返回严格的JSON格式,不要有任何额外说明:
 {{
@@ -349,7 +374,7 @@ class AIDocumentAnalyzer:
   "theme": "页面核心主题",
   "importance": "high",
   "suggested_layout": "title_and_table",
-  "formatted_content": "重新组织后的文本内容(可选,仅当文本顺序混乱时提供)",
+  "formatted_content": "重新组织后的文本内容(可选,仅当文本顺序混乱时提供,必须保留所有原始内容)",
   "elements": [
     {{
       "type": "table",
