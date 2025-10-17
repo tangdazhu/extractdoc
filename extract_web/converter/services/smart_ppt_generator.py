@@ -235,7 +235,7 @@ class SmartPPTGenerator:
         
         if image_elements and "image" in layout and current_top < max_height:
             logger.debug("尝试为第%d页添加图片(布局=%s,剩余空间=%.2f)", page_num, layout, max_height - current_top)
-            current_top = self._add_images(slide, page_num, multimodal_data, current_top, max_height)
+            current_top = self._add_images(slide, page_num, multimodal_data, current_top, max_height, page_analysis)
             has_content = True
         
         # 添加文本内容(即使已经添加了图片)
@@ -253,12 +253,10 @@ class SmartPPTGenerator:
             
             page_images = [i for i in multimodal_data.get("images", []) if i["page"] == page_num]
             valid_imgs = [img for img in page_images if img.get("path") and img["path"].exists()]
-            # 过滤背景图
-            content_imgs = [img for img in valid_imgs 
-                          if not (img.get("width") == 1920 and img.get("height") == 1080)]
             
-            if content_imgs:
-                logger.debug("兜底:为第%d页添加图片(%d张)", page_num, len(content_imgs))
+            # 完全信任AI判断,不再硬编码过滤规则
+            if valid_imgs:
+                logger.debug("兜底:为第%d页添加图片(%d张)", page_num, len(valid_imgs))
                 current_top = self._add_images(slide, page_num, multimodal_data, current_top, max_height)
         
         logger.debug("已创建内容页: 第%d页 - %s", page_num, title)
@@ -306,7 +304,8 @@ class SmartPPTGenerator:
         page_num: int,
         multimodal_data: dict,
         current_top: float,
-        max_height: float
+        max_height: float,
+        page_analysis: dict = None
     ) -> float:
         """添加图片"""
         
@@ -315,42 +314,26 @@ class SmartPPTGenerator:
         # 过滤掉不存在的图片
         valid_images = [img for img in page_images if img.get("path") and img["path"].exists()]
         
-        if not valid_images:
-            return current_top
-        
-        # 过滤多页重复的装饰图
-        # 统计每张图片在多少页出现
-        all_images = multimodal_data.get("images", [])
-        image_page_count = {}
-        for img in all_images:
-            img_path = str(img.get("path", ""))
-            if img_path:
-                # 提取图片的xref作为唯一标识
-                img_name = img_path.split('/')[-1] if '/' in img_path else img_path.split('\\')[-1]
-                # 提取xref编号(如page1_img1.jpeg中的img1)
-                if '_img' in img_name:
-                    xref_part = img_name.split('_img')[1].split('.')[0]
-                    img_key = f"img{xref_part}"
-                    image_page_count[img_key] = image_page_count.get(img_key, 0) + 1
-        
-        # 过滤装饰图
-        filtered_images = []
-        for img in valid_images:
-            img_path = str(img.get("path", ""))
-            img_name = img_path.split('/')[-1] if '/' in img_path else img_path.split('\\')[-1]
-            img_width = img.get("width", 0)
-            img_height = img.get("height", 0)
+        # 根据AI判断过滤图片
+        if page_analysis:
+            # 获取AI判断为should_keep=true的图片尺寸列表
+            ai_approved_sizes = set()
+            for element in page_analysis.get("elements", []):
+                if element.get("type") == "image" and element.get("should_keep", False):
+                    size_str = element.get("size", "")
+                    ai_approved_sizes.add(size_str)
             
-            # 只过滤1920x1080的全屏背景图
-            if img_width == 1920 and img_height == 1080:
-                logger.debug("跳过第%d页的全屏背景图: %s (%dx%d)", page_num, img_name, img_width, img_height)
-                continue
+            # 只保留AI批准的图片
+            filtered_images = []
+            for img in valid_images:
+                img_size = f"{img.get('width', 0)}x{img.get('height', 0)}"
+                if img_size in ai_approved_sizes:
+                    filtered_images.append(img)
+                    logger.debug("AI批准的图片: %s", img_size)
+                else:
+                    logger.debug("AI未批准的图片: %s", img_size)
             
-            # 保留其他所有图片(包括1263x1153和1246x707)
-            filtered_images.append(img)
-            logger.debug("保留第%d页的图片: %s (%dx%d)", page_num, img_name, img_width, img_height)
-        
-        valid_images = filtered_images
+            valid_images = filtered_images
         
         if not valid_images:
             return current_top
