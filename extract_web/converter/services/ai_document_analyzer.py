@@ -282,8 +282,14 @@ class AIDocumentAnalyzer:
    - 忽略页眉页脚(如"Proprietary and Confidential"、页码等)
    - 如果文本开头有明显的标题(如"更新记录"、"Content"、"Background"等),使用它
    - 不要使用页眉页脚或页码作为标题
-3. 如果有表格,表格的作用是什么? (元数据表/数据表/内容表)
-4. 如果有图片,图片是否应该在PPT中显示? **请基于以下原则智能判断**:
+3. 文本内容是否需要重新组织?
+   - 检查文本是否因PDF布局导致顺序混乱
+   - **特别注意**:如果列表项格式为"• Encoder Bert 架构",这是错误的
+   - 正确格式应该是:"• Encoder 架构:... 典型模型如 Bert"
+   - 如果发现此类问题,在 formatted_content 字段中提供重新组织后的文本
+   - 如果文本顺序正常,不需要提供 formatted_content 字段
+4. 如果有表格,表格的作用是什么? (元数据表/数据表/内容表)
+5. 如果有图片,图片是否应该在PPT中显示? **请基于以下原则智能判断**:
    
    **判断原则**:
    a) **尺寸判断**:
@@ -306,8 +312,8 @@ class AIDocumentAnalyzer:
    2. 再判断内容相关性(图片是否与页面主题匹配)
    3. 最后综合判断(是否应该在PPT中显示)
    
-5. 这一页的重要程度? (high/medium/low)
-6. 建议的PPT布局类型? **请根据以下规则严格判断**:
+6. 这一页的重要程度? (high/medium/low)
+7. 建议的PPT布局类型? **请根据以下规则严格判断**:
    - `title_and_table`: 页面主要内容是表格
    - `title_and_image`: 页面主要内容是图片(架构图/流程图/示意图),且图片与主题直接相关
    - `title_and_text`: 页面主要内容是文字说明/列表
@@ -330,7 +336,8 @@ class AIDocumentAnalyzer:
 
 - **判断示例**:
   * 页面标题"Background",主题"模型分类与架构",有架构图 → 图片 should_keep=true, 布局 title_and_image
-  * 页面标题"基础及实践案例",主题"知识介绍",有架构图 → 图片 should_keep=false, 布局 title_and_text
+  * 页面标题"大语言模型基础及实践案例",主题"知识介绍",有架构图 → 图片 should_keep=false, 布局 title_and_text
+  * **关键**:如果页面标题包含"基础"、"实践"、"案例"等词,通常是文字说明页,图片只是装饰 → should_keep=false
   
 - 不要因为"多页重复"就过滤内容图,只过滤装饰性背景图
 
@@ -342,6 +349,7 @@ class AIDocumentAnalyzer:
   "theme": "页面核心主题",
   "importance": "high",
   "suggested_layout": "title_and_table",
+  "formatted_content": "重新组织后的文本内容(可选,仅当文本顺序混乱时提供)",
   "elements": [
     {{
       "type": "table",

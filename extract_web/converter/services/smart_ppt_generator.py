@@ -219,7 +219,7 @@ class SmartPPTGenerator:
                 current_top = self._add_table(slide, page_num, multimodal_data, current_top)
                 has_content = True
             elif element_type == "text":
-                current_top = self._add_text(slide, page_num, multimodal_data, current_top, max_height)
+                current_top = self._add_text(slide, page_num, multimodal_data, current_top, max_height, page_analysis)
                 has_content = True
             elif element_type == "image":
                 # 收集image元素,稍后处理
@@ -244,7 +244,7 @@ class SmartPPTGenerator:
         
         if page_text.strip() and current_top < max_height:
             logger.debug("为第%d页添加文本内容(%d字符)", page_num, len(page_text.strip()))
-            current_top = self._add_text(slide, page_num, multimodal_data, current_top, max_height)
+            current_top = self._add_text(slide, page_num, multimodal_data, current_top, max_height, page_analysis)
             has_content = True
         
         # 如果仍然没有添加任何内容,尝试兜底(添加图片)
@@ -433,18 +433,26 @@ class SmartPPTGenerator:
         page_num: int,
         multimodal_data: dict,
         current_top: float,
-        max_height: float
+        max_height: float,
+        page_analysis: dict = None
     ) -> float:
         """添加文本内容"""
         
-        # 获取页面文本
-        page_data = next((p for p in multimodal_data.get("pages", []) if p["page"] == page_num), None)
-        if not page_data:
-            return current_top
-        
-        page_text = page_data.get("text", "")
-        if not page_text.strip():
-            return current_top
+        # 优先使用AI重新组织后的文本
+        if page_analysis and page_analysis.get("formatted_content"):
+            page_text = page_analysis["formatted_content"]
+            logger.debug("第%d页使用AI重新组织的文本", page_num)
+        else:
+            # 获取页面原始文本
+            page_data = next((p for p in multimodal_data.get("pages", []) if p["page"] == page_num), None)
+            if not page_data:
+                return current_top
+            
+            page_text = page_data.get("text", "")
+            if not page_text.strip():
+                return current_top
+            
+            logger.debug("第%d页使用原始文本", page_num)
         
         lines = [line.strip() for line in page_text.split('\n') if line.strip()]
         if not lines:
