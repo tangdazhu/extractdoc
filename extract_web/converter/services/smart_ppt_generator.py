@@ -1,8 +1,7 @@
 # -*- coding: utf-8 -*-
 """
-智能PPT生成器
-
-基于AI分析结果生成PPT,完全抛弃固定规则
+智能PPT生成器 - 新版本
+使用固定布局 + Auto-Fit,简单可靠
 """
 
 import logging
@@ -11,21 +10,34 @@ from typing import Dict, List
 
 from pptx import Presentation
 from pptx.util import Inches, Pt as PptPt
+from pptx.enum.text import MSO_AUTO_SIZE
+
+from .fixed_layout_manager import FixedLayoutManager
+from .autofit_renderer import AutoFitRenderer
 
 logger = logging.getLogger("converter")
 
 
 class SmartPPTGenerator:
-    """基于AI分析的智能PPT生成器"""
+    """
+    智能PPT生成器(新版)
+    
+    核心理念:
+    1. 使用固定布局区域
+    2. 利用PowerPoint的auto-fit功能
+    3. 简单可靠,不会溢出
+    """
     
     def __init__(self, config: dict = None):
         """
         初始化智能PPT生成器
         
         Args:
-            config: 物理布局配置
+            config: 配置
         """
-        self.config = config or self._get_default_config()
+        self.config = config or {}
+        self.layout_manager = FixedLayoutManager()
+        self.renderer = AutoFitRenderer()
     
     def generate_ppt(
         self,
@@ -48,7 +60,7 @@ class SmartPPTGenerator:
         Returns:
             生成的Presentation对象
         """
-        logger.info("开始智能PPT生成,RequestID=%s", request_id)
+        logger.info("开始智能PPT生成(新版),RequestID=%s", request_id)
         
         # 1. 加载模板
         presentation = Presentation(str(template_path))
@@ -71,15 +83,6 @@ class SmartPPTGenerator:
         )
         
         # 3. 生成内容页
-        content_pages = document_structure.get("content_pages", [])
-        background_images = document_structure.get("background_images", [])
-        
-        # 构建背景图过滤集合
-        bg_image_pages = set()
-        for bg_info in background_images:
-            if bg_info.get("should_filter", False):
-                bg_image_pages.update(bg_info.get("pages", []))
-        
         for page_analysis in page_analyses:
             page_num = page_analysis.get("page_number")
             
@@ -87,7 +90,7 @@ class SmartPPTGenerator:
             if page_num == document_structure.get("title_page", {}).get("page_number", 1):
                 continue
             
-            # 跳过低重要度页面(可配置)
+            # 跳过低重要度页面
             if page_analysis.get("importance") == "low" and self.config.get("skip_low_importance", False):
                 logger.debug("跳过低重要度页面: 第%d页", page_num)
                 continue
@@ -95,8 +98,7 @@ class SmartPPTGenerator:
             self._create_content_slide(
                 presentation,
                 page_analysis,
-                multimodal_data,
-                bg_image_pages
+                multimodal_data
             )
         
         logger.info("智能PPT生成完成,共%d页,RequestID=%s", len(presentation.slides), request_id)
@@ -112,7 +114,8 @@ class SmartPPTGenerator:
         
         # 使用模板第一页
         if len(presentation.slides) == 0:
-            title_layout = presentation.slide_layouts[0]
+            # 查找标题布局(不hardcode索引)
+            title_layout = self._find_layout(presentation, 'title')
             title_slide = presentation.slides.add_slide(title_layout)
         else:
             title_slide = presentation.slides[0]
@@ -138,376 +141,314 @@ class SmartPPTGenerator:
             
             if page_tables:
                 table_data = page_tables[0]["data"]
-                rows = len(table_data)
-                cols = len(table_data[0]) if table_data else 0
                 
-                if rows > 0 and cols > 0:
-                    # 在标题页底部添加表格
-                    left = Inches(3.0)
-                    top = Inches(5.5)
-                    width = Inches(4.0)
-                    height = Inches(0.4 * rows)
-                    
-                    table = title_slide.shapes.add_table(rows, cols, left, top, width, height).table
-                    
-                    for row_idx, row_data in enumerate(table_data):
-                        for col_idx, cell_value in enumerate(row_data):
-                            cell = table.cell(row_idx, col_idx)
-                            cell.text = str(cell_value) if cell_value else ""
-                            cell.text_frame.paragraphs[0].font.size = PptPt(11)
-                            if row_idx == 0:
-                                cell.text_frame.paragraphs[0].font.bold = True
-                    
-                    logger.info("已将元数据表添加到标题页")
+                # 使用固定区域渲染表格(向上移动,避免溢出)
+                zone = self.layout_manager.to_inches({
+                    'left': 3.0,
+                    'top': 4.5,  # 从5.5上移到4.5
+                    'width': 4.0,
+                    'height': 1.5
+                })
+                
+                self.renderer.render_table(title_slide, table_data, zone, enable_autofit=True)
+                logger.info("已将元数据表添加到标题页")
     
     def _create_content_slide(
         self,
         presentation: Presentation,
         page_analysis: dict,
-        multimodal_data: dict,
-        bg_image_pages: set
+        multimodal_data: dict
     ):
-        """创建内容页"""
+        """
+        创建内容页(使用固定布局+auto-fit)
+        """
         
         page_num = page_analysis.get("page_number")
         title = page_analysis.get("title", f"第{page_num}页")
         layout_type = page_analysis.get("suggested_layout", "title_and_text")
         
-        # 选择布局
-        try:
-            content_layout = presentation.slide_layouts[1]  # 标题和内容布局
-        except IndexError:
-            content_layout = presentation.slide_layouts[0]
+        logger.debug("创建第%d页: %s, 布局=%s", page_num, title, layout_type)
         
+        # 1. 创建幻灯片(不hardcode索引)
+        content_layout = self._find_layout(presentation, 'content')
         slide = presentation.slides.add_slide(content_layout)
         
-        # 设置标题
+        # 2. 设置标题
         if slide.shapes.title:
             slide.shapes.title.text = title
         
-        # 添加元素(只添加AI标记为should_keep的元素)
-        current_top = Inches(1.0)
-        max_height = Inches(5.5)
+        # 3. 清空内容占位符(但不删除,因为auto-size只对placeholder有效)
+        self._clear_content_placeholders(slide)
         
-        has_content = False  # 跟踪是否添加了任何内容
+        # 4. 获取布局区域
+        zones = self.layout_manager.get_zones(layout_type)
         
-        # 先处理table和text元素,最后处理image
-        image_elements = []
+        # 5. 收集内容
+        content = self._collect_page_content(page_num, page_analysis, multimodal_data)
         
-        for element in page_analysis.get("elements", []):
-            element_type = element.get("type")
-            
-            # 完全信任AI判断,不再覆盖
-            # 只输出AI的判断结果用于调试
-            if element_type == "image":
-                size_str = element.get("size", "")
-                should_keep = element.get("should_keep", True)
-                reason = element.get("reason", "未提供原因")
-                logger.debug("AI判断图片元素: %s, should_keep=%s, reason=%s", 
-                           size_str, should_keep, reason)
-            
-            # 检查是否应该保留该元素
-            if not element.get("should_keep", True):
-                logger.debug("跳过元素: %s (原因: %s)", element_type, element.get("reason"))
-                continue
-            
-            if current_top >= max_height:
-                logger.warning("第%d页空间不足,跳过剩余元素", page_num)
-                break
-            
-            if element_type == "table":
-                current_top = self._add_table(slide, page_num, multimodal_data, current_top)
-                has_content = True
-            elif element_type == "text":
-                current_top = self._add_text(slide, page_num, multimodal_data, current_top, max_height, page_analysis)
-                has_content = True
-            elif element_type == "image":
-                # 收集image元素,稍后处理
-                image_elements.append(element)
-        
-        # 处理image元素:只在AI布局包含image且有剩余空间时添加
-        layout = page_analysis.get("suggested_layout", "")
-        
-        # 完全信任AI判断,不再使用硬编码规则
-        # image_elements 中的图片已经过AI的 should_keep 判断
-        logger.debug("第%d页图片处理检查: image_elements=%d, layout=%s, current_top=%.2f", 
-                    page_num, len(image_elements), layout, current_top)
-        
-        if image_elements and "image" in layout and current_top < max_height:
-            logger.debug("尝试为第%d页添加图片(布局=%s,剩余空间=%.2f)", page_num, layout, max_height - current_top)
-            current_top = self._add_images(slide, page_num, multimodal_data, current_top, max_height, page_analysis)
-            has_content = True
-        
-        # 添加文本内容(即使已经添加了图片)
-        page_data = next((p for p in multimodal_data.get("pages", []) if p["page"] == page_num), None)
-        page_text = page_data.get("text", "") if page_data else ""
-        
-        if page_text.strip() and current_top < max_height:
-            logger.debug("为第%d页添加文本内容(%d字符)", page_num, len(page_text.strip()))
-            current_top = self._add_text(slide, page_num, multimodal_data, current_top, max_height, page_analysis)
-            has_content = True
-        
-        # 如果仍然没有添加任何内容,尝试兜底(添加图片)
-        if not has_content and current_top < max_height:
-            logger.warning("第%d页没有添加任何元素,尝试添加图片作为兜底", page_num)
-            
-            page_images = [i for i in multimodal_data.get("images", []) if i["page"] == page_num]
-            valid_imgs = [img for img in page_images if img.get("path") and img["path"].exists()]
-            
-            # 完全信任AI判断,不再硬编码过滤规则
-            if valid_imgs:
-                logger.debug("兜底:为第%d页添加图片(%d张)", page_num, len(valid_imgs))
-                current_top = self._add_images(slide, page_num, multimodal_data, current_top, max_height)
+        # 6. 渲染内容到固定区域
+        self._render_content_to_zones(slide, content, zones, layout_type)
         
         logger.debug("已创建内容页: 第%d页 - %s", page_num, title)
     
-    def _add_table(
-        self,
-        slide,
-        page_num: int,
-        multimodal_data: dict,
-        current_top: float
-    ) -> float:
-        """添加表格"""
+    def _clear_content_placeholders(self, slide):
+        """
+        清空内容占位符(但不删除)
         
-        page_tables = [t for t in multimodal_data.get("tables", []) if t["page"] == page_num]
-        
-        for table_data in page_tables:
-            rows_data = table_data["data"]
-            rows = len(rows_data)
-            cols = len(rows_data[0]) if rows_data else 0
-            
-            if rows > 0 and cols > 0:
-                left = Inches(0.5)
-                width = Inches(9.0)
-                row_height = min(0.4, 2.5 / rows)
-                height = Inches(row_height * rows)
-                
-                table = slide.shapes.add_table(rows, cols, left, current_top, width, height).table
-                
-                for row_idx, row_data in enumerate(rows_data):
-                    for col_idx, cell_value in enumerate(row_data):
-                        cell = table.cell(row_idx, col_idx)
-                        cell.text = str(cell_value) if cell_value else ""
-                        cell.text_frame.paragraphs[0].font.size = PptPt(11)
-                        if row_idx == 0:
-                            cell.text_frame.paragraphs[0].font.bold = True
-                
-                current_top += height + Inches(0.3)
-                logger.debug("已添加表格: 第%d页, %d行x%d列", page_num, rows, cols)
-        
-        return current_top
-    
-    def _add_images(
-        self,
-        slide,
-        page_num: int,
-        multimodal_data: dict,
-        current_top: float,
-        max_height: float,
-        page_analysis: dict = None
-    ) -> float:
-        """添加图片"""
-        
-        page_images = [i for i in multimodal_data.get("images", []) if i["page"] == page_num]
-        
-        # 过滤掉不存在的图片
-        valid_images = [img for img in page_images if img.get("path") and img["path"].exists()]
-        
-        # 根据AI判断过滤图片
-        if page_analysis:
-            # 获取AI判断为should_keep=true的图片尺寸列表
-            ai_approved_sizes = set()
-            for element in page_analysis.get("elements", []):
-                if element.get("type") == "image" and element.get("should_keep", False):
-                    size_str = element.get("size", "")
-                    ai_approved_sizes.add(size_str)
-            
-            # 只保留AI批准的图片
-            filtered_images = []
-            for img in valid_images:
-                img_size = f"{img.get('width', 0)}x{img.get('height', 0)}"
-                if img_size in ai_approved_sizes:
-                    filtered_images.append(img)
-                    logger.debug("AI批准的图片: %s", img_size)
-                else:
-                    logger.debug("AI未批准的图片: %s", img_size)
-            
-            valid_images = filtered_images
-        
-        if not valid_images:
-            return current_top
-        
-        # 如果有2张图片,左右并排
-        if len(valid_images) == 2:
-            available_height = max_height - current_top
-            available_width_per_img = Inches(4.5)
-            max_img_height = 0
-            
-            for img_idx, img_data in enumerate(valid_images):
-                img_path = img_data["path"]
-                img_width_px = img_data["width"]
-                img_height_px = img_data["height"]
-                
-                img_width_inch = img_width_px / 96.0
-                img_height_inch = img_height_px / 96.0
-                
-                width_ratio = available_width_per_img / Inches(img_width_inch)
-                height_ratio = available_height / Inches(img_height_inch)
-                scale_ratio = min(width_ratio, height_ratio, 1.0)
-                
-                final_width = Inches(img_width_inch * scale_ratio)
-                final_height = Inches(img_height_inch * scale_ratio)
-                
-                left = Inches(0.5) if img_idx == 0 else Inches(5.5)
-                
-                slide.shapes.add_picture(
-                    str(img_path),
-                    left=left,
-                    top=current_top,
-                    width=final_width,
-                    height=final_height
-                )
-                
-                max_img_height = max(max_img_height, final_height)
-            
-            current_top += max_img_height + Inches(0.3)
-            logger.debug("已添加图片: 第%d页 (左右并排)", page_num)
-        else:
-            # 单张或多张图片,垂直排列
-            for img_data in valid_images:
-                if current_top >= max_height - Inches(0.5):
-                    break
-                
-                img_path = img_data["path"]
-                img_width_px = img_data["width"]
-                img_height_px = img_data["height"]
-                
-                available_height = max_height - current_top - Inches(0.2)
-                max_width = Inches(9.0)
-                
-                img_width_inch = img_width_px / 96.0
-                img_height_inch = img_height_px / 96.0
-                
-                width_ratio = max_width / Inches(img_width_inch)
-                height_ratio = available_height / Inches(img_height_inch)
-                scale_ratio = min(width_ratio, height_ratio, 1.0)
-                
-                final_width = Inches(img_width_inch * scale_ratio)
-                final_height = Inches(img_height_inch * scale_ratio)
-                left = (Inches(10.0) - final_width) / 2
-                
-                slide.shapes.add_picture(
-                    str(img_path),
-                    left=left,
-                    top=current_top,
-                    width=final_width,
-                    height=final_height
-                )
-                
-                current_top += final_height + Inches(0.2)
-                logger.debug("已添加图片: 第%d页 (%dx%d)", page_num, img_width_px, img_height_px)
-        
-        return current_top
-    
-    def _add_text(
-        self,
-        slide,
-        page_num: int,
-        multimodal_data: dict,
-        current_top: float,
-        max_height: float,
-        page_analysis: dict = None
-    ) -> float:
-        """添加文本内容"""
-        
-        # 优先使用AI重新组织后的文本
-        if page_analysis and page_analysis.get("formatted_content"):
-            page_text = page_analysis["formatted_content"]
-            logger.debug("第%d页使用AI重新组织的文本", page_num)
-        else:
-            # 获取页面原始文本
-            page_data = next((p for p in multimodal_data.get("pages", []) if p["page"] == page_num), None)
-            if not page_data:
-                return current_top
-            
-            page_text = page_data.get("text", "")
-            if not page_text.strip():
-                return current_top
-            
-            logger.debug("第%d页使用原始文本", page_num)
-        
-        lines = [line.strip() for line in page_text.split('\n') if line.strip()]
-        if not lines:
-            return current_top
-        
-        # 过滤掉页眉页脚
-        filtered_lines = []
-        for line in lines:
-            line_lower = line.lower()
-            # 跳过页眉页脚
-            if 'proprietary and confidential' in line_lower:
-                continue
-            if line.isdigit() and len(line) <= 2:  # 跳过单独的页码
-                continue
-            filtered_lines.append(line)
-        
-        if not filtered_lines:
-            return current_top
-        
-        # 查找内容占位符
-        body_shape = None
+        关键: MSO_AUTO_SIZE只对placeholder有效,所以我们保留placeholder
+        但清空其内容,避免显示默认文本
+        """
         for shape in slide.shapes:
-            if shape.has_text_frame and shape != slide.shapes.title:
-                # 检查是否是内容占位符
-                if hasattr(shape, 'placeholder_format'):
-                    body_shape = shape
-                    break
-        
-        # 如果找到占位符,使用它;否则创建文本框
-        if body_shape:
-            text_frame = body_shape.text_frame
-            text_frame.clear()
-        else:
-            text_box = slide.shapes.add_textbox(
-                Inches(0.5),
-                current_top,
-                Inches(9.0),
-                max_height - current_top
-            )
-            text_frame = text_box.text_frame
-        
-        text_frame.word_wrap = True
-        
-        # 智能识别列表结构
-        for idx, line in enumerate(filtered_lines):
-            # 检查是否是编号列表(1. 2. 3. 等)
-            is_numbered = line and len(line) > 2 and line[0].isdigit() and line[1] in '.、'
-            # 检查是否是子项(以•或-开头,或有缩进)
-            is_bullet = line.startswith('•') or line.startswith('-') or line.startswith('  ')
+            # 跳过标题
+            if shape == slide.shapes.title:
+                continue
             
-            if idx == 0:
-                text_frame.text = line
-                p = text_frame.paragraphs[0]
-            else:
-                p = text_frame.add_paragraph()
-                p.text = line
-            
-            # 设置层级
-            if is_bullet or (is_numbered and '  ' in line):
-                p.level = 1  # 子项
-                p.font.size = PptPt(12)
-            else:
-                p.level = 0  # 主项
-                p.font.size = PptPt(14)
-        
-        logger.debug("已添加文本内容: 第%d页, %d行", page_num, len(filtered_lines))
-        
-        return max_height  # 文本占满剩余空间
+            # 清空placeholder的文本
+            if hasattr(shape, 'placeholder_format') and shape.has_text_frame:
+                shape.text_frame.clear()
+                logger.debug("已清空placeholder: %s", shape.name)
     
-    def _get_default_config(self) -> dict:
-        """获取默认配置"""
-        return {
-            "skip_low_importance": False,
-            "max_elements_per_slide": 5
+    def _collect_page_content(self, page_num: int, page_analysis: dict, multimodal_data: dict) -> dict:
+        """
+        收集页面内容
+        
+        Returns:
+            {'table': [...], 'images': [...], 'text': '...'}
+        """
+        content = {
+            'table': None,
+            'images': [],
+            'text': ''
         }
+        
+        # 收集表格
+        page_tables = [t for t in multimodal_data.get("tables", []) if t["page"] == page_num]
+        if page_tables:
+            content['table'] = page_tables[0]['data']
+        
+        # 收集图片(根据AI判断过滤)
+        ai_approved_images = []
+        for element in page_analysis.get("elements", []):
+            if element.get("type") == "image" and element.get("should_keep", False):
+                size_str = element.get("size", "")
+                # 找到对应的图片
+                for img in multimodal_data.get("images", []):
+                    if img["page"] == page_num:
+                        img_size = f"{img.get('width', 0)}x{img.get('height', 0)}"
+                        if img_size == size_str and img.get("path") and img["path"].exists():
+                            ai_approved_images.append(img["path"])
+        
+        content['images'] = ai_approved_images
+        
+        # 收集文本
+        page_data = next((p for p in multimodal_data.get("pages", []) if p["page"] == page_num), None)
+        if page_data:
+            # 优先使用AI重组的文本
+            formatted_content = page_analysis.get("formatted_content")
+            if formatted_content:
+                content['text'] = formatted_content
+                logger.debug("第%d页使用AI重新组织的文本", page_num)
+            else:
+                content['text'] = page_data.get("text", "")
+        
+        return content
+    
+    def _render_content_to_zones(self, slide, content: dict, zones: list, layout_type: str):
+        """
+        将内容渲染到固定区域
+        
+        Args:
+            slide: 幻灯片
+            content: 内容字典
+            zones: 区域列表
+            layout_type: 布局类型
+        """
+        # 根据布局类型决定渲染策略
+        if layout_type == 'title_and_table':
+            # 表格 + 文本
+            self._render_table_text_layout(slide, content, zones)
+        
+        elif layout_type == 'title_and_image':
+            # 图片 + 文本
+            self._render_image_text_layout(slide, content, zones)
+        
+        elif layout_type == 'title_and_text':
+            # 纯文本
+            self._render_text_only_layout(slide, content, zones)
+        
+        elif layout_type == 'title_text_and_image':
+            # 文本 + 图片
+            self._render_text_image_layout(slide, content, zones)
+        
+        else:
+            # 默认: 文本
+            self._render_text_only_layout(slide, content, zones)
+    
+    def _render_table_text_layout(self, slide, content: dict, zones: list):
+        """渲染表格布局(只渲染表格,表格已包含所有信息)"""
+        # 找到表格区域
+        table_zone = None
+        
+        for zone in zones:
+            zone_inches = self.layout_manager.to_inches(zone)
+            if zone['type'] == 'table':
+                table_zone = zone_inches
+                break
+        
+        # 只渲染表格(表格已包含所有信息,不需要额外文本)
+        if content.get('table') and table_zone:
+            self.renderer.render_table(slide, content['table'], table_zone, enable_autofit=True)
+            logger.debug("title_and_table布局:只渲染表格")
+    
+    def _render_image_text_layout(self, slide, content: dict, zones: list):
+        """
+        渲染图片+文本布局
+        
+        注意:图片会覆盖placeholder,所以需要删除placeholder并使用textbox
+        """
+        image_zone = None
+        text_zone = None
+        
+        for zone in zones:
+            zone_inches = self.layout_manager.to_inches(zone)
+            if zone['type'] == 'image':
+                image_zone = zone_inches
+            elif zone['type'] == 'text':
+                text_zone = zone_inches
+        
+        # 删除内容placeholder(因为图片会覆盖它)
+        for shape in list(slide.shapes):
+            if (hasattr(shape, 'placeholder_format') and 
+                shape.has_text_frame and 
+                shape != slide.shapes.title):
+                sp = shape.element
+                sp.getparent().remove(sp)
+                logger.debug("删除placeholder以避免被图片遮挡")
+        
+        # 渲染图片
+        if content.get('images') and image_zone:
+            if len(content['images']) > 1:
+                # 多张图片并排
+                self.renderer.render_images_side_by_side(slide, content['images'], image_zone)
+            elif len(content['images']) == 1:
+                # 单张图片
+                self.renderer.render_image(slide, content['images'][0], image_zone)
+        
+        # 渲染文本(使用textbox,因为placeholder已删除)
+        if content.get('text') and text_zone:
+            # 创建textbox
+            textbox = slide.shapes.add_textbox(
+                text_zone['left'],
+                text_zone['top'],
+                text_zone['width'],
+                text_zone['height']
+            )
+            text_frame = textbox.text_frame
+            text_frame.word_wrap = True
+            text_frame.auto_size = MSO_AUTO_SIZE.NONE
+            
+            # 清除边距
+            text_frame.margin_left = 0
+            text_frame.margin_right = 0
+            text_frame.margin_top = 0
+            text_frame.margin_bottom = 0
+            
+            # 添加文本
+            lines = content['text'].split('\n')
+            for idx, line in enumerate(lines):
+                if not line.strip():
+                    continue
+                if idx == 0:
+                    p = text_frame.paragraphs[0]
+                else:
+                    p = text_frame.add_paragraph()
+                p.text = line.strip()
+                p.font.size = PptPt(9)  # 固定字体9pt
+            
+            logger.debug("已渲染文本到textbox: %d行", len(lines))
+    
+    def _render_text_only_layout(self, slide, content: dict, zones: list):
+        """渲染纯文本布局"""
+        text_zone = None
+        
+        for zone in zones:
+            zone_inches = self.layout_manager.to_inches(zone)
+            if zone['type'] == 'text':
+                text_zone = zone_inches
+                break
+        
+        # 渲染文本
+        if content.get('text') and text_zone:
+            self.renderer.render_text(slide, content['text'], text_zone, enable_autofit=True)
+    
+    def _render_text_image_layout(self, slide, content: dict, zones: list):
+        """渲染文本+图片布局"""
+        text_zone = None
+        image_zone = None
+        
+        for zone in zones:
+            zone_inches = self.layout_manager.to_inches(zone)
+            if zone['type'] == 'text' and not text_zone:
+                text_zone = zone_inches
+            elif zone['type'] == 'image' and not image_zone:
+                image_zone = zone_inches
+        
+        # 渲染文本
+        if content.get('text') and text_zone:
+            self.renderer.render_text(slide, content['text'], text_zone, enable_autofit=True)
+        
+        # 渲染图片
+        if content.get('images') and image_zone:
+            if len(content['images']) > 1:
+                self.renderer.render_images_side_by_side(slide, content['images'], image_zone)
+            elif len(content['images']) == 1:
+                self.renderer.render_image(slide, content['images'][0], image_zone)
+    
+    def _find_layout(self, presentation: Presentation, layout_type: str):
+        """
+        根据类型查找合适的布局(不hardcode索引)
+        
+        Args:
+            presentation: 演示文稿对象
+            layout_type: 布局类型 ('title' 或 'content')
+        
+        Returns:
+            找到的布局对象
+        """
+        layouts = presentation.slide_layouts
+        
+        if layout_type == 'title':
+            # 查找标题布局
+            # 常见名称: "Title Slide", "标题幻灯片", "Title Only"
+            for layout in layouts:
+                name_lower = layout.name.lower()
+                if 'title' in name_lower and ('slide' in name_lower or 'only' in name_lower):
+                    logger.debug("找到标题布局: %s (索引=%d)", layout.name, layouts.index(layout))
+                    return layout
+            
+            # 回退: 使用第一个布局
+            logger.warning("未找到标题布局,使用第一个布局: %s", layouts[0].name)
+            return layouts[0]
+        
+        elif layout_type == 'content':
+            # 查找内容布局
+            # 常见名称: "Title and Content", "标题和内容", "Content"
+            for layout in layouts:
+                name_lower = layout.name.lower()
+                if ('title' in name_lower and 'content' in name_lower) or \
+                   ('标题' in layout.name and '内容' in layout.name):
+                    logger.debug("找到内容布局: %s (索引=%d)", layout.name, layouts.index(layout))
+                    return layout
+            
+            # 回退: 使用第二个布局(如果存在)
+            if len(layouts) > 1:
+                logger.warning("未找到内容布局,使用第二个布局: %s", layouts[1].name)
+                return layouts[1]
+            else:
+                logger.warning("未找到内容布局,使用第一个布局: %s", layouts[0].name)
+                return layouts[0]
+        
+        else:
+            # 未知类型,使用第一个布局
+            logger.warning("未知布局类型: %s, 使用第一个布局", layout_type)
+            return layouts[0]
