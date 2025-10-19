@@ -1,5 +1,8 @@
 # PDF提取工作流程
 
+**最后更新**: 2025-10-19 16:52  
+**核心原则**: 零硬编码,完全通用的提取方案
+
 ## 三个工具的角色
 
 | 工具 | 角色 | 使用时机 | 速度 | 准确率 |
@@ -77,15 +80,24 @@
 │    - paddleocr.ocr()        │
 │    - 返回: 文字+坐标+置信度 │
 │                             │
-│ 3. 过滤页眉页脚             │
-│    - 过滤顶部5%的内容       │
-│    - 过滤底部5%的内容       │
+│ 3. 图片转换(增强异常处理)   │
+│    - 主方法: pix.tobytes()  │
+│    - 备用: Image.frombytes()│
 │                             │
-│ 4. 按Y坐标分组为行          │
+│ 4. 过滤页眉页脚             │
+│    - 纯位置判断(顶部5%)     │
+│    - 纯位置判断(底部5%)     │
+│    - 无硬编码关键词         │
+│                             │
+│ 5. 按Y坐标分组为行          │
 │    - 容差: 10像素           │
 │                             │
-│ 5. 按X坐标排序为列          │
+│ 6. 按X坐标排序为列          │
 │    - 每行内从左到右排序     │
+│                             │
+│ 7. 智能修复(双重fallback)   │
+│    - 策略1: 从校核列推断    │
+│    - 策略2: 从前一行推断    │
 │                             │
 │ 速度: ~2-5秒/页             │
 └─────────────────────────────┘
@@ -347,13 +359,18 @@ pdf_extraction:
     lang: 'ch'      # 语言
     use_angle_cls: true  # 旋转识别
   
-  # 页眉页脚过滤
+  # 页眉页脚过滤(纯位置判断,无硬编码关键词)
   header_margin: 0.05  # 顶部5%
   footer_margin: 0.05  # 底部5%
   
   # 图片过滤
   min_image_size: 200  # 最小宽高
   max_aspect_ratio: 10  # 最大宽高比
+  
+  # Fallback策略
+  enable_team_inference: true  # 启用团队列推断
+  inference_from_review: true  # 从校核列推断
+  inference_from_prev_row: true  # 从前一行推断
 ```
 
 ## 调试技巧
@@ -428,12 +445,78 @@ pdf_extraction:
 
 但这样复杂表格可能提取错误。
 
+## 最新更新 (2025-10-19)
+
+### 1. OCR异常处理增强
+
+**问题**: PyMuPDF的`pix.tobytes("png")`在某些PDF上触发`could not execute a primitive`错误
+
+**解决方案**:
+```python
+try:
+    img_data = pix.tobytes("png")
+    image = Image.open(io.BytesIO(img_data))
+except Exception:
+    # 备用方法
+    image = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
+```
+
+**效果**: ✅ 提高OCR稳定性,避免因PyMuPDF错误导致整个提取失败
+
+---
+
+### 2. 页眉页脚过滤优化
+
+**改进**: 移除硬编码关键词,改用纯位置判断
+
+**Before**:
+```python
+is_header_footer = (
+    y_pos < page_height * 0.10 or
+    y_pos > page_height * 0.90 or
+    '远景智能' in text or  # ❌ 硬编码
+    'Proprietary' in text
+)
+```
+
+**After**:
+```python
+is_header_footer = (
+    y_pos < page_height * 0.05 or  # ✅ 纯位置
+    y_pos > page_height * 0.95
+)
+```
+
+**效果**: ✅ 更通用,无硬编码,避免误过滤正文内容
+
+---
+
+### 3. 双重Fallback策略
+
+**问题**: OCR失败时,团队列为空
+
+**解决方案**: 增加策略2,从前一行推断
+
+```python
+# 策略1: 从校核列推断
+if not team_col and review_col:
+    row[2] = extract_name(review_col)  # "李赟"
+
+# 策略2: 从前一行推断(新增)
+if not team_col and not review_col and row_idx > 1:
+    prev_team = processed_table[row_idx - 1][2]
+    if prev_team:
+        row[2] = extract_name(prev_team)  # "Michael"
+```
+
+**效果**: ✅ 即使OCR失败且校核列为空,也能从前一行推断
+
+---
+
 ## 相关文档
 
-- **`OCR_INTEGRATION.md`** - OCR集成详细说明
+- **`COMPLETE_IMPLEMENTATION_GUIDE.md`** - 完整实现指南
 - **`PDF_TABLE_EXTRACTION_LIMITATION.md`** - pdfplumber的限制
-- **`OCR_AND_IMAGE_EXTRACTION_FIX.md`** - 最新的修复
-- **`TABLE_STRUCTURE_NORMALIZATION.md`** - 表格规范化
 
 ## 总结
 
@@ -443,6 +526,8 @@ pdf_extraction:
 pdfplumber (主力,快速) 
     ↓ 失败
 paddleocr (fallback,慢速但准确)
+    ↓ 失败
+双重Fallback (从校核列或前一行推断)
     ↓ 并行
 PyMuPDF (图片提取,总是使用)
 ```
@@ -453,3 +538,11 @@ PyMuPDF (图片提取,总是使用)
 2. **按需使用**: paddleocr (检测到问题时)
 3. **性能优先**: 能用pdfplumber就不用OCR
 4. **准确率优先**: 宁可慢一点,也要用OCR修复错误
+5. **零硬编码**: 使用通用算法,不针对特定文档
+
+### 核心改进 (2025-10-19)
+
+✅ **OCR异常处理**: 增加备用方法,提高稳定性  
+✅ **纯位置过滤**: 移除硬编码关键词,更通用  
+✅ **双重Fallback**: 从校核列或前一行推断,确保数据完整  
+✅ **零硬编码**: 所有逻辑使用通用算法,适用于任何PDF

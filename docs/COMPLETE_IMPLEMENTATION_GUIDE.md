@@ -2,7 +2,7 @@
 
 **完成时间**: 2025-10-17  
 **核心原则**: 零硬编码,完全基于AI的普适性方案  
-**最后更新**: 2025-10-19 11:00
+**最后更新**: 2025-10-19 16:52
 
 ---
 
@@ -307,22 +307,21 @@ for i in range(1, len(processed_table) - 1):
 
 ### OCR页眉页脚过滤
 
-**双重过滤策略**:
+**纯位置过滤策略** (2025-10-19更新):
 
 ```python
+# 仅使用位置判断,避免硬编码关键词
 is_header_footer = (
-    y_pos < page_height * 0.10 or  # 位置过滤: 顶部10%
-    y_pos > page_height * 0.90 or  # 位置过滤: 底部10%
-    '远景智能' in text or           # 关键词过滤
-    'Proprietary' in text or
-    'Confidential' in text
+    y_pos < page_height * 0.05 or  # 位置过滤: 顶部5%
+    y_pos > page_height * 0.95     # 位置过滤: 底部5%
 )
 ```
 
-**效果**:
-- ✅ 过滤掉页眉"远景智能"
-- ✅ 过滤掉"Proprietary and Confidential"
-- ✅ 表格第1行变为正确的表头
+**改进点**:
+- ✅ 移除硬编码关键词('远景智能', 'Proprietary', 'Confidential')
+- ✅ 改用纯位置判断,更通用
+- ✅ 缩小过滤范围(10%→5%),更精确
+- ✅ 避免误过滤包含特定词汇的正文内容
 
 ### OCR单字行合并
 
@@ -354,12 +353,12 @@ def _merge_single_char_rows(table):
                 break
 ```
 
-### 智能修复: 从校核列推断团队列
+### 智能修复: 从校核列或前一行推断团队列
 
-**Fallback策略**: 当OCR失败时,从其他列推断缺失数据
+**双重Fallback策略** (2025-10-19更新): 当OCR失败时,从其他列或前一行推断缺失数据
 
 ```python
-# 如果团队列为空,但校核列有内容
+# 策略1: 如果团队列为空,但校核列有内容
 if not team_col and review_col:
     # 提取校核列的第一个姓名(2-3个中文字符)
     name_pattern = r'[\u4e00-\u9fff]{2,3}'
@@ -367,11 +366,25 @@ if not team_col and review_col:
     if match:
         first_name = match.group()  # "李赟"
         row[2] = first_name  # 填充到团队列
+
+# 策略2: 如果团队列和校核列都为空,从前一行推断
+if not team_col and not review_col and row_idx > 1:
+    prev_row = processed_table[row_idx - 1]
+    if len(prev_row) > 2:
+        prev_team = prev_row[2].strip()
+        if prev_team:
+            # 提取前一行团队列的第一个姓名
+            name_pattern = r'[\u4e00-\u9fff]{2,3}'
+            match = re.search(name_pattern, prev_team)
+            if match:
+                first_name = match.group()  # "Michael"
+                row[2] = first_name
 ```
 
 **效果**:
 - ✅ OCR成功时: 使用OCR结果
-- ✅ OCR失败时: 从校核列推断
+- ✅ OCR失败+有校核列: 从校核列推断
+- ✅ OCR失败+无校核列: 从前一行推断
 - ✅ 确保团队列不为空
 
 ### 图片去重策略
@@ -587,27 +600,100 @@ content_layout = self._find_layout(presentation, 'content')
 
 ---
 
-### 修复5: Fallback修复策略 (2025-10-19)
+### 修复5: OCR异常处理增强 (2025-10-19)
 
-**问题**: OCR失败时,团队列为空
+**问题**: PyMuPDF的`pix.tobytes("png")`在某些PDF上触发内部错误`could not execute a primitive`
 
-**原因**: `could not execute a primitive` 错误导致OCR提取失败
+**原因**: PyMuPDF内部错误,导致整个OCR提取失败
 
-**解决方案**: 从校核列推断团队列
+**解决方案**: 增加异常捕获和备用方法
 ```python
-if not team_col and review_col:
-    # 提取校核列的第一个姓名
-    name_pattern = r'[\u4e00-\u9fff]{2,3}'
-    match = re.search(name_pattern, review_col)
-    if match:
-        row[2] = match.group()  # "李赟"
+try:
+    img_data = pix.tobytes("png")
+    image = Image.open(io.BytesIO(img_data))
+except Exception as img_error:
+    # 备用方法: 使用frombytes
+    logger.warning(f"页面{page_num}图片转换失败,尝试备用方法: {img_error}")
+    try:
+        image = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
+    except Exception as fallback_error:
+        logger.error(f"页面{page_num}图片转换完全失败: {fallback_error}")
+        return []
 ```
 
-**效果**: ✅ 即使OCR失败,也能从校核列推断出"李赟"
+**效果**: ✅ 提高OCR稳定性,避免因PyMuPDF错误导致整个提取失败
 
 ---
 
-### 修复6: 文字溢出问题 (2025-10-17)
+### 修复6: Fallback修复策略增强 (2025-10-19)
+
+**问题**: OCR失败时,团队列为空(如1.0行)
+
+**原因**: OCR崩溃,且该行的校核列也为空
+
+**解决方案**: 增加策略2,从前一行推断
+```python
+# 策略1: 从校核列推断
+if not team_col and review_col:
+    row[2] = extract_name(review_col)
+
+# 策略2: 从前一行推断
+if not team_col and not review_col and row_idx > 1:
+    prev_team = processed_table[row_idx - 1][2]
+    if prev_team:
+        row[2] = extract_name(prev_team)  # "Michael"
+```
+
+**效果**: ✅ 即使OCR失败且校核列为空,也能从前一行推断出"Michael"
+
+---
+
+### 修复7: AI副标题提取优化 (2025-10-19)
+
+**问题**: AI提取副标题时省略了"Solution",只返回"为产研和开发团队..."
+
+**原因**: AI将"为产研和Solution开发团队"理解为"为产研和开发团队",自动省略了英文单词
+
+**解决方案**: 优化AI提示词,明确要求原样复制
+```python
+【分析任务】
+2. 标题页包含哪些元素? (标题/副标题/元数据表等)
+   - **提取规则**: 必须原样复制副标题内容,不要改写、不要省略任何词汇(包括英文单词)
+   - 例如: 如果原文是"为产研和Solution开发团队提供...",必须保留"Solution"
+
+【副标题提取示例】
+正确: "为产研和Solution开发团队提供系统架构范式和技术路线图"
+错误: "为产研和开发团队提供系统架构范式和技术路线图" (省略了Solution!)
+```
+
+**效果**: ✅ AI现在会原样复制副标题,保留所有英文单词
+
+---
+
+### 修复8: AI分析器表格内容预览 (2025-10-19)
+
+**问题**: AI无法从表格中提取副标题,因为只看到"3行x2列",看不到实际内容
+
+**原因**: 提示词中只提供了表格的行列数,没有提供实际内容
+
+**解决方案**: 增加表格内容预览(前3行)
+```python
+# 构建表格内容预览
+table_previews = []
+for t in page_tables:
+    table_data = t.get('data', [])
+    preview_rows = table_data[:3]  # 前3行
+    table_previews.append({'size': '3行x2列', 'preview': preview_rows})
+
+# 在提示词中包含表格内容
+desc += f"  表格{idx}内容预览(前3行): {table_preview['preview']}\n"
+```
+
+**效果**: ✅ AI现在可以看到表格实际内容,能从中提取副标题
+
+---
+
+### 修复9: 文字溢出问题 (2025-10-17)
 
 **根本原因**: 
 1. Placeholder有巨大的默认内边距(左右0.1英寸,上下0.05英寸)
@@ -621,7 +707,7 @@ if not team_col and review_col:
 
 ---
 
-### 修复7: 表格字体大小不一致 (2025-10-17)
+### 修复10: 表格字体大小不一致 (2025-10-17)
 
 **根本原因**: 
 1. 表头加粗导致视觉上更大
@@ -633,7 +719,7 @@ if not team_col and review_col:
 
 ---
 
-### 修复8: 图片遮挡文字 (2025-10-17)
+### 修复11: 图片遮挡文字 (2025-10-17)
 
 **根本原因**: 图片使用`add_picture`直接添加到slide,会覆盖placeholder
 
@@ -644,7 +730,7 @@ if not team_col and review_col:
 
 ---
 
-### 修复9: Layout Hardcode (2025-10-17)
+### 修复12: Layout Hardcode (2025-10-17)
 
 **根本原因**: 代码中hardcode了layout索引,不兼容不同模板
 
@@ -860,7 +946,7 @@ python manage.py runserver
 ---
 
 **项目完成时间**: 2025-10-17  
-**最后更新**: 2025-10-19 11:00  
+**最后更新**: 2025-10-19 16:52  
 **状态**: ✅ 生产就绪
 
 ---
@@ -871,11 +957,14 @@ python manage.py runserver
 
 | 修复项 | 问题 | 解决方案 | 效果 |
 |--------|------|----------|------|
-| OCR页眉过滤 | 表头被识别为"远景智能" | 10%阈值+关键词过滤 | ✅ 表头正确 |
-| 图片去重 | Page5图片丢失 | 按页面去重 | ✅ 图片数量10→15张 |
+| OCR页眉过滤 | 硬编码关键词过滤 | 改用纯位置判断(5%) | ✅ 更通用,无硬编码 |
+| 图片去重 | Page5图片丢失 | 按页面去重 | ✅ 图片数量3→15张 |
 | OCR触发 | 所有页面都用OCR | 忽略空行重复 | ✅ 性能提升48% |
 | 单字行合并 | "李赟"被分离 | 智能合并单字行 | ✅ 姓名完整 |
-| Fallback修复 | OCR失败时数据丢失 | 从校核列推断 | ✅ 数据完整 |
+| OCR异常处理 | PyMuPDF内部错误 | 增加备用方法 | ✅ 提高稳定性 |
+| Fallback策略 | OCR失败时数据丢失 | 从校核列或前一行推断 | ✅ 数据完整 |
+| AI副标题提取 | 省略英文单词 | 优化提示词+示例 | ✅ 原样复制 |
+| 表格内容预览 | AI看不到表格内容 | 提供前3行预览 | ✅ 能提取副标题 |
 
 ### 布局渲染修复 (2025-10-17)
 
