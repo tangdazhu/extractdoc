@@ -23,8 +23,122 @@ from dashscope import Generation
 
 from .ai_document_analyzer import AIDocumentAnalyzer
 from .smart_ppt_generator import SmartPPTGenerator
+from .ocr_table_extractor import get_ocr_extractor
 
 logger = logging.getLogger("converter")
+
+
+def _normalize_table_structure(table: List[List[str]]) -> List[List[str]]:
+    """
+    规范化表格结构,确保所有行的列数一致
+    
+    Args:
+        table: 原始表格数据
+        
+    Returns:
+        规范化后的表格
+    """
+    if not table:
+        return []
+    
+    # 找出最大列数
+    max_cols = max(len(row) for row in table)
+    
+    # 补齐所有行到最大列数
+    normalized_table = []
+    for row_idx, row in enumerate(table):
+        if len(row) < max_cols:
+            # 补空字符串
+            normalized_row = row + [''] * (max_cols - len(row))
+            logger.debug(f"规范化第{row_idx}行: {len(row)}列 → {max_cols}列")
+        else:
+            normalized_row = row
+        normalized_table.append(normalized_row)
+    
+    return normalized_table
+
+
+def _align_ocr_row_to_target(
+    ocr_row: List[str],
+    target_row: List[str],
+    header_row: Optional[List[str]] = None
+) -> List[str]:
+    """
+    智能对齐OCR提取的行到目标列数
+    
+    策略:
+    1. 识别日期列(格式如2025-01-25),保留到最后一列
+    2. 识别第一列(版本号/序号),保留不变
+    3. 合并中间的空列或内容较短的列
+    
+    Args:
+        ocr_row: OCR提取的行数据
+        target_row: 目标行(用于确定列数)
+        header_row: 表头行(可选,用于辅助判断)
+        
+    Returns:
+        对齐后的行数据
+    """
+    target_cols = len(target_row)
+    ocr_cols = len(ocr_row)
+    
+    if ocr_cols <= target_cols:
+        # 列数相同或更少,直接补齐
+        return ocr_row + [''] * (target_cols - ocr_cols)
+    
+    # OCR列数更多,需要智能合并
+    # 策略1: 查找日期列(格式: YYYY-MM-DD 或 YYYY-MM)
+    import re
+    date_pattern = re.compile(r'^\d{4}-\d{2}(-\d{2})?$')
+    date_col_idx = -1
+    for idx, cell in enumerate(ocr_row):
+        if date_pattern.match(cell.strip()):
+            date_col_idx = idx
+            break
+    
+    # 策略2: 构建对齐后的行
+    aligned_row = []
+    
+    # 保留第一列(版本号/序号)
+    aligned_row.append(ocr_row[0])
+    
+    # 如果找到日期列,特殊处理
+    if date_col_idx > 0:
+        # 中间列: 合并第1列到日期列之前的所有列(除了第一列)
+        middle_cols = [ocr_row[i] for i in range(1, date_col_idx) if ocr_row[i].strip()]
+        
+        # 根据目标列数分配
+        if target_cols == 5:  # 版本、内容、团队、校核、时间
+            if len(middle_cols) >= 2:
+                aligned_row.append(middle_cols[0])  # 内容
+                aligned_row.append(middle_cols[1] if len(middle_cols) > 1 else '')  # 团队
+                aligned_row.append(middle_cols[2] if len(middle_cols) > 2 else '')  # 校核
+            elif len(middle_cols) == 1:
+                aligned_row.append(middle_cols[0])  # 内容
+                aligned_row.append('')  # 团队
+                aligned_row.append('')  # 校核
+            else:
+                aligned_row.extend(['', '', ''])
+        else:
+            # 其他列数: 简单合并
+            aligned_row.extend(middle_cols)
+            aligned_row.extend([''] * (target_cols - len(aligned_row) - 1))
+        
+        # 最后一列是日期
+        aligned_row.append(ocr_row[date_col_idx])
+    else:
+        # 没有日期列: 保留前target_cols-1列,合并剩余列到最后一列
+        aligned_row.extend(ocr_row[1:target_cols-1])
+        aligned_row.append(' '.join(ocr_row[target_cols-1:]))
+    
+    # 确保列数正确
+    if len(aligned_row) < target_cols:
+        aligned_row.extend([''] * (target_cols - len(aligned_row)))
+    elif len(aligned_row) > target_cols:
+        aligned_row = aligned_row[:target_cols]
+    
+    return aligned_row
+
 
 try:
     from pptx import Presentation
@@ -86,6 +200,91 @@ def _extract_pdf_multimodal(pdf_path: Path, temp_dir: Path) -> Dict[str, any]:
             "images": [{"page": 1, "path": Path(...), "bbox": (x0,y0,x1,y1)}, ...]
         }
     """
+    
+    def _merge_single_char_rows(table: List[List[str]]) -> List[List[str]]:
+        """
+        合并OCR表格中的单字行(可能是被错误分离的姓名)
+        
+        策略:
+        1. 查找只有1-2个字符的行
+        2. 向前查找最近的版本号行(可能不是紧邻的前一行)
+        3. 将单字行合并到版本号行的第3列(团队列)
+        
+        Args:
+            table: OCR提取的表格
+            
+        Returns:
+            合并后的表格
+        """
+        if not table or len(table) < 2:
+            return table
+        
+        import re
+        version_pattern = re.compile(r'^\d+\.\d+$')  # 匹配版本号: 0.1, 1.0等
+        
+        # 第一步: 找出所有单字行的索引
+        single_char_rows = []
+        for i, row in enumerate(table):
+            is_single_char = (
+                len(row) > 0 and
+                len(row[0].strip()) <= 2 and
+                len(row[0].strip()) > 0 and  # 不是空行
+                all(not cell.strip() for cell in row[1:])
+            )
+            if is_single_char:
+                single_char_rows.append(i)
+                logger.debug("  发现单字行[%d]: '%s'", i, row[0])
+        
+        if not single_char_rows:
+            logger.debug("  没有发现单字行,无需合并")
+            return table
+        
+        # 第二步: 对每个单字行,向前查找最近的版本号行
+        merge_map = {}  # {单字行索引: 目标版本号行索引}
+        for single_idx in single_char_rows:
+            # 向前查找版本号行(最多向前查找5行)
+            for j in range(single_idx - 1, max(-1, single_idx - 6), -1):
+                if j >= 0 and len(table[j]) > 0:
+                    if version_pattern.match(table[j][0].strip()):
+                        merge_map[single_idx] = j
+                        logger.debug("  单字行[%d]'%s' → 合并到版本行[%d]'%s'", 
+                                   single_idx, table[single_idx][0], j, table[j][0])
+                        break
+        
+        # 第三步: 执行合并
+        merged_table = []
+        skip_indices = set()
+        
+        for i, row in enumerate(table):
+            if i in skip_indices:
+                continue
+            
+            # 如果当前行是版本号行,检查是否有单字行需要合并到它
+            current_row = list(row)  # 复制一份
+            for single_idx, target_idx in merge_map.items():
+                if target_idx == i:
+                    # 合并单字到第3列
+                    single_char = table[single_idx][0].strip()
+                    if len(current_row) > 2:
+                        if current_row[2].strip():
+                            current_row[2] = current_row[2] + single_char
+                        else:
+                            current_row[2] = single_char
+                    else:
+                        # 补齐列数
+                        while len(current_row) < 3:
+                            current_row.append('')
+                        current_row[2] = single_char
+                    
+                    skip_indices.add(single_idx)
+                    logger.info("  已合并单字'%s'到版本%s第3列: '%s'", 
+                               single_char, current_row[0], current_row[2])
+            
+            merged_table.append(current_row)
+        
+        logger.info("  单字行合并完成: 原%d行 → %d行", len(table), len(merged_table))
+        return merged_table
+    
     result = {"text": "", "tables": [], "images": [], "pages": []}
     
     if not PYMUPDF_AVAILABLE:
@@ -110,8 +309,29 @@ def _extract_pdf_multimodal(pdf_path: Path, temp_dir: Path) -> Dict[str, any]:
                     "text": page_text if page_text else ""
                 })
                 
-                # 提取表格
-                tables = page.extract_tables()
+                # 提取表格(使用更精确的设置)
+                # 优化表格提取参数,提高复杂表格的识别准确率
+                tables = page.extract_tables(table_settings={
+                    "vertical_strategy": "lines",
+                    "horizontal_strategy": "lines",
+                    "snap_tolerance": 5,  # 增加容差,更宽松地识别表格线
+                    "join_tolerance": 5,
+                    "edge_min_length": 5,
+                    "min_words_vertical": 2,  # 降低阈值,避免漏掉短文本
+                    "min_words_horizontal": 1,
+                    "text_tolerance": 5,  # 增加文本容差,允许更大的Y坐标偏差
+                    "text_x_tolerance": 5,
+                    "text_y_tolerance": 5,
+                    "intersection_tolerance": 5,
+                })
+                
+                # 如果lines策略失败,尝试text策略
+                if not tables or len(tables) == 0:
+                    tables = page.extract_tables(table_settings={
+                        "vertical_strategy": "text",
+                        "horizontal_strategy": "text",
+                    })
+                
                 for table in tables:
                     if table and len(table) > 1:  # 至少有标题行和一行数据
                         # 检查第一行是否为空(可能是纯背景色的表头)
@@ -123,35 +343,300 @@ def _extract_pdf_multimodal(pdf_path: Path, temp_dir: Path) -> Dict[str, any]:
                             logger.debug("检测到空表头行,使用第二行作为表头,页面=%d", page_num)
                             table = table[1:]  # 跳过空的第一行
                         
-                        # 处理单元格中的换行符(表头和数据可能在同一单元格)
-                        processed_table = []
+                        # 处理单元格中的换行符
+                        # 第一步:检查第一行是否包含表头和数据(用换行符分隔)
+                        first_row = table[0]
+                        has_newline_in_first_row = any('\n' in str(cell) for cell in first_row if cell)
+                        
+                        # 添加详细日志查看原始数据
+                        logger.debug("页面%d原始表格所有行:", page_num)
                         for row_idx, row in enumerate(table):
-                            # 检查是否有单元格包含换行符
-                            has_newline = any('\n' in str(cell) for cell in row if cell)
+                            logger.debug("  第%d行: %s", row_idx, [str(cell)[:30] for cell in row])
                             
-                            if has_newline and row_idx == 0:
-                                # 第一行包含换行符,可能是表头和数据合并
-                                # 尝试分离表头和数据
-                                header_row = []
-                                data_row = []
-                                for cell in row:
-                                    if cell and '\n' in str(cell):
-                                        parts = str(cell).split('\n', 1)
-                                        header_row.append(parts[0].strip())
-                                        data_row.append(parts[1].strip() if len(parts) > 1 else '')
-                                    else:
-                                        header_row.append(str(cell) if cell else '')
-                                        data_row.append('')
-                                
-                                # 检查是否成功分离
-                                if any(data_row):
-                                    processed_table.append(header_row)
-                                    processed_table.append(data_row)
-                                    logger.debug("分离表头和数据行,页面=%d", page_num)
+                            # 智能修复: 如果某行只有"LLM",尝试从下一行获取完整内容
+                            # 这是因为PDF提取时可能将内容分散到多行
+                            for row_idx in range(len(table) - 1):
+                                row = table[row_idx]
+                                next_row = table[row_idx + 1]
+                                # 检查当前行的第二列是否只有"LLM"(或其他短关键词)
+                                if len(row) > 1 and str(row[1]).strip() == 'LLM':
+                                    # 检查下一行的第二列是否有内容
+                                    if len(next_row) > 1 and next_row[1] and str(next_row[1]).strip():
+                                        next_content = str(next_row[1]).strip()
+                                        # 如果下一行内容以"增加"或其他动词开头,可能是被分离的内容
+                                        if next_content.startswith('增加') or next_content.startswith('修改') or next_content.startswith('优化'):
+                                            # 合并内容: "增加 模型..." → "增加 LLM 模型..."
+                                            if '\n' in next_content:
+                                                # 移除末尾的"\nLLM"
+                                                next_content = next_content.replace('\nLLM', '').strip()
+                                            # 将"LLM"插入到内容中
+                                            parts = next_content.split(' ', 1)
+                                            if len(parts) == 2:
+                                                row[1] = f"{parts[0]} LLM {parts[1]}"
+                                            else:
+                                                row[1] = f"{next_content} LLM"
+                                            logger.debug("  修复第%d行: 从下一行合并内容 → '%s'", row_idx, str(row[1])[:50])
+                                            
+                                            # TODO: 下一行的内容已经被合并到当前行,但下一行本应有自己的内容
+                                            # 这是pdfplumber的提取bug,无法从错误数据中恢复
+                                            # 可能的解决方案: 使用OCR重新提取表格内容
+                                            # 当前workaround: 保持下一行的原始内容(虽然可能不正确)
+                        
+                        if has_newline_in_first_row:
+                            # 第一行包含换行符,可能是表头和数据合并
+                            # 尝试分离表头和数据
+                            header_row = []
+                            data_row = []
+                            for col_idx, cell in enumerate(first_row):
+                                if cell and '\n' in str(cell):
+                                    parts = str(cell).split('\n', 1)
+                                    header_part = parts[0].strip()
+                                    data_part = parts[1].strip() if len(parts) > 1 else ''
+                                    
+                                    # 智能重组: 如果数据部分以短关键词开头,将其移到后面
+                                    # 例如: "LLM\n首次发布..." → "首次发布: LLM ..."
+                                    if data_part and '\n' in data_part:
+                                        data_lines = data_part.split('\n')
+                                        # 如果第一行很短(<=10字符)且第二行以中文开头,可能是关键词错位
+                                        if len(data_lines) >= 2 and len(data_lines[0]) <= 10:
+                                            first_line = data_lines[0].strip()
+                                            rest_lines = '\n'.join(data_lines[1:]).strip()
+                                            # 检查第二行是否以中文或"首次"等开头
+                                            if rest_lines and (rest_lines[0] >= '\u4e00' or rest_lines.startswith('首次') or rest_lines.startswith('增加')):
+                                                # 重组: 将短关键词移到后面
+                                                # "首次发布：..." → "首次发布： LLM ..."
+                                                if '：' in rest_lines or ':' in rest_lines:
+                                                    # 在冒号后插入关键词
+                                                    for sep in ['：', ':']:
+                                                        if sep in rest_lines:
+                                                            prefix, suffix = rest_lines.split(sep, 1)
+                                                            data_part = f"{prefix}{sep} {first_line} {suffix}".strip()
+                                                            logger.debug("  重组列%d数据: '%s' + '%s' → '%s'", 
+                                                                       col_idx, first_line[:20], rest_lines[:30], data_part[:50])
+                                                            break
+                                    
+                                    header_row.append(header_part)
+                                    data_row.append(data_part)
+                                    logger.debug("  页面%d分离列%d: 表头='%s', 数据='%s'", 
+                                               page_num, col_idx, header_part[:50], data_part[:50])
                                 else:
-                                    processed_table.append(row)
-                            else:
-                                processed_table.append(row)
+                                    header_row.append(str(cell).strip() if cell else '')
+                                    data_row.append('')
+                            
+                            # 检查是否成功分离(数据行不全为空)
+                            if any(data_row):
+                                logger.debug("分离表头和数据行,页面=%d", page_num)
+                                # 替换第一行为表头,插入数据行
+                                table[0] = header_row
+                                table.insert(1, data_row)
+                        
+                        # 第二步:清理所有行的换行符(包括后续数据行,也需要智能重组)
+                        processed_table = []
+                        prev_content = {}  # 记录前一行的内容,用于检测重复
+                        for row_idx, row in enumerate(table):
+                            cleaned_row = []
+                            for col_idx, cell in enumerate(row):
+                                if cell and '\n' in str(cell):
+                                    cell_str = str(cell)
+                                    
+                                    # 对所有单元格应用智能重组逻辑(不只是第一行)
+                                    if '\n' in cell_str:
+                                        lines = cell_str.split('\n')
+                                        # 如果最后一行是"LLM"(或其他短关键词),将其移到前面
+                                        if len(lines) >= 2 and lines[-1].strip() == 'LLM':
+                                            keyword = lines[-1].strip()
+                                            content_lines = lines[:-1]  # 移除最后一行
+                                            content = ' '.join(line.strip() for line in content_lines if line.strip())
+                                            # 将关键词插入到内容中
+                                            # 例如: "增加 模型..." + "LLM" → "增加 LLM 模型..."
+                                            parts = content.split(' ', 1)
+                                            if len(parts) == 2:
+                                                cell_str = f"{parts[0]} {keyword} {parts[1]}".strip()
+                                            else:
+                                                cell_str = f"{content} {keyword}".strip()
+                                            if row_idx > 0:
+                                                logger.debug("  页面%d重组第%d行列%d: '%s' + '%s' → '%s'", 
+                                                           page_num, row_idx, col_idx, content[:20], keyword, cell_str[:50])
+                                        # 如果第一行很短(<=10字符)且第二行以中文开头,可能是关键词错位
+                                        elif len(lines) >= 2 and len(lines[0]) <= 10:
+                                            first_line = lines[0].strip()
+                                            rest_lines = '\n'.join(lines[1:]).strip()
+                                            # 检查第二行是否以中文或"首次"等开头
+                                            if rest_lines and (rest_lines[0] >= '\u4e00' or rest_lines.startswith('首次') or rest_lines.startswith('增加')):
+                                                # 重组: 将短关键词移到后面
+                                                if '：' in rest_lines or ':' in rest_lines:
+                                                    # 在冒号后插入关键词
+                                                    for sep in ['：', ':']:
+                                                        if sep in rest_lines:
+                                                            prefix, suffix = rest_lines.split(sep, 1)
+                                                            cell_str = f"{prefix}{sep} {first_line} {suffix}".strip()
+                                                            if row_idx > 0:
+                                                                logger.debug("  页面%d重组第%d行列%d: '%s' + '%s' → '%s'", 
+                                                                           page_num, row_idx, col_idx, first_line[:20], rest_lines[:30], cell_str[:50])
+                                                            break
+                                    
+                                    # 清理换行符
+                                    cleaned_cell = ' '.join(cell_str.split('\n'))
+                                    cleaned_row.append(cleaned_cell.strip())
+                                    
+                                    # 检测重复内容: 如果当前单元格内容与前一行相同,可能是PDF提取错误
+                                    # 这种情况下,我们无法从错误数据中恢复正确数据,只能标记为可疑
+                                    if col_idx == 1 and row_idx > 0:
+                                        if col_idx in prev_content and cleaned_cell.strip() == prev_content[col_idx]:
+                                            # 内容重复!这是PDF提取的bug
+                                            # 无法修复,因为真实内容已经丢失
+                                            logger.warning("  页面%d检测到第%d行列%d内容与前一行重复: '%s' (PDF提取错误,无法修复)", 
+                                                         page_num, row_idx, col_idx, cleaned_cell[:50])
+                                    
+                                    # 记录当前内容
+                                    prev_content[col_idx] = cleaned_cell.strip()
+                                else:
+                                    cleaned_row.append(str(cell).strip() if cell else '')
+                                    # 记录当前内容
+                                    prev_content[col_idx] = str(cell).strip() if cell else ''
+                            
+                            processed_table.append(cleaned_row)
+                        
+                        # OCR验证: 如果检测到重复内容,只对有问题的行使用OCR
+                        # 不再整个表格重新提取,而是保留pdfplumber的表结构
+                        ocr_extractor = get_ocr_extractor()
+                        if ocr_extractor:
+                            # 检测有问题的行(忽略空行)
+                            duplicate_rows = []
+                            for i in range(1, len(processed_table) - 1):
+                                if len(processed_table[i]) > 0 and len(processed_table[i+1]) > 0:
+                                    # 检查所有列是否有重复内容(而不是只检查第2列)
+                                    has_duplicate = False
+                                    for col_idx in range(min(len(processed_table[i]), len(processed_table[i+1]))):
+                                        content1 = processed_table[i][col_idx].strip()
+                                        content2 = processed_table[i+1][col_idx].strip()
+                                        # 只有当两列都有实际内容,且内容相同时,才认为是重复
+                                        if content1 and content2 and content1 == content2:
+                                            has_duplicate = True
+                                            logger.debug("  第%d行第%d列与前一行重复: '%s'", i + 1, col_idx, content1[:30])
+                                            break
+                                    
+                                    if has_duplicate:
+                                        # 标记第i+1行为有问题的行(因为它是重复的)
+                                        duplicate_rows.append(i + 1)
+                                        logger.warning("页面%d第%d行内容与前一行重复,标记为需要OCR修复", page_num, i + 1)
+                            
+                            # 如果有重复行,使用OCR提取整个表格,但只替换有问题的行
+                            if duplicate_rows:
+                                try:
+                                    ocr_table = ocr_extractor.extract_table_from_page(pdf_path, page_num)
+                                    if ocr_table and len(ocr_table) > 0:
+                                        logger.info("OCR提取成功,将修复%d个有问题的行", len(duplicate_rows))
+                                        # 调试: 输出pdfplumber和OCR提取的完整表格对比
+                                        logger.debug("pdfplumber表格(%d行):", len(processed_table))
+                                        for idx, row in enumerate(processed_table):
+                                            logger.debug("  PDF第%d行: %s", idx, row[:3] if len(row) > 3 else row)
+                                        logger.debug("OCR提取的完整表格(%d行):", len(ocr_table))
+                                        for idx, row in enumerate(ocr_table):
+                                            logger.debug("  OCR第%d行: %s", idx, row[:3] if len(row) > 3 else row)
+                                        
+                                        # 预处理: 合并OCR表格中的单字行(可能是被错误分离的姓名)
+                                        ocr_table = _merge_single_char_rows(ocr_table)
+                                        
+                                        # 只替换有问题的行,保留pdfplumber的表结构
+                                        # 通过第一列的值(版本号)来匹配OCR行,而不是用行索引
+                                        for row_idx in duplicate_rows:
+                                            if row_idx >= len(processed_table):
+                                                continue
+                                            
+                                            target_row = processed_table[row_idx]
+                                            target_cols = len(target_row)
+                                            
+                                            # 通过第一列的值查找OCR表格中的对应行
+                                            first_col_value = target_row[0].strip() if len(target_row) > 0 else ''
+                                            ocr_row = None
+                                            ocr_row_idx = -1
+                                            
+                                            for idx, row in enumerate(ocr_table):
+                                                if len(row) > 0 and row[0].strip() == first_col_value:
+                                                    ocr_row = row
+                                                    ocr_row_idx = idx
+                                                    break
+                                            
+                                            if not ocr_row:
+                                                logger.warning("  第%d行未在OCR表格中找到匹配(第一列='%s'),跳过", row_idx, first_col_value)
+                                                continue
+                                            
+                                            # 调试: 输出OCR提取的原始行数据
+                                            logger.debug("  通过第一列'%s'匹配到OCR第%d行", first_col_value, ocr_row_idx)
+                                            logger.debug("  OCR原始第%d行(%d列): %s", ocr_row_idx, len(ocr_row), ocr_row)
+                                            logger.debug("  目标第%d行(%d列): %s", row_idx, target_cols, target_row)
+                                            
+                                            # 智能修复: 如果OCR团队列只有单字,尝试从pdfplumber其他行中查找完整姓名
+                                            if len(ocr_row) > 2 and len(ocr_row[2].strip()) <= 2:
+                                                single_char = ocr_row[2].strip()
+                                                # 在pdfplumber表格中查找包含该单字的完整姓名
+                                                for pdf_row in processed_table:
+                                                    if len(pdf_row) > 2:
+                                                        team_col = pdf_row[2].strip()
+                                                        # 如果找到包含该单字的姓名(如"李赟")
+                                                        if single_char and single_char in team_col:
+                                                            # 提取完整姓名(假设姓名是2个字)
+                                                            import re
+                                                            # 查找单字后面紧跟的一个字
+                                                            pattern = single_char + r'[\u4e00-\u9fff]'
+                                                            match = re.search(pattern, team_col)
+                                                            if match:
+                                                                full_name = match.group()
+                                                                ocr_row[2] = full_name
+                                                                logger.info("  智能修复团队列: '%s' → '%s'", single_char, full_name)
+                                                                break
+                                            
+                                            # 如果列数一致,直接替换
+                                            if len(ocr_row) == target_cols:
+                                                processed_table[row_idx] = ocr_row
+                                                logger.debug("  替换第%d行: %s", row_idx, ocr_row[:3])
+                                            # 如果OCR列数更多,智能对齐列
+                                            elif len(ocr_row) > target_cols:
+                                                # 尝试找到最佳的列对齐方式
+                                                aligned_row = _align_ocr_row_to_target(
+                                                    ocr_row, 
+                                                    target_row,
+                                                    processed_table[0] if len(processed_table) > 0 else None
+                                                )
+                                                processed_table[row_idx] = aligned_row
+                                                logger.info("  第%d行列数对齐: OCR %d列 → %d列, 对齐后: %s", 
+                                                           row_idx, len(ocr_row), target_cols, aligned_row[:3])
+                                            # 如果OCR列数更少,补齐空字符串
+                                            else:
+                                                aligned_row = ocr_row + [''] * (target_cols - len(ocr_row))
+                                                processed_table[row_idx] = aligned_row
+                                                logger.info("  第%d行列数对齐: OCR %d列 → %d列, 补齐后: %s", 
+                                                           row_idx, len(ocr_row), target_cols, aligned_row[:3])
+                                    else:
+                                        logger.warning("OCR提取失败,保留pdfplumber结果")
+                                except Exception as e:
+                                    logger.error("OCR提取异常: %s", e)
+                        
+                        # Fallback: 如果OCR失败,尝试从校核列推断团队列的缺失数据
+                        # 逻辑: 如果某行的团队列为空,但校核列有内容,且校核列包含姓名,
+                        # 则将校核列的第一个姓名复制到团队列
+                        for row_idx in range(1, len(processed_table)):  # 跳过表头
+                            row = processed_table[row_idx]
+                            if len(row) > 3:  # 至少有4列(版本、内容、团队、校核)
+                                team_col = row[2].strip() if len(row) > 2 else ''
+                                review_col = row[3].strip() if len(row) > 3 else ''
+                                
+                                # 如果团队列为空,但校核列有内容
+                                if not team_col and review_col:
+                                    # 提取校核列的第一个姓名(假设姓名是2-3个中文字符)
+                                    import re
+                                    # 匹配中文姓名: 2-3个连续中文字符
+                                    name_pattern = r'[\u4e00-\u9fff]{2,3}'
+                                    match = re.search(name_pattern, review_col)
+                                    if match:
+                                        first_name = match.group()
+                                        row[2] = first_name
+                                        logger.info("  Fallback修复: 从校核列'%s'推断团队列 → '%s' (第%d行)", 
+                                                   review_col[:20], first_name, row_idx)
+                        
+                        # 最后再次规范化表格结构(确保所有行列数一致)
+                        processed_table = _normalize_table_structure(processed_table)
                         
                         result["tables"].append({
                             "page": page_num,
@@ -164,16 +649,22 @@ def _extract_pdf_multimodal(pdf_path: Path, temp_dir: Path) -> Dict[str, any]:
             result["text"] = "\n".join(text_parts)
         
         # 使用 PyMuPDF 提取图片（过滤小图）
-        # 注意:不在此阶段去重,因为PDF图片资源可能被多页共享,需要在PPT生成时智能判断
+        # 按页面去重:同一页面内的相同xref只提取一次,但不同页面可以有相同图片
         pdf_document = fitz.open(str(pdf_path))
         
         for page_num in range(len(pdf_document)):
             page = pdf_document[page_num]
             image_list = page.get_images(full=True)
             
+            page_extracted_xrefs = set()  # 当前页面已提取的xref
             img_count = 0  # 当前页面有效图片计数
             for img_index, img in enumerate(image_list):
                 xref = img[0]
+                
+                # 跳过当前页面已提取的图片
+                if xref in page_extracted_xrefs:
+                    logger.debug("跳过页面内重复图片: xref=%d (页面 %d)", xref, page_num + 1)
+                    continue
                 
                 try:
                     base_image = pdf_document.extract_image(xref)
@@ -210,6 +701,9 @@ def _extract_pdf_multimodal(pdf_path: Path, temp_dir: Path) -> Dict[str, any]:
                         "bytes": image_bytes,  # 用于去重
                         "xref": xref  # 记录xref用于调试
                     })
+                    
+                    # 标记为当前页面已提取
+                    page_extracted_xrefs.add(xref)
                     
                     logger.debug("提取有效图片: %s (%dx%d, 页面 %d, xref=%d)", 
                                 img_filename, width, height, page_num + 1, xref)

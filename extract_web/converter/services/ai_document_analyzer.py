@@ -17,46 +17,44 @@ logger = logging.getLogger("converter")
 
 class AIDocumentAnalyzer:
     """AI驱动的文档结构分析器"""
-    
+
     def __init__(self, model: str = "qwen-max"):
         """
         初始化AI文档分析器
-        
+
         Args:
             model: AI模型名称
         """
         self.model = model
-    
+
     def analyze_document_structure(
-        self, 
-        multimodal_data: dict,
-        request_id: str
+        self, multimodal_data: dict, request_id: str
     ) -> dict:
         """
         分析文档整体结构
-        
+
         Args:
             multimodal_data: 多模态提取的数据
             request_id: 请求ID
-            
+
         Returns:
             文档结构分析结果
         """
         logger.info("开始AI文档结构分析,RequestID=%s", request_id)
-        
+
         # 1. 构建文档概览
         overview = self._build_document_overview(multimodal_data)
-        
+
         # 2. 构建AI提示词
         prompt = self._build_structure_analysis_prompt(overview)
-        
+
         # 3. 调用AI分析
         try:
             response = self._call_ai(prompt, request_id)
-            
+
             # 4. 解析AI返回的JSON - 增强提取
             response_text = response.strip()
-            
+
             # 移除markdown代码块标记
             if response_text.startswith("```json"):
                 response_text = response_text[7:]
@@ -64,72 +62,78 @@ class AIDocumentAnalyzer:
                 response_text = response_text[3:]
             if response_text.endswith("```"):
                 response_text = response_text[:-3]
-            
+
             response_text = response_text.strip()
-            
+
             # 提取JSON对象(处理AI返回额外说明的情况)
-            start_idx = response_text.find('{')
-            end_idx = response_text.rfind('}')
-            
+            start_idx = response_text.find("{")
+            end_idx = response_text.rfind("}")
+
             if start_idx != -1 and end_idx != -1 and end_idx > start_idx:
-                json_text = response_text[start_idx:end_idx+1]
+                json_text = response_text[start_idx : end_idx + 1]
                 structure = json.loads(json_text)
-                logger.info("AI文档结构分析完成,识别标题页=%s,内容页=%d个", 
-                           structure.get("title_page", {}).get("page_number"),
-                           len(structure.get("content_pages", [])))
+                logger.info(
+                    "AI文档结构分析完成,识别标题页=%s,内容页=%d个",
+                    structure.get("title_page", {}).get("page_number"),
+                    len(structure.get("content_pages", [])),
+                )
                 return structure
             else:
                 raise ValueError("未找到有效的JSON对象")
-            
+
         except json.JSONDecodeError as e:
-            logger.error("AI返回JSON解析失败: %s,响应内容: %s", e, response[:500] if 'response' in locals() else 'N/A')
+            logger.error(
+                "AI返回JSON解析失败: %s,响应内容: %s",
+                e,
+                response[:500] if "response" in locals() else "N/A",
+            )
             return self._get_default_structure(multimodal_data)
         except Exception as e:
             logger.error("AI文档结构分析失败: %s", e, exc_info=True)
             return self._get_default_structure(multimodal_data)
-    
+
     def analyze_page_content(
         self,
         page_num: int,
         page_text: str,
         page_tables: list,
         page_images: list,
-        request_id: str
+        request_id: str,
     ) -> dict:
         """
         分析单个页面的内容
-        
+
         Args:
             page_num: 页码
             page_text: 页面文本
             page_tables: 页面表格列表
             page_images: 页面图片列表
             request_id: 请求ID
-            
+
         Returns:
             页面内容分析结果
         """
         logger.debug("分析第%d页内容,RequestID=%s", page_num, request_id)
-        
+
         # 1. 构建页面内容摘要
         content_summary = {
             "page_num": page_num,
             "text": page_text[:1000] if page_text else "",  # 前1000字
             "text_length": len(page_text) if page_text else 0,
             "tables": [self._summarize_table(t) for t in page_tables],
-            "images": [self._summarize_image(i) for i in page_images]
+            "images": [self._summarize_image(i) for i in page_images],
         }
-        
+
         # 2. 构建AI提示词
         prompt = self._build_content_analysis_prompt(content_summary)
-        
+
         # 3. 调用AI分析
         try:
             response = self._call_ai(prompt, request_id)
-            
+
             # 4. 解析结果 - 增强JSON提取
             response_text = response.strip()
-            
+
             # 移除markdown代码块标记
             if response_text.startswith("```json"):
                 response_text = response_text[7:]
@@ -137,72 +141,82 @@ class AIDocumentAnalyzer:
                 response_text = response_text[3:]
             if response_text.endswith("```"):
                 response_text = response_text[:-3]
-            
+
             response_text = response_text.strip()
-            
+
             # 尝试提取JSON对象(处理AI返回额外说明的情况)
             # 查找第一个{和最后一个}
-            start_idx = response_text.find('{')
-            end_idx = response_text.rfind('}')
-            
+            start_idx = response_text.find("{")
+            end_idx = response_text.rfind("}")
+
             if start_idx != -1 and end_idx != -1 and end_idx > start_idx:
-                json_text = response_text[start_idx:end_idx+1]
+                json_text = response_text[start_idx : end_idx + 1]
                 analysis = json.loads(json_text)
-                logger.debug("第%d页分析完成,标题=%s,布局=%s", 
-                            page_num, analysis.get("title"), analysis.get("suggested_layout"))
+                logger.debug(
+                    "第%d页分析完成,标题=%s,布局=%s",
+                    page_num,
+                    analysis.get("title"),
+                    analysis.get("suggested_layout"),
+                )
                 return analysis
             else:
                 raise ValueError("未找到有效的JSON对象")
-            
+
         except Exception as e:
             logger.error("第%d页内容分析失败: %s", page_num, e)
             # 返回默认分析
-            return self._get_default_page_analysis(page_num, page_text, page_tables, page_images)
-    
+            return self._get_default_page_analysis(
+                page_num, page_text, page_tables, page_images
+            )
+
     def _build_document_overview(self, data: dict) -> dict:
         """构建文档概览信息"""
         pages_summary = []
-        
+
         for page_data in data.get("pages", []):
             page_num = page_data["page"]
             text = page_data.get("text", "")
-            
+
             # 获取该页的表格和图片
             page_tables = [t for t in data.get("tables", []) if t["page"] == page_num]
             page_images = [i for i in data.get("images", []) if i["page"] == page_num]
-            
-            pages_summary.append({
-                "page": page_num,
-                "text_preview": text[:200] if text else "",  # 前200字
-                "text_length": len(text),
-                "table_count": len(page_tables),
-                "table_info": [f"{len(t['data'])}行x{len(t['data'][0]) if t['data'] else 0}列" 
-                              for t in page_tables],
-                "image_count": len(page_images),
-                "image_sizes": [f"{i['width']}x{i['height']}" for i in page_images]
-            })
-        
+
+            pages_summary.append(
+                {
+                    "page": page_num,
+                    "text_preview": text[:200] if text else "",  # 前200字
+                    "text_length": len(text),
+                    "table_count": len(page_tables),
+                    "table_info": [
+                        f"{len(t['data'])}行x{len(t['data'][0]) if t['data'] else 0}列"
+                        for t in page_tables
+                    ],
+                    "image_count": len(page_images),
+                    "image_sizes": [f"{i['width']}x{i['height']}" for i in page_images],
+                }
+            )
+
         return {
             "total_pages": len(data.get("pages", [])),
             "total_tables": len(data.get("tables", [])),
             "total_images": len(data.get("images", [])),
-            "pages_summary": pages_summary
+            "pages_summary": pages_summary,
         }
-    
+
     def _build_structure_analysis_prompt(self, overview: dict) -> str:
         """构建文档结构分析提示词"""
-        
+
         pages_desc = []
         for page in overview["pages_summary"]:
             desc = f"第{page['page']}页:\n"
             desc += f"  文本长度: {page['text_length']}字\n"
             desc += f"  文本预览: \"{page['text_preview']}\"\n"
-            if page['table_count'] > 0:
+            if page["table_count"] > 0:
                 desc += f"  表格: {page['table_count']}个 ({', '.join(page['table_info'])})\n"
-            if page['image_count'] > 0:
+            if page["image_count"] > 0:
                 desc += f"  图片: {page['image_count']}张 ({', '.join(page['image_sizes'])})\n"
             pages_desc.append(desc)
-        
+
         prompt = f"""你是一个专业的文档结构分析专家。请分析以下文档的结构:
 
 【文档概览】
@@ -263,15 +277,19 @@ class AIDocumentAnalyzer:
 }}
 """
         return prompt
-    
+
     def _build_content_analysis_prompt(self, content_summary: dict) -> str:
         """构建页面内容分析提示词"""
-        
+
         page_num = content_summary["page_num"]
         text = content_summary["text"]
-        tables_desc = ", ".join(content_summary["tables"]) if content_summary["tables"] else "无"
-        images_desc = ", ".join(content_summary["images"]) if content_summary["images"] else "无"
-        
+        tables_desc = (
+            ", ".join(content_summary["tables"]) if content_summary["tables"] else "无"
+        )
+        images_desc = (
+            ", ".join(content_summary["images"]) if content_summary["images"] else "无"
+        )
+
         prompt = f"""你是一个专业的内容分析专家。请分析第{page_num}页的内容:
 
 【页面文本】
@@ -415,28 +433,30 @@ Transform 模型分类
 }}
 """
         return prompt
-    
+
     def _call_ai(self, prompt: str, request_id: str) -> str:
         """调用AI模型"""
         messages = [{"role": "user", "content": prompt}]
-        
+
         response = Generation.call(
             model=self.model,
             messages=messages,
             result_format="message",
             temperature=0.1,
-            max_tokens=4000
+            max_tokens=4000,
         )
-        
+
         if response.status_code == 200:
             content = response.output.choices[0].message.content
-            logger.debug("AI调用成功,RequestID=%s,返回长度=%d", request_id, len(content))
+            logger.debug(
+                "AI调用成功,RequestID=%s,返回长度=%d", request_id, len(content)
+            )
             return content
         else:
             error_msg = f"AI调用失败: {response.code} - {response.message}"
             logger.error(error_msg)
             raise RuntimeError(error_msg)
-    
+
     def _summarize_table(self, table_data: dict) -> str:
         """总结表格信息"""
         data = table_data.get("data", [])
@@ -445,58 +465,51 @@ Transform 模型分类
         rows = len(data)
         cols = len(data[0]) if data else 0
         return f"{rows}行x{cols}列表格"
-    
+
     def _summarize_image(self, image_data: dict) -> str:
         """总结图片信息"""
         width = image_data.get("width", 0)
         height = image_data.get("height", 0)
         return f"{width}x{height}图片"
-    
+
     def _get_default_structure(self, multimodal_data: dict) -> dict:
         """获取默认文档结构(AI失败时的后备方案)"""
         pages = multimodal_data.get("pages", [])
-        
+
         return {
             "document_type": "未知文档",
             "title_page": {
                 "page_number": 1,
-                "elements": {
-                    "title": "文档标题",
-                    "subtitle": "AI智能生成"
-                }
+                "elements": {"title": "文档标题", "subtitle": "AI智能生成"},
             },
             "content_pages": [
                 {
                     "page_number": i,
                     "page_type": "content_page",
                     "main_topic": f"第{i}页",
-                    "importance": "medium"
+                    "importance": "medium",
                 }
                 for i in range(2, len(pages) + 1)
             ],
-            "background_images": []
+            "background_images": [],
         }
-    
+
     def _get_default_page_analysis(
-        self,
-        page_num: int,
-        page_text: str,
-        page_tables: list,
-        page_images: list
+        self, page_num: int, page_text: str, page_tables: list, page_images: list
     ) -> dict:
         """获取默认页面分析(AI失败时的后备方案)"""
-        
+
         # 尝试从文本提取标题
         title = f"第{page_num}页"
         if page_text:
-            lines = [line.strip() for line in page_text.split('\n') if line.strip()]
+            lines = [line.strip() for line in page_text.split("\n") if line.strip()]
             if lines:
                 title = lines[0][:50]  # 使用第一行作为标题
-        
+
         # 判断布局类型
         has_table = len(page_tables) > 0
         has_image = len(page_images) > 0
-        
+
         if has_table and has_image:
             layout = "title_table_image"
         elif has_table:
@@ -505,37 +518,41 @@ Transform 模型分类
             layout = "title_and_image"
         else:
             layout = "title_and_text"
-        
+
         # 构建元素列表
         elements = []
         for table in page_tables:
-            elements.append({
-                "type": "table",
-                "purpose": "数据表",
-                "should_keep": True,
-                "reason": "包含表格数据"
-            })
-        
+            elements.append(
+                {
+                    "type": "table",
+                    "purpose": "数据表",
+                    "should_keep": True,
+                    "reason": "包含表格数据",
+                }
+            )
+
         for image in page_images:
             # 简单判断是否为背景图
             width = image.get("width", 0)
             height = image.get("height", 0)
             area = width * height
             is_background = area > 1500000
-            
-            elements.append({
-                "type": "image",
-                "size": f"{width}x{height}",
-                "purpose": "背景装饰" if is_background else "内容图",
-                "should_keep": not is_background,
-                "reason": "全屏背景图" if is_background else "内容图片"
-            })
-        
+
+            elements.append(
+                {
+                    "type": "image",
+                    "size": f"{width}x{height}",
+                    "purpose": "背景装饰" if is_background else "内容图",
+                    "should_keep": not is_background,
+                    "reason": "全屏背景图" if is_background else "内容图片",
+                }
+            )
+
         return {
             "page_number": page_num,
             "title": title,
             "theme": "页面内容",
             "importance": "medium",
             "suggested_layout": layout,
-            "elements": elements
+            "elements": elements,
         }

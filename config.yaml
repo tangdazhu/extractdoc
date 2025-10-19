@@ -1,3 +1,15 @@
 input_directory: "his_pic"
 output_filename: "extracted_text.docx"
-log_file: "app.log" 
+log_file: "app.log"
+
+# PDF提取配置
+pdf_extraction:
+  # 是否启用OCR作为fallback
+  enable_ocr_fallback: true
+  # OCR检测阈值: 当检测到重复内容时触发OCR
+  ocr_trigger_on_duplicate: true
+  # OCR引擎配置
+  ocr_engine:
+    use_gpu: false  # 是否使用GPU加速
+    lang: 'ch'  # 语言: ch(中英文), en(英文)
+    use_angle_cls: true  # 是否支持旋转文字识别
