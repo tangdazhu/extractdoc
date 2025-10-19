@@ -932,29 +932,80 @@ def generate_word_document(
 ) -> Tuple[str, str]:
     """生成 Word 文档，返回 (文件名, 提示信息)。"""
 
-    text = _collect_source_text(source_file_path, source_url)
-    if not text:
-        raise ValueError("未能从输入源提取到有效文本。")
-
-    if template_config and template_config.get("template_path"):
-        template_path = Path(template_config["template_path"])
-        if template_path.exists():
-            doc = WordDocument(str(template_path))
-        else:
-            logger.warning("模板 %s 不存在，使用空白文档。", template_path)
-            doc = WordDocument()
+    # 1. 检测是否为 PDF 并提取多模态内容
+    is_pdf = source_file_path and source_file_path.suffix.lower() == ".pdf"
+    multimodal_data = None
+    
+    if is_pdf:
+        logger.info("检测到 PDF 文件，使用AI智能分析模式...")
+        multimodal_data = _extract_pdf_multimodal(source_file_path, temp_dir)
+        text = multimodal_data["text"]
     else:
-        doc = WordDocument()
-
-    style_name = template_config.get("paragraph_style") if template_config else None
-    for chunk in _ensure_text_chunks(text):
-        paragraph = doc.add_paragraph(chunk)
-        if style_name and style_name in doc.styles:
-            paragraph.style = style_name
+        logger.info("提取文本内容...")
+        text = _collect_source_text(source_file_path, source_url)
+        
+        if not text:
+            raise ValueError("未能从输入源提取到有效文本。")
+    
+    # 2. 根据文件类型选择生成模式
+    if is_pdf and multimodal_data:
+        # PDF 文件：使用AI智能分析模式
+        logger.info("使用AI分析文档结构...")
+        
+        # 初始化AI分析器
+        ai_analyzer = AIDocumentAnalyzer(model="qwen-max")
+        
+        # 分析文档整体结构
+        document_structure = ai_analyzer.analyze_document_structure(multimodal_data, request_id)
+        
+        # 分析每一页的内容
+        page_analyses = []
+        for page_data in multimodal_data.get("pages", []):
+            page_num = page_data["page"]
+            page_text = page_data.get("text", "")
+            page_tables = [t for t in multimodal_data.get("tables", []) if t["page"] == page_num]
+            page_images = [i for i in multimodal_data.get("images", []) if i["page"] == page_num]
+            
+            page_analysis = ai_analyzer.analyze_page_content(
+                page_num, page_text, page_tables, page_images, request_id
+            )
+            page_analyses.append(page_analysis)
+        
+        # 使用智能Word生成器
+        logger.info("使用AI智能生成器生成Word...")
+        from .smart_word_generator import SmartWordGenerator
+        
+        smart_generator = SmartWordGenerator()
+        doc = smart_generator.generate_word(
+            document_structure,
+            page_analyses,
+            multimodal_data,
+            request_id
+        )
+    else:
+        # 非 PDF 文件：传统文本模式
+        logger.info("使用传统文本模式生成Word...")
+        
+        if template_config and template_config.get("template_path"):
+            template_path = Path(template_config["template_path"])
+            if template_path.exists():
+                doc = WordDocument(str(template_path))
+            else:
+                logger.warning("模板 %s 不存在，使用空白文档。", template_path)
+                doc = WordDocument()
         else:
-            run = paragraph.runs[0]
-            run.font.size = Pt(12)
+            doc = WordDocument()
 
+        style_name = template_config.get("paragraph_style") if template_config else None
+        for chunk in _ensure_text_chunks(text):
+            paragraph = doc.add_paragraph(chunk)
+            if style_name and style_name in doc.styles:
+                paragraph.style = style_name
+            else:
+                run = paragraph.runs[0]
+                run.font.size = Pt(12)
+
+    # 3. 保存文档
     output_filename = f"{request_id}_document.docx"
     output_path = converted_dir / output_filename
     doc.save(output_path)
