@@ -152,6 +152,16 @@ class AIDocumentAnalyzer:
             if start_idx != -1 and end_idx != -1 and end_idx > start_idx:
                 json_text = response_text[start_idx : end_idx + 1]
                 analysis = json.loads(json_text)
+                
+                # 详细日志：输出formatted_content用于调试
+                formatted_content = analysis.get("formatted_content", "")
+                if formatted_content:
+                    logger.debug(
+                        "第%d页AI重组文本: %s",
+                        page_num,
+                        formatted_content[:200] if len(formatted_content) > 200 else formatted_content
+                    )
+                
                 logger.debug(
                     "第%d页分析完成,标题=%s,布局=%s",
                     page_num,
@@ -316,6 +326,11 @@ class AIDocumentAnalyzer:
 
         prompt = f"""你是一个专业的内容分析专家。请分析第{page_num}页的内容:
 
+【重要警告 - 必须严格遵守】
+在重新组织文本时,你必须逐字保留所有原始内容,包括所有中文、英文单词、数字、标点符号。
+绝对禁止删除、替换、改写任何词汇。只允许调整文本顺序和添加必要的标点符号。
+特别注意:所有英文单词(如Solution、Whitepaper、LLM等)必须保留在原始位置,不得删除或移动。
+
 【页面文本】
 {text}
 
@@ -337,7 +352,12 @@ class AIDocumentAnalyzer:
    - **特别注意**:如果列表项格式为"• Encoder Bert 架构",这是错误的
    - 正确格式应该是:"• Encoder 架构:... 典型模型如 Bert"
    - 如果发现此类问题,在 formatted_content 字段中提供重新组织后的文本
-   - **重要**:重新组织时必须保留所有原始内容,包括标题、段落、列表项等,只调整顺序,不要删除任何内容
+   - **重要规则(必须严格遵守)**:
+     * 必须逐字保留所有原始内容,包括所有中文、英文、数字、标点符号
+     * 只允许调整文本顺序,不得改写、删除、替换、省略任何词汇
+     * 特别注意保留所有英文单词(如Solution、Whitepaper、LLM等),不得删除或替换
+     * 可以添加必要的标点符号(如逗号、句号)来改善可读性
+     * 示例:原文"为产研和Solution开发团队" → 必须保留"Solution",不能改为"为产研和开发团队"
    - 如果文本顺序正常,不需要提供 formatted_content 字段
 4. 如果有表格,表格的作用是什么? (元数据表/数据表/内容表)
 5. 如果有图片,图片是否应该在PPT中显示? **请基于以下原则智能判断**:
@@ -393,7 +413,9 @@ class AIDocumentAnalyzer:
 - 不要因为"多页重复"就过滤内容图,只过滤装饰性背景图
 
 【文本重组示例】
-如果原始文本是:
+
+示例1 - 调整顺序(正确):
+原始文本:
 ```
 Transform
 模型分类
@@ -403,7 +425,7 @@ Transform
 架构：适合生成任务...
 ```
 
-正确的 formatted_content 应该是:
+正确的 formatted_content:
 ```
 Transform 模型分类
 • Encoder 架构：不适合做生成，在任务理解上性价比较高，如句子分类、命名实体识别等。典型模型如 Bert。
@@ -416,6 +438,43 @@ Transform 模型分类
 2. 将关键词(Bert, LLM, GPT, Llama)移到正确位置
 3. 保持完整的列表结构
 
+示例2 - 保留所有词汇(极其重要 - 这是最常见的错误):
+
+【原始文本】
+```
+Whitepaper的目的：为产研和Solution开发团队提供系统架构范式和技术路线图
+```
+
+【✓✓✓ 唯一正确的 formatted_content】
+```
+Whitepaper 的目的：为产研和 Solution 开发团队提供系统架构范式和技术路线图
+```
+分析: 保留了所有词汇,只添加了空格,Solution在"和"与"开发"之间 ✓
+
+【✗✗✗ 错误示例1 - 删除了"Solution"】
+```
+Whitepaper 的目的：为产研和开发团队提供系统架构范式和技术路线图
+```
+错误原因: 删除了"Solution"这个英文单词 ✗ 严重违规!
+
+【✗✗✗ 错误示例2 - 移动了"Solution"】
+```
+Whitepaper Solution 的目的：为产研和开发团队提供系统架构范式和技术路线图
+```
+错误原因: 将"Solution"从"和"与"开发"之间移到了"Whitepaper"后面 ✗ 严重违规!
+
+【✗✗✗ 错误示例3 - 替换了"Solution"】
+```
+Whitepaper 的目的：为产研和解决方案开发团队提供系统架构范式和技术路线图
+```
+错误原因: 将"Solution"替换为"解决方案" ✗ 严重违规!
+
+【关键规则 - 再次强调】
+1. 原文是"为产研和Solution开发团队" → "Solution"必须保留在"和"与"开发"之间
+2. 只能添加空格,不得删除、移动、替换任何词汇
+3. 所有英文单词必须保留在原始位置
+4. 如果你不确定如何重组,就不要提供formatted_content字段
+
 【输出格式】
 必须返回严格的JSON格式,不要有任何额外说明:
 {{
@@ -424,7 +483,7 @@ Transform 模型分类
   "theme": "页面核心主题",
   "importance": "high",
   "suggested_layout": "title_and_table",
-  "formatted_content": "重新组织后的文本内容(可选,仅当文本顺序混乱时提供,必须保留所有原始内容)",
+  "formatted_content": "重新组织后的文本内容(可选字段,仅当文本顺序混乱时提供)。**严格要求**:必须逐字复制原文所有词汇(包括所有中英文单词、数字、标点),只允许调整顺序和添加标点,绝对不得删除、替换、改写任何词汇。例如原文'为产研和Solution开发团队'必须保留'Solution',不能改为'为产研和开发团队'。如果文本顺序正常,不要提供此字段。",
   "elements": [
     {{
       "type": "table",
