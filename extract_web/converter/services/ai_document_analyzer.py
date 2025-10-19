@@ -181,6 +181,17 @@ class AIDocumentAnalyzer:
             page_tables = [t for t in data.get("tables", []) if t["page"] == page_num]
             page_images = [i for i in data.get("images", []) if i["page"] == page_num]
 
+            # 构建表格内容预览(前3行)
+            table_previews = []
+            for t in page_tables:
+                table_data = t.get('data', [])
+                preview_rows = table_data[:3] if table_data else []
+                table_preview = {
+                    'size': f"{len(table_data)}行x{len(table_data[0]) if table_data else 0}列",
+                    'preview': preview_rows
+                }
+                table_previews.append(table_preview)
+
             pages_summary.append(
                 {
                     "page": page_num,
@@ -191,6 +202,7 @@ class AIDocumentAnalyzer:
                         f"{len(t['data'])}行x{len(t['data'][0]) if t['data'] else 0}列"
                         for t in page_tables
                     ],
+                    "table_previews": table_previews,  # 新增:表格内容预览
                     "image_count": len(page_images),
                     "image_sizes": [f"{i['width']}x{i['height']}" for i in page_images],
                 }
@@ -213,6 +225,9 @@ class AIDocumentAnalyzer:
             desc += f"  文本预览: \"{page['text_preview']}\"\n"
             if page["table_count"] > 0:
                 desc += f"  表格: {page['table_count']}个 ({', '.join(page['table_info'])})\n"
+                # 增加表格内容预览
+                for idx, table_preview in enumerate(page.get("table_previews", []), 1):
+                    desc += f"    表格{idx}内容预览(前3行): {table_preview['preview']}\n"
             if page["image_count"] > 0:
                 desc += f"  图片: {page['image_count']}张 ({', '.join(page['image_sizes'])})\n"
             pages_desc.append(desc)
@@ -230,6 +245,9 @@ class AIDocumentAnalyzer:
 【分析任务】
 1. 哪一页是标题页? 为什么?
 2. 标题页包含哪些元素? (标题/副标题/元数据表等)
+   - **重要**: 副标题可能在文本中,也可能在表格中(如"Whitepaper的目的:xxx")
+   - 如果表格第一行包含类似"Whitepaper的目的"、"文档目的"等内容,这就是副标题
+   - 提取副标题时要保留完整内容,不要截断
 3. 每一页的主要内容类型? (标题页/内容页/图表页)
 4. **表格分类** - 分析每个表格的用途和位置:
    - **元数据表**: 包含文档元信息(作者/版本/日期/团队等),通常是键值对形式,列数较少
@@ -250,7 +268,7 @@ class AIDocumentAnalyzer:
     "page_number": <标题页页码>,
     "elements": {{
       "title": "<从文本提取的主标题>",
-      "subtitle": "<从文本提取的副标题,如果没有则为空字符串>",
+      "subtitle": "<从文本或表格中提取的副标题,必须保留完整内容,如果没有则为空字符串>",
       "metadata_table": {{
         "page": <元数据表所在页码,如果没有元数据表则省略此字段>,
         "purpose": "<从表格内容推断的用途>",

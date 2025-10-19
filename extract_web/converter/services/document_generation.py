@@ -613,27 +613,39 @@ def _extract_pdf_multimodal(pdf_path: Path, temp_dir: Path) -> Dict[str, any]:
                                 except Exception as e:
                                     logger.error("OCR提取异常: %s", e)
                         
-                        # Fallback: 如果OCR失败,尝试从校核列推断团队列的缺失数据
-                        # 逻辑: 如果某行的团队列为空,但校核列有内容,且校核列包含姓名,
-                        # 则将校核列的第一个姓名复制到团队列
+                        # Fallback: 如果OCR失败,尝试从校核列或前一行推断团队列的缺失数据
+                        import re
                         for row_idx in range(1, len(processed_table)):  # 跳过表头
                             row = processed_table[row_idx]
                             if len(row) > 3:  # 至少有4列(版本、内容、团队、校核)
                                 team_col = row[2].strip() if len(row) > 2 else ''
                                 review_col = row[3].strip() if len(row) > 3 else ''
                                 
-                                # 如果团队列为空,但校核列有内容
+                                # 策略1: 如果团队列为空,但校核列有内容
                                 if not team_col and review_col:
                                     # 提取校核列的第一个姓名(假设姓名是2-3个中文字符)
-                                    import re
-                                    # 匹配中文姓名: 2-3个连续中文字符
                                     name_pattern = r'[\u4e00-\u9fff]{2,3}'
                                     match = re.search(name_pattern, review_col)
                                     if match:
                                         first_name = match.group()
                                         row[2] = first_name
-                                        logger.info("  Fallback修复: 从校核列'%s'推断团队列 → '%s' (第%d行)", 
+                                        logger.info("  Fallback修复(策略1): 从校核列'%s'推断团队列 → '%s' (第%d行)", 
                                                    review_col[:20], first_name, row_idx)
+                                
+                                # 策略2: 如果团队列和校核列都为空,从前一行的团队列推断
+                                if not team_col and not review_col and row_idx > 1:
+                                    prev_row = processed_table[row_idx - 1]
+                                    if len(prev_row) > 2:
+                                        prev_team = prev_row[2].strip()
+                                        if prev_team:
+                                            # 提取前一行团队列的第一个姓名
+                                            name_pattern = r'[\u4e00-\u9fff]{2,3}'
+                                            match = re.search(name_pattern, prev_team)
+                                            if match:
+                                                first_name = match.group()
+                                                row[2] = first_name
+                                                logger.info("  Fallback修复(策略2): 从前一行团队列'%s'推断 → '%s' (第%d行)", 
+                                                           prev_team[:20], first_name, row_idx)
                         
                         # 最后再次规范化表格结构(确保所有行列数一致)
                         processed_table = _normalize_table_structure(processed_table)

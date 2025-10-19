@@ -70,9 +70,19 @@ class OCRTableExtractor:
             else:
                 pix = page.get_pixmap(matrix=fitz.Matrix(2, 2))
             
-            # 转为PIL Image
-            img_data = pix.tobytes("png")
-            image = Image.open(io.BytesIO(img_data))
+            # 转为PIL Image - 使用更安全的方法避免PyMuPDF内部错误
+            try:
+                img_data = pix.tobytes("png")
+                image = Image.open(io.BytesIO(img_data))
+            except Exception as img_error:
+                # 如果tobytes失败,尝试使用pil_tobytes
+                logger.warning(f"页面{page_num}图片转换失败,尝试备用方法: {img_error}")
+                try:
+                    image = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
+                except Exception as fallback_error:
+                    logger.error(f"页面{page_num}图片转换完全失败: {fallback_error}")
+                    pdf_document.close()
+                    return []
             
             # 转为numpy数组(paddleocr需要)
             img_array = np.array(image)
@@ -104,20 +114,18 @@ class OCRTableExtractor:
                 })
             
             # 4. 过滤页眉页脚(通常在页面顶部和底部)
+            # 使用纯位置判断,避免硬编码关键词导致误过滤正文内容
             page_height = pix.height
             filtered_lines = []
             for line in ocr_lines:
                 y_pos = line['y_center']
                 text = line['text']
                 
-                # 过滤顶部10%和底部10%的内容(页眉页脚)
-                # 同时过滤包含常见页眉页脚关键词的行
+                # 仅过滤顶部5%和底部5%的内容(页眉页脚)
+                # 不使用关键词过滤,避免误杀包含特定词汇的正文
                 is_header_footer = (
-                    y_pos < page_height * 0.10 or  # 顶部10%
-                    y_pos > page_height * 0.90 or  # 底部10%
-                    '远景智能' in text or
-                    'Proprietary' in text or
-                    'Confidential' in text
+                    y_pos < page_height * 0.05 or  # 顶部5%
+                    y_pos > page_height * 0.95     # 底部5%
                 )
                 
                 if not is_header_footer:
