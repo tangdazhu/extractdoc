@@ -137,6 +137,7 @@ class WebContentExtractor:
         sections = []
         images = []
         current_section = None
+        processed_texts = set()  # 用于去重
         
         # 遍历所有元素，包括section标签内的内容
         for elem in content_elem.find_all(['p', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'section', 'div']):
@@ -152,9 +153,10 @@ class WebContentExtractor:
             if not text or len(text) < 2:
                 continue
             
-            # 跳过重复内容（如果文本已经在某个父元素中出现过）
-            if elem.parent and elem.parent.name in ['p', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6']:
+            # 去重：跳过已经处理过的文本
+            if text in processed_texts:
                 continue
+            processed_texts.add(text)
             
             # 判断是否为标题
             is_heading = elem.name in ['h1', 'h2', 'h3', 'h4', 'h5', 'h6']
@@ -178,6 +180,7 @@ class WebContentExtractor:
                     'content': [],
                     'level': int(elem.name[1]) if elem.name.startswith('h') else 2
                 }
+                logger.debug(f"识别到章节标题: {text} (标签={elem.name}, is_heading={is_heading}, is_section_title={is_section_title}, has_strong_style={has_strong_style})")
             else:
                 # 添加到当前章节
                 if current_section is None:
@@ -361,9 +364,11 @@ class WebContentExtractor:
             r'^[一二三四五六七八九十百千]+[、\.]',  # 一、二、三、
             r'^\d+[、\.]',  # 1. 2. 3.
             r'^第[一二三四五六七八九十百千\d]+[章节部分条]',  # 第一章、第1节
+            r'第\s*[一二三四五六七八九十百千\d]+\s*章',  # 第 1 章（允许空格）
             r'^\([一二三四五六七八九十\d]+\)',  # (一) (1)
             r'^[\d]+\)',  # 1) 2) 3)
             r'^【.*】$',  # 【标题】
+            r'^\d+\s*[、\.]',  # 1 . 2 . (允许空格)
         ]
         
         for pattern in patterns:
