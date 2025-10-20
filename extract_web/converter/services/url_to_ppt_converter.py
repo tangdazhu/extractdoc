@@ -53,9 +53,12 @@ class URLToPPTConverter:
                 'success': True/False,
                 'output_path': 输出文件路径,
                 'slides_count': 幻灯片数量,
-                'message': 消息
+                'message': 消息,
+                'elapsed_time': 耗时（秒）
             }
         """
+        import time
+        start_time = time.time()
         logger.info(f"开始转换URL到PPT: {url}")
         
         try:
@@ -71,12 +74,16 @@ class URLToPPTConverter:
             logger.info("步骤3: 生成PPT文件")
             self._create_ppt(ppt_structure, output_path)
             
+            # 计算总耗时
+            elapsed_time = time.time() - start_time
+            
             result = {
                 'success': True,
                 'output_path': output_path,
                 'slides_count': len(ppt_structure['slides']) + 1,  # +1 for cover
                 'title': ppt_structure['cover']['title'],
-                'message': f"成功生成PPT，共{len(ppt_structure['slides']) + 1}页"
+                'elapsed_time': elapsed_time,
+                'message': f"成功生成PPT，共{len(ppt_structure['slides']) + 1}页，耗时{elapsed_time:.1f}秒"
             }
             
             logger.info(f"转换成功: {result['message']}")
