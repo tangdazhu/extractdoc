@@ -1,33 +1,36 @@
-import yaml
-import logging
-import os
+# -*- coding: utf-8 -*-
+"""
+配置工具（向后兼容层）
 
-DEFAULT_CONFIG = {
-    "input_directory": "his_pic",
-    "output_filename": "extracted_text.docx",
-    "log_file": "app.log",
-}
+此模块为旧版代码提供兼容接口，内部使用新的统一配置管理器。
+现在所有配置都从 config/application.yaml 加载。
+"""
+
+import logging
+from .config_manager import config as unified_config
 
 
 def load_config(config_path="config.yaml"):
-    """Load configuration from a YAML file."""
-    try:
-        with open(config_path, "r", encoding="utf-8") as f:
-            config = yaml.safe_load(f)
-        for key, value in DEFAULT_CONFIG.items():
-            if key not in config:
-                config[key] = value
-        return config
-    except FileNotFoundError:
-        print(
-            f"Warning: '{config_path}' not found. Created a default config file. Using default values."
-        )
-        with open(config_path, "w", encoding="utf-8") as f:
-            yaml.dump(DEFAULT_CONFIG, f, allow_unicode=True)
-        return DEFAULT_CONFIG.copy()
-    except Exception as e:
-        print(f"Error loading config file '{config_path}': {e}. Using default values.")
-        return DEFAULT_CONFIG.copy()
+    """
+    加载配置（向后兼容接口）
+    
+    注意：此函数现在从统一配置文件 config/application.yaml 加载配置，
+    config_path 参数被忽略以保持向后兼容。
+    
+    Args:
+        config_path: 配置文件路径（已废弃，保留仅为兼容性）
+    
+    Returns:
+        配置字典，包含旧版脚本需要的配置项
+    """
+    # 从统一配置管理器获取配置
+    return {
+        "input_directory": unified_config.get("paths.input_directory", "his_pic"),
+        "output_filename": "extracted_text.docx",
+        "log_file": unified_config.get("logging.file_path", "logs/app.log"),
+        # PDF提取配置（如果旧版脚本需要）
+        "pdf_extraction": unified_config.get_section("pdf_extraction"),
+    }
 
 
 def setup_logging(log_file_path, logger_name="app_logger"):

@@ -2,6 +2,16 @@
 
 ---
 
+## 📢 最新更新
+
+**2025-10-20 重大更新：配置管理统一**
+- ✅ **配置统一**: 所有配置文件已合并到 `config/application.yaml`
+- ✅ **配置管理器**: 新增统一配置管理器 `utils/config_manager.py`
+- ✅ **向后兼容**: 旧代码无需修改，自动适配新配置
+- ✅ **智能服务**: AI驱动的Word/PPT智能生成服务
+- ✅ **测试完善**: 所有测试通过（10/10）
+- 📘 详细说明: [配置管理完整指南](docs/CONFIG_COMPLETE_GUIDE.md)
+
 **2025-06-21 新增功能：**
 - 实时语音识别（流式同步）：前后端流式同步，兼容 DashScope WebSocket 接口，前端可实时显示临时（is_final: false）和最终（is_final: true）识别结果，支持中英文，详细日志辅助排查。
 
@@ -97,39 +107,57 @@ extract_doc/
 │   │   ├── migrations/
 │   │   ├── static/converter/css/ # CSS 样式
 │   │   ├── templates/converter/  # HTML 模板
+│   │   ├── services/             # 业务服务层
+│   │   │   ├── smart_word_generator.py    # 智能Word生成器
+│   │   │   ├── smart_ppt_generator.py     # 智能PPT生成器
+│   │   │   ├── ai_document_analyzer.py    # AI文档分析器
+│   │   │   ├── document_generation.py     # 文档生成服务
+│   │   │   └── ... (其他服务)
 │   │   ├── admin.py
-│   │   ├── apps.py
-│   │   ├── forms.py
-│   │   ├── models.py
-│   │   ├── urls.py
 │   │   ├── views.py
 │   │   ├── pic_file_converter.py # 图片转文件逻辑
 │   │   ├── excel_pdf_converter.py # Excel 转 PDF 逻辑
-│   │   ├── ppt_pdf_converter.py  # PPT 转 PDF 逻辑
-│   │   ├── txt_to_pdf_converter.py # TXT 转 PDF 逻辑
-│   │   ├── pdf_to_excel_converter.py # PDF 转 Excel 逻辑
-│   │   ├── pdf_to_word_converter.py  # PDF 转 Word 逻辑
-│   │   ├── pdf_to_ppt_converter.py   # PDF 转 PPT 逻辑
-│   │   ├── pdf_to_txt_converter.py   # PDF 转 TXT 逻辑
-│   │   ├── word_to_pdf_converter.py  # Word 转 PDF 逻辑
-│   │   ├── libreoffice_converter.py  # LibreOffice 通用转换器
-│   │   └── extract_video_snapshots.py # 视频帧提取脚本
-│   ├── media/                    # 存放用户上传和转换后的文件 (通过 settings.MEDIA_ROOT 配置)
+│   │   └── ... (其他转换器)
+│   ├── media/                    # 存放用户上传和转换后的文件
 │   │   └── his_pic/              # 用户历史文件根目录
-│   ├── db.sqlite3                # SQLite 数据库文件 (默认)
-│   └── ... (其他 Django 项目文件)
+│   └── db.sqlite3                # SQLite 数据库文件
+├── config/                       # 配置文件目录
+│   ├── application.yaml          # 统一配置文件 (新)
+│   ├── templates/                # PPT模板文件
+│   │   ├── business_template.pptx
+│   │   └── academic_template.pptx
+│   ├── create_ppt_templates.py   # 模板生成脚本
+│   ├── patterns.py               # 正则表达式工具库
+│   └── backup/                   # 旧配置文件备份
+├── utils/                        # 工具函数模块
+│   ├── __init__.py
+│   ├── config_manager.py         # 统一配置管理器 (新)
+│   ├── config.py                 # 配置加载（向后兼容层）
+│   ├── logger.py                 # 日志工具
+│   └── ... (其他工具)
+├── docs/                         # 项目文档
+│   ├── README.md                 # 文档目录
+│   └── CONFIG_COMPLETE_GUIDE.md  # 配置管理完整指南
 ├── requirements.txt              # Python 依赖包列表
 ├── install_dependencies.py      # 自动安装脚本
-├── utils.py                      # 工具函数 (配置加载、日志设置)
-├── extract_text_from_images.py  # 早期命令行脚本 (已集成到Web应用)
+├── test_config_migration.py     # 配置迁移测试脚本
+├── test_config_compatibility.py # 配置兼容性测试脚本
+├── extract_text_from_images.py  # 早期命令行脚本
 ├── VERSION.md                    # 版本历史和更新日志
 └── README.md                     # 本说明文件
 ```
 
+**重要更新 (2025-10-20)**:
+- ✅ **配置统一**: 所有配置已统一到 `config/application.yaml`
+- ✅ **配置管理器**: 新增 `utils/config_manager.py` 统一管理所有配置
+- ✅ **向后兼容**: `utils/config.py` 作为兼容层，旧代码无需修改
+- ✅ **智能服务**: 新增AI驱动的文档生成服务（Word、PPT）
+- ✅ **测试完善**: 配置迁移和兼容性测试全部通过
+
 **注意**:
-- `media/his_pic/` 目录及其子目录会在用户注册和文件上传/转换时自动创建。
-- `extract_text_from_images.py` 是早期命令行脚本，现已集成到Web应用中。
-- `install_dependencies.py` 是新增的自动安装脚本，简化项目部署流程。
+- `config/application.yaml` 是唯一的配置文件，包含所有应用配置
+- 旧配置文件已备份到 `config/backup/` 目录
+- 详细配置说明请参考 `docs/CONFIG_COMPLETE_GUIDE.md`
 
 ## 安装与运行
 

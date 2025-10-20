@@ -1,0 +1,164 @@
+# ============================================
+# Extract Doc 项目统一配置文件
+# ============================================
+
+# 应用基础配置
+application:
+  name: "extract_doc"
+  version: "1.0.0"
+  environment: "production"
+
+# 文件路径配置
+paths:
+  input_directory: "his_pic"
+  output_directory: "converted_files"
+  log_directory: "logs"
+  template_directory: "config/templates"
+
+# 日志配置
+logging:
+  level: "INFO"
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+  file_path: "logs/app.log"
+  max_file_size: 10485760  # 10MB
+  backup_count: 5
+  console_output: true
+
+# PDF提取配置
+pdf_extraction:
+  # 是否启用OCR作为fallback
+  enable_ocr_fallback: true
+  # OCR检测阈值: 当检测到重复内容时触发OCR
+  ocr_trigger_on_duplicate: true
+  # OCR引擎配置
+  ocr_engine:
+    use_gpu: false
+    lang: 'ch'  # 语言: ch(中英文), en(英文)
+    use_angle_cls: true  # 是否支持旋转文字识别
+    det_db_thresh: 0.3
+    det_db_box_thresh: 0.6
+    det_db_unclip_ratio: 1.5
+    rec_batch_num: 6
+    max_text_length: 25
+    use_space_char: true
+    drop_score: 0.5
+    gpu_mem: 500
+    enable_mkldnn: false
+    cpu_threads: 10
+
+# AI文档分析配置
+ai_document_analysis:
+  provider: "dashscope"
+  model: "qwen-max"
+  temperature: 0.1
+  max_tokens: 4000
+
+# Word文档生成配置
+word_generation:
+  # 页边距配置（英寸）
+  page_margins:
+    top: 1.0
+    bottom: 1.0
+    left: 1.0
+    right: 1.0
+  
+  # 字体大小配置（磅）
+  font_sizes:
+    title: 24
+    subtitle: 14
+    heading: 18
+    body: 11
+    table: 10
+  
+  # 颜色配置（RGB）
+  colors:
+    title: [0, 0, 0]
+    subtitle: [64, 64, 64]
+    placeholder: [128, 128, 128]
+  
+  # 图片配置
+  image:
+    max_width_inches: 6.0
+    max_height_inches: 4.0
+    default_dpi: 96
+  
+  # 表格配置
+  table:
+    style: "Light Grid Accent 1"
+  
+  # 样式模板配置
+  styles:
+    style_a:
+      name: "标准文档"
+      description: "通用文档格式"
+      template_path: null
+      paragraph_style: null
+      font_name: "宋体"
+      font_size: 12
+    style_b:
+      name: "报告文档"
+      description: "正式报告格式"
+      template_path: null
+      paragraph_style: null
+      font_name: "微软雅黑"
+      font_size: 11
+
+# PPT生成配置
+ppt_generation:
+  # 幻灯片尺寸（英寸）
+  slide_size:
+    width: 10.0
+    height: 7.5
+  
+  # 布局配置
+  margins: 0.5
+  spacing: 0.3
+  
+  # 字体大小配置（磅）
+  font_sizes:
+    title: 24
+    body: 14
+    table: 11
+  
+  # 生成偏好
+  generation_preferences:
+    prefer_original_title: true      # 优先使用原文标题
+    prefer_concise_content: false    # 不简化内容,保留完整性
+    skip_low_importance: false       # 不跳过低重要度内容
+    max_elements_per_slide: 5        # 每页最多元素数
+    prefer_layouts:                  # 布局优先级
+      - title_and_table
+      - title_and_image
+      - title_and_text
+  
+  # 样式模板配置
+  styles:
+    style_a:
+      name: "简约商务风格"
+      description: "适合商务汇报、项目展示"
+      template_path: "config/templates/business_template.pptx"
+      title: "自动生成演示文稿"
+      subtitle: "基于内容智能整理"
+      bullet_layout_index: 1
+      title_font_size: 44
+      content_font_size: 18
+    style_b:
+      name: "学术报告风格"
+      description: "适合学术论文、研究报告"
+      template_path: "config/templates/academic_template.pptx"
+      title: "研究成果展示"
+      subtitle: "数据驱动的内容呈现"
+      bullet_layout_index: 1
+      title_font_size: 40
+      content_font_size: 16
+
+# 文本处理配置
+text_processing:
+  min_text_length: 2
+  max_text_length: 1000
+  merge_threshold: 50
+  table_detection_threshold: 0.7
+  enable_text_cleaning: true
+  enable_ocr_error_correction: true
+  group_nearby_elements: true
+  proximity_threshold: 30

@@ -156,33 +156,33 @@ except ImportError:
     PYMUPDF_AVAILABLE = False
     logger.warning("PyMuPDF 未安装，PDF 转图片功能不可用。")
 
-TEMPLATES_CONFIG_PATH = Path(settings.BASE_DIR).parent / "config" / "document_generation_templates.json"
+# 导入配置管理器
+import sys
+sys.path.insert(0, str(Path(settings.BASE_DIR).parent))
+from utils.config_manager import config
 
 
 def load_generation_templates() -> Dict[str, Dict[str, dict]]:
-    """加载文档生成模板配置。
+    """
+    加载文档生成模板配置（从统一配置文件）
 
     返回结构:
         {
             "ppt": {"style_key": {...}},
             "word": {"style_key": {...}}
         }
-    若文件缺失，返回空配置并记录日志。
     """
-
-    if not TEMPLATES_CONFIG_PATH.exists():
-        logger.warning("未找到模板配置文件 %s。", TEMPLATES_CONFIG_PATH)
-        return {"ppt": {}, "word": {}}
-
     try:
-        with TEMPLATES_CONFIG_PATH.open("r", encoding="utf-8") as fp:
-            data = json.load(fp)
-        if not isinstance(data, dict):
-            logger.warning("模板配置文件结构非法，已忽略。")
-            return {"ppt": {}, "word": {}}
+        # 从统一配置文件加载
+        ppt_styles = config.get("ppt_generation.styles", {})
+        word_styles = config.get("word_generation.styles", {})
+        
+        logger.info("从配置文件加载模板配置: PPT样式=%d个, Word样式=%d个", 
+                   len(ppt_styles), len(word_styles))
+        
         return {
-            "ppt": data.get("ppt", {}),
-            "word": data.get("word", {}),
+            "ppt": ppt_styles,
+            "word": word_styles,
         }
     except Exception as exc:
         logger.error("加载模板配置失败: %s", exc, exc_info=True)

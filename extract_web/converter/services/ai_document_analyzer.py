@@ -7,10 +7,16 @@ AI驱动的文档分析模块
 
 import json
 import logging
+from pathlib import Path
 from typing import Dict, List, Optional
 
 import dashscope
 from dashscope import Generation
+
+# 导入配置管理器
+import sys
+sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
+from utils.config_manager import config
 
 logger = logging.getLogger("converter")
 
@@ -18,14 +24,22 @@ logger = logging.getLogger("converter")
 class AIDocumentAnalyzer:
     """AI驱动的文档结构分析器"""
 
-    def __init__(self, model: str = "qwen-max"):
+    def __init__(self, model: Optional[str] = None):
         """
         初始化AI文档分析器
 
         Args:
-            model: AI模型名称
+            model: AI模型名称，如果为None则从配置文件加载
         """
-        self.model = model
+        # 从配置文件加载AI模型配置
+        if model is None:
+            self.model = config.get("ai_document_analysis.model", "qwen-max")
+            self.temperature = config.get("ai_document_analysis.temperature", 0.1)
+            self.max_tokens = config.get("ai_document_analysis.max_tokens", 4000)
+        else:
+            self.model = model
+            self.temperature = 0.1
+            self.max_tokens = 4000
 
     def analyze_document_structure(
         self, multimodal_data: dict, request_id: str

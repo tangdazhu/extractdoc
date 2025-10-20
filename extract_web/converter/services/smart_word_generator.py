@@ -21,37 +21,12 @@ from docx.oxml.ns import qn
 from docx.oxml import OxmlElement
 from PIL import Image
 
-logger = logging.getLogger("converter")
+# 导入配置管理器
+import sys
+sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
+from utils.config_manager import config
 
-# Word文档样式配置（可从配置文件读取）
-WORD_STYLE_CONFIG = {
-    "page_margins": {
-        "top": 1.0,
-        "bottom": 1.0,
-        "left": 1.0,
-        "right": 1.0
-    },
-    "font_sizes": {
-        "title": 24,
-        "subtitle": 14,
-        "heading": 18,
-        "body": 11,
-        "table": 10
-    },
-    "colors": {
-        "title": (0, 0, 0),
-        "subtitle": (64, 64, 64),
-        "placeholder": (128, 128, 128)
-    },
-    "image": {
-        "max_width_inches": 6.0,
-        "max_height_inches": 4.0,
-        "default_dpi": 96
-    },
-    "table": {
-        "style": "Light Grid Accent 1"
-    }
-}
+logger = logging.getLogger("converter")
 
 
 class SmartWordGenerator:
@@ -62,10 +37,14 @@ class SmartWordGenerator:
         初始化生成器
         
         Args:
-            style_config: 样式配置，如果为None则使用默认配置
+            style_config: 样式配置，如果为None则从配置文件加载
         """
         self.doc = None
-        self.config = style_config or WORD_STYLE_CONFIG
+        # 从配置文件加载，允许运行时覆盖
+        if style_config is None:
+            self.config = config.get_section("word_generation")
+        else:
+            self.config = style_config
         
     def generate_word(
         self,
