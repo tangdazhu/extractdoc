@@ -1035,11 +1035,35 @@ def generate_ppt_document(
     if not PPTX_AVAILABLE:
         raise RuntimeError("python-pptx 未安装，无法生成 PPT。")
 
-    # 1. 检测是否为 PDF 并提取多模态内容
+    # 1. 检测输入源类型
     is_pdf = source_file_path and source_file_path.suffix.lower() == ".pdf"
+    is_url = bool(source_url and not source_file_path)
     multimodal_data = None
     
-    if is_pdf:
+    if is_url:
+        # URL输入：使用URL到PPT转换器
+        logger.info("检测到URL输入，使用URL到PPT智能转换...")
+        from .url_to_ppt_converter import URLToPPTConverter
+        
+        # 获取样式名称
+        style_name = template_config.get('style_name', 'style_a')
+        
+        # 创建转换器
+        converter = URLToPPTConverter(style=style_name)
+        
+        # 生成输出文件名
+        output_filename = f"url_ppt_{request_id}.pptx"
+        output_path = str(converted_dir / output_filename)
+        
+        # 执行转换
+        result = converter.convert(source_url, output_path)
+        
+        if not result['success']:
+            raise ValueError(f"URL转换失败: {result['message']}")
+        
+        return output_filename, f"成功从URL生成PPT，共{result['slides_count']}页"
+    
+    elif is_pdf:
         logger.info("检测到 PDF 文件，使用AI智能分析模式...")
         multimodal_data = _extract_pdf_multimodal(source_file_path, temp_dir)
         text = multimodal_data["text"]

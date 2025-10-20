@@ -592,10 +592,11 @@ let audioChunks = [];
 let audioContext = null;
 let analyser = null;
 let microphone = null;
-let isRealtimeRecording = false;
+window.isRealtimeRecording = false;
 let recognitionResults = [];
 let pollingInterval = null;
 let scriptProcessor = null;
+
 function initializeRealtimeSpeechFunctionality() {
     console.log('Initializing real-time speech recognition functionality');
     const startBtn = document.getElementById('startRealtimeBtn');
@@ -608,13 +609,30 @@ function initializeRealtimeSpeechFunctionality() {
     startBtn.addEventListener('click', startRealtimeRecognition);
     stopBtn.addEventListener('click', stopRealtimeRecognition);
     clearBtn.addEventListener('click', clearRealtimeResults);
+    
+    // 页面卸载或隐藏时自动停止
+    window.addEventListener('beforeunload', function() {
+        if (window.isRealtimeRecording) {
+            console.log('[beforeunload] Auto-stopping speech recognition');
+            window.stopRealtimeRecognition();
+        }
+    });
+    
+    // 页面可见性变化时检查
+    document.addEventListener('visibilitychange', function() {
+        if (document.hidden && window.isRealtimeRecording) {
+            console.log('[visibilitychange] Page hidden, auto-stopping speech recognition');
+            window.stopRealtimeRecognition();
+        }
+    });
+    
     console.log('Real-time speech recognition functionality initialized');
 }
 window.initializeRealtimeSpeechFunctionality = initializeRealtimeSpeechFunctionality;
 async function startRealtimeRecognition() {
     console.log('Starting real-time speech recognition');
     try {
-        if (isRealtimeRecording) {
+        if (window.isRealtimeRecording) {
             console.log('Already recording');
             return;
         }
@@ -643,7 +661,7 @@ async function startRealtimeRecognition() {
         microphone.connect(scriptProcessor);
         scriptProcessor.connect(audioContext.destination);
         scriptProcessor.onaudioprocess = function(e) {
-            if (!isRealtimeRecording) return;
+            if (!window.isRealtimeRecording) return;
             const input = e.inputBuffer.getChannelData(0);
             let pcm = new Int16Array(input.length);
             for (let i = 0; i < input.length; i++) {
@@ -669,7 +687,9 @@ async function startRealtimeRecognition() {
             throw new Error(sessionData.error || 'Failed to start recognition session');
         }
         realtimeSpeechSession = sessionData.session_id;
-        isRealtimeRecording = true;
+        window.isRealtimeRecording = true;
+        console.log('[startRealtimeRecognition] Set window.isRealtimeRecording = true');
+        console.log('[startRealtimeRecognition] Session ID:', realtimeSpeechSession);
         document.getElementById('startRealtimeBtn').style.display = 'none';
         document.getElementById('stopRealtimeBtn').style.display = 'inline-block';
         document.getElementById('audioLevelContainer').style.display = 'block';
@@ -685,9 +705,10 @@ async function startRealtimeRecognition() {
     }
 }
 async function stopRealtimeRecognition() {
+    console.log('[stopRealtimeRecognition] Function called');
     console.log('Stopping real-time speech recognition');
     try {
-        isRealtimeRecording = false;
+        window.isRealtimeRecording = false;
         if (pollingInterval) {
             clearInterval(pollingInterval);
             pollingInterval = null;
@@ -732,6 +753,9 @@ async function stopRealtimeRecognition() {
         showRealtimeError('停止实时识别时出错: ' + error.message);
     }
 }
+// 暴露stopRealtimeRecognition到全局作用域
+window.stopRealtimeRecognition = stopRealtimeRecognition;
+
 function getSelectedLanguages() {
     const languages = [];
     if (document.getElementById('langZh').checked) languages.push('zh');
@@ -739,7 +763,7 @@ function getSelectedLanguages() {
     return languages;
 }
 async function sendAudioData(arrayBuffer) {
-    if (!realtimeSpeechSession || !isRealtimeRecording) {
+    if (!realtimeSpeechSession || !window.isRealtimeRecording) {
         return;
     }
     try {
@@ -762,8 +786,18 @@ function startResultPolling() {
     if (pollingInterval) {
         clearInterval(pollingInterval);
     }
+    console.log('[startResultPolling] Starting polling with session:', realtimeSpeechSession);
     pollingInterval = setInterval(async () => {
-        if (!realtimeSpeechSession || !isRealtimeRecording) {
+        // 检查是否还在语音处理页面
+        const speechContent = document.getElementById('speechProcessingContent');
+        if (speechContent && speechContent.style.display === 'none') {
+            console.log('[Polling] Speech section hidden, auto-stopping');
+            window.stopRealtimeRecognition();
+            return;
+        }
+        
+        if (!realtimeSpeechSession || !window.isRealtimeRecording) {
+            console.log('[Polling] Stopping - session:', realtimeSpeechSession, 'recording:', window.isRealtimeRecording);
             clearInterval(pollingInterval);
             pollingInterval = null;
             return;
@@ -840,7 +874,7 @@ function clearRealtimeResults() {
     document.getElementById('realtimeErrorOutput').innerHTML = '';
 }
 function monitorAudioLevel(dataArray) {
-    if (!analyser || !isRealtimeRecording) {
+    if (!analyser || !window.isRealtimeRecording) {
         return;
     }
     analyser.getByteFrequencyData(dataArray);
@@ -861,7 +895,7 @@ function monitorAudioLevel(dataArray) {
             levelBar.className = 'progress-bar bg-info';
         }
     }
-    if (isRealtimeRecording) {
+    if (window.isRealtimeRecording) {
         requestAnimationFrame(() => monitorAudioLevel(dataArray));
     }
 }

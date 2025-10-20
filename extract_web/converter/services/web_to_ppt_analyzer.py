@@ -1,0 +1,264 @@
+# -*- coding: utf-8 -*-
+"""
+网页内容到PPT分析器
+
+使用AI智能分析网页内容，生成PPT结构
+"""
+
+import json
+import logging
+from typing import Dict, List, Optional
+from http import HTTPStatus
+import dashscope
+from utils.config_manager import config
+
+logger = logging.getLogger(__name__)
+
+
+class WebToPPTAnalyzer:
+    """网页内容到PPT分析器"""
+    
+    def __init__(self, model: Optional[str] = None):
+        """
+        初始化分析器
+        
+        Args:
+            model: AI模型名称，默认从配置加载
+        """
+        if model is None:
+            self.model = config.get("ai_document_analysis.model", "qwen-max")
+            self.temperature = config.get("ai_document_analysis.temperature", 0.1)
+            self.max_tokens = config.get("ai_document_analysis.max_tokens", 4000)
+        else:
+            self.model = model
+            self.temperature = 0.1
+            self.max_tokens = 4000
+        
+        logger.info(f"初始化WebToPPTAnalyzer: model={self.model}")
+    
+    def analyze_content(self, article: Dict) -> Dict:
+        """
+        分析文章内容，生成PPT结构
+        
+        Args:
+            article: 文章信息字典，包含：
+                - title: 标题
+                - subtitle: 副标题
+                - author: 作者
+                - publish_time: 发布时间
+                - content: 正文内容
+                - sections: 章节列表
+                
+        Returns:
+            PPT结构字典：
+            {
+                'cover': {首页信息},
+                'slides': [幻灯片列表]
+            }
+        """
+        logger.info(f"开始分析文章内容: {article.get('title')}")
+        
+        try:
+            # 构建提示词
+            prompt = self._build_prompt(article)
+            
+            # 调用AI分析
+            response = dashscope.Generation.call(
+                model=self.model,
+                prompt=prompt,
+                temperature=self.temperature,
+                max_tokens=self.max_tokens,
+                result_format='message'
+            )
+            
+            if response.status_code != HTTPStatus.OK:
+                raise Exception(f"AI调用失败: {response.message}")
+            
+            # 解析AI返回的结果
+            ai_result = response.output.choices[0].message.content
+            logger.info(f"AI返回结果长度: {len(ai_result)}")
+            
+            # 解析JSON结构
+            ppt_structure = self._parse_ai_result(ai_result, article)
+            
+            logger.info(f"分析完成: 生成{len(ppt_structure['slides'])}页幻灯片")
+            return ppt_structure
+            
+        except Exception as e:
+            logger.error(f"分析文章内容失败: {e}", exc_info=True)
+            # 返回基础结构
+            return self._create_fallback_structure(article)
+    
+    def _build_prompt(self, article: Dict) -> str:
+        """
+        构建AI提示词
+        
+        Args:
+            article: 文章信息
+            
+        Returns:
+            提示词字符串
+        """
+        sections_text = ""
+        if article.get('sections'):
+            for i, section in enumerate(article['sections'], 1):
+                content_preview = '\n'.join(section['content'][:5])  # 取前5段
+                sections_text += f"\n## {i}. {section['title']}\n{content_preview}\n"
+        
+        prompt = f"""
+你是一个专业的PPT内容策划师。请分析以下文章内容，为其设计一个专业的PPT演示文稿结构。
+
+文章信息：
+标题：{article.get('title', '未知标题')}
+作者：{article.get('author', '未知作者')}
+发布时间：{article.get('publish_time', '')}
+
+文章共有 {len(article.get('sections', []))} 个章节：
+{sections_text}
+
+请按照以下要求生成PPT结构：
+
+1. **首页（封面页）**：
+   - 主标题：使用文章标题
+   - 副标题：提炼文章的核心主题（10-20字）
+   - 作者：{article.get('author', '未知作者')}
+   - 日期：{article.get('publish_time', '')}
+
+2. **内容页**：
+   - **必须覆盖所有章节**，为每个章节生成一页PPT
+   - 每页包含：
+     * 页面标题：使用章节标题
+     * 要点列表：从章节内容中提取3-5个核心要点（每个要点15-30字）
+     * 总结：可选的一句话总结（不超过40字）
+   - **重要**：要点必须是具体内容，不能只是标题或概述性文字
+   - **重要**：如果章节提到了具体的能力、特点、要素等，必须列出具体内容
+   - 例如：如果章节标题是"AI原生应用的核心能力"，要点应该列出具体的能力名称和说明
+
+3. **要点提取原则**：
+   - 提取实质性内容，而非描述性语言
+   - 如果有列表、要素、步骤，必须提取具体项目
+   - 如果有定义、特点、优势，必须提取关键信息
+   - 避免"探讨了"、"介绍了"等元描述
+
+请以JSON格式返回，格式如下：
+{{
+  "cover": {{
+    "title": "主标题",
+    "subtitle": "副标题",
+    "author": "作者",
+    "date": "日期"
+  }},
+  "slides": [
+    {{
+      "title": "页面标题",
+      "points": ["具体要点1", "具体要点2", "具体要点3"],
+      "summary": "总结文字（可选）"
+    }}
+  ]
+}}
+
+注意：
+- 只返回JSON，不要包含markdown代码块标记
+- 确保JSON格式正确
+- 必须为所有 {len(article.get('sections', []))} 个章节生成对应的幻灯片
+- 要点必须是具体内容，不能是空泛的描述
+"""
+        return prompt
+    
+    def _parse_ai_result(self, ai_result: str, article: Dict) -> Dict:
+        """
+        解析AI返回的结果
+        
+        Args:
+            ai_result: AI返回的文本
+            article: 原始文章信息
+            
+        Returns:
+            PPT结构字典
+        """
+        try:
+            # 尝试提取JSON
+            # 移除可能的markdown代码块标记
+            ai_result = ai_result.strip()
+            if ai_result.startswith('```'):
+                ai_result = ai_result.split('```')[1]
+                if ai_result.startswith('json'):
+                    ai_result = ai_result[4:]
+            
+            # 解析JSON
+            ppt_data = json.loads(ai_result)
+            
+            # 验证结构
+            if 'cover' not in ppt_data or 'slides' not in ppt_data:
+                raise ValueError("AI返回的JSON缺少必要字段")
+            
+            # 补充缺失的封面信息
+            if 'title' not in ppt_data['cover']:
+                ppt_data['cover']['title'] = article.get('title', '未知标题')
+            if 'author' not in ppt_data['cover']:
+                ppt_data['cover']['author'] = article.get('author', '')
+            if 'date' not in ppt_data['cover']:
+                ppt_data['cover']['date'] = article.get('publish_time', '')
+            
+            return ppt_data
+            
+        except Exception as e:
+            logger.error(f"解析AI结果失败: {e}", exc_info=True)
+            logger.debug(f"AI原始返回: {ai_result[:500]}")
+            # 返回备用结构
+            return self._create_fallback_structure(article)
+    
+    def _create_fallback_structure(self, article: Dict) -> Dict:
+        """
+        创建备用PPT结构（当AI分析失败时）
+        
+        Args:
+            article: 文章信息
+            
+        Returns:
+            基础PPT结构
+        """
+        logger.info("使用备用PPT结构生成器")
+        
+        # 封面页
+        cover = {
+            'title': article.get('title', '未知标题'),
+            'subtitle': article.get('subtitle', ''),
+            'author': article.get('author', ''),
+            'date': article.get('publish_time', '')
+        }
+        
+        # 内容页
+        slides = []
+        
+        # 从章节生成幻灯片
+        sections = article.get('sections', [])
+        for section in sections[:8]:  # 最多8页
+            slide = {
+                'title': section['title'],
+                'points': [],
+                'summary': ''
+            }
+            
+            # 提取要点（取前5段作为要点）
+            for content in section['content'][:5]:
+                # 简化内容
+                point = content[:50] + ('...' if len(content) > 50 else '')
+                slide['points'].append(point)
+            
+            slides.append(slide)
+        
+        # 如果没有章节，从正文创建一页
+        if not slides:
+            slides.append({
+                'title': '内容概述',
+                'points': [
+                    article.get('content', '')[:100] + '...'
+                ],
+                'summary': ''
+            })
+        
+        return {
+            'cover': cover,
+            'slides': slides
+        }

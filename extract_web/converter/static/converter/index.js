@@ -1012,9 +1012,32 @@ document.addEventListener('DOMContentLoaded', function() {
 // --- Main Navigation Logic ---
 function selectMainNavigation(navId, isInitialLoad = false) {
     console.log(`[selectMainNavigation] Called with navId: ${navId}, isInitialLoad: ${isInitialLoad}`);
+    console.log(`[selectMainNavigation] currentSelectedMainNavigation: ${currentSelectedMainNavigation}`);
+    
     if (isConverting && !isInitialLoad) {
         console.log("[selectMainNavigation] Processing active. Main navigation switch prevented.");
         return;
+    }
+
+    // 如果正在离开语音处理页面，自动停止实时语音识别
+    console.log(`[selectMainNavigation] Checking: currentSelectedMainNavigation === 'speechProcessing': ${currentSelectedMainNavigation === 'speechProcessing'}`);
+    console.log(`[selectMainNavigation] Checking: navId !== 'speechProcessing': ${navId !== 'speechProcessing'}`);
+    
+    if (currentSelectedMainNavigation === 'speechProcessing' && navId !== 'speechProcessing') {
+        console.log("[selectMainNavigation] ✓ Leaving speech section, checking for active recording");
+        console.log("[selectMainNavigation] window.isRealtimeRecording =", window.isRealtimeRecording);
+        console.log("[selectMainNavigation] typeof window.stopRealtimeRecognition =", typeof window.stopRealtimeRecognition);
+        try {
+            // 从window对象获取函数和变量
+            if (typeof window.stopRealtimeRecognition === 'function' && window.isRealtimeRecording === true) {
+                console.log("[selectMainNavigation] Auto-stopping real-time speech recognition");
+                window.stopRealtimeRecognition();
+            } else {
+                console.log("[selectMainNavigation] No active recording to stop");
+            }
+        } catch (e) {
+            console.error("[selectMainNavigation] Error stopping real-time speech:", e);
+        }
     }
 
     // Hide all main content sections
@@ -1072,6 +1095,13 @@ function selectMainNavigation(navId, isInitialLoad = false) {
     
 function clearAllInputAreas() {
     console.log("[clearAllInputAreas] Clearing all relevant input areas.");
+    
+    // 如果有正在进行的实时语音识别，先停止
+    if (typeof window.stopRealtimeRecognition === 'function' && window.isRealtimeRecording === true) {
+        console.log("[clearAllInputAreas] Stopping active real-time speech recognition");
+        window.stopRealtimeRecognition();
+    }
+    
     // Document Conversion
     clearFileList(); // Clears uploadedFiles array and UI for doc conversion
     clearConvertedFilesList(); // Clears results table for doc conversion
