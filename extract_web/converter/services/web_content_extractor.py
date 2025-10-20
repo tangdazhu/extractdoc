@@ -6,11 +6,14 @@
 """
 
 import re
+import json
 import logging
 from typing import Dict, Optional, List
 from datetime import datetime
+from http import HTTPStatus
 import requests
 from bs4 import BeautifulSoup
+import dashscope
 from utils.config_manager import config
 
 logger = logging.getLogger(__name__)
@@ -19,12 +22,24 @@ logger = logging.getLogger(__name__)
 class WebContentExtractor:
     """网页内容提取器"""
     
-    def __init__(self):
-        """初始化提取器"""
+    def __init__(self, use_ai: bool = True):
+        """
+        初始化提取器
+        
+        Args:
+            use_ai: 是否使用AI分析HTML（默认True）
+        """
         self.timeout = 30
         self.headers = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
         }
+        self.use_ai = use_ai
+        if use_ai:
+            # 从配置加载AI参数
+            self.model = config.get("ai_document_analysis.model", "qwen-max")
+            self.temperature = config.get("ai_document_analysis.temperature", 0.1)
+            self.max_tokens = config.get("ai_document_analysis.max_tokens", 4000)
+            logger.info(f"AI内容提取已启用: model={self.model}")
     
     def extract_from_url(self, url: str) -> Dict:
         """
@@ -48,7 +63,16 @@ class WebContentExtractor:
         logger.info(f"开始提取URL内容: {url}")
         
         try:
-            # 判断URL类型
+            # 如果启用AI，优先使用AI提取
+            if self.use_ai:
+                try:
+                    logger.info("使用AI分析HTML内容")
+                    return self._extract_with_ai(url)
+                except Exception as e:
+                    logger.warning(f"AI提取失败，回退到传统方法: {e}")
+                    # AI失败后回退到传统方法
+            
+            # 传统方法：判断URL类型
             if 'mp.weixin.qq.com' in url:
                 return self._extract_weixin_article(url)
             else:
@@ -381,3 +405,176 @@ class WebContentExtractor:
             return True
         
         return False
+    
+    def _extract_with_ai(self, url: str) -> Dict:
+        """
+        使用AI分析HTML并提取内容
+        
+        Args:
+            url: 文章URL
+            
+        Returns:
+            文章信息字典
+        """
+        logger.info("使用AI提取器分析网页内容")
+        
+        # 获取网页HTML
+        response = requests.get(url, headers=self.headers, timeout=self.timeout)
+        response.encoding = response.apparent_encoding or 'utf-8'
+        html = response.text
+        
+        # 使用BeautifulSoup清理HTML，移除script、style等无用标签
+        soup = BeautifulSoup(html, 'html.parser')
+        
+        # 移除无用标签
+        for tag in soup(['script', 'style', 'nav', 'footer', 'header', 'aside', 'iframe', 'noscript']):
+            tag.decompose()
+        
+        # 对于微信文章，只提取正文部分
+        content_elem = None
+        if 'mp.weixin.qq.com' in url:
+            content_elem = soup.find('div', class_='rich_media_content')
+            if content_elem:
+                logger.info("检测到微信文章，只提取正文内容")
+        
+        # 如果找到了正文，只用正文；否则用整个body
+        if content_elem:
+            cleaned_html = str(content_elem)
+        else:
+            body = soup.find('body')
+            if body:
+                cleaned_html = str(body)
+            else:
+                cleaned_html = str(soup)
+        
+        # 进一步清理：移除所有HTML标签，只保留文本和结构
+        # 这样可以大幅减少token消耗
+        text_soup = BeautifulSoup(cleaned_html, 'html.parser')
+        
+        # 提取纯文本，但保留标题结构
+        text_parts = []
+        seen_texts = set()  # 用于去重
+        
+        for elem in text_soup.find_all(['h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'p', 'div', 'section']):
+            text = elem.get_text(strip=True)
+            if not text or len(text) < 5:  # 过滤太短的文本
+                continue
+            
+            # 去重：避免嵌套元素导致的重复
+            # 但对于标题，即使重复也保留（因为可能是重要的章节标题）
+            is_heading = elem.name in ['h1', 'h2', 'h3', 'h4', 'h5', 'h6']
+            
+            if is_heading:
+                text_parts.append(f"[标题] {text}")
+            elif text not in seen_texts:
+                text_parts.append(text)
+                seen_texts.add(text)
+        
+        cleaned_html = '\n\n'.join(text_parts)  # 使用双换行分隔，更清晰
+        
+        # 限制长度
+        max_html_length = 100000  # 提高到100KB
+        if len(cleaned_html) > max_html_length:
+            logger.warning(f"内容过长({len(cleaned_html)}字符)，截取前{max_html_length}字符")
+            cleaned_html = cleaned_html[:max_html_length]
+        else:
+            logger.info(f"提取的内容长度: {len(cleaned_html)}字符")
+        
+        # 构建AI提示词
+        prompt = f"""请分析以下文章内容，提取结构化信息。
+
+文章内容中，以"[标题]"标记的是章节标题。
+
+要求：
+1. 识别文章标题（通常是第一个标题）
+2. 提取所有章节标题和内容，特别注意"第1章"、"第2章"......"第11章"等所有章节
+3. 每个章节的content是该章节下的所有段落
+4. 返回JSON格式，格式如下：
+
+{{
+    "title": "文章标题",
+    "subtitle": "",
+    "author": "作者",
+    "publish_time": "",
+    "sections": [
+        {{
+            "title": "章节标题",
+            "content": ["段落1", "段落2"],
+            "level": 2
+        }}
+    ],
+    "images": []
+}}
+
+重要：
+- 必须提取所有章节，不要遗漏任何"第X章"
+- 内容段落保留原文，不要总结或省略
+- 如果找不到某个字段，设为空字符串或空数组
+- 只返回JSON，不要有其他说明文字
+
+文章内容：
+{cleaned_html}
+"""
+        
+        # 调用dashscope AI
+        logger.info("调用AI分析HTML...")
+        response = dashscope.Generation.call(
+            model=self.model,
+            prompt=prompt,
+            temperature=self.temperature,
+            max_tokens=self.max_tokens,
+            result_format='message'
+        )
+        
+        if response.status_code != HTTPStatus.OK:
+            raise Exception(f"AI调用失败: {response.message}")
+        
+        response_text = response.output.choices[0].message.content
+        logger.debug(f"AI返回内容: {response_text[:500]}...")
+        
+        # 解析JSON响应
+        try:
+            # 尝试提取JSON（可能被markdown代码块包裹）
+            json_match = re.search(r'```(?:json)?\s*(\{.*?\})\s*```', response_text, re.DOTALL)
+            if json_match:
+                json_str = json_match.group(1)
+            else:
+                # 直接尝试解析整个响应
+                json_str = response_text.strip()
+            
+            result = json.loads(json_str)
+            
+            # 验证必需字段
+            if 'title' not in result:
+                result['title'] = '未知标题'
+            if 'sections' not in result:
+                result['sections'] = []
+            if 'images' not in result:
+                result['images'] = []
+            
+            # 添加额外字段
+            result['url'] = url
+            result['source'] = 'ai_extracted'
+            
+            # 生成完整正文
+            content_parts = []
+            for section in result['sections']:
+                if section.get('title'):
+                    content_parts.append(section['title'])
+                if section.get('content'):
+                    if isinstance(section['content'], list):
+                        content_parts.extend(section['content'])
+                    else:
+                        content_parts.append(str(section['content']))
+            result['content'] = '\n\n'.join(content_parts)
+            
+            logger.info(f"AI提取成功: 标题={result['title']}, 章节数={len(result['sections'])}, 图片数={len(result['images'])}")
+            return result
+            
+        except json.JSONDecodeError as e:
+            logger.error(f"解析LLM返回的JSON失败: {e}")
+            logger.error(f"LLM返回内容: {response_text}")
+            raise ValueError(f"AI返回的内容不是有效的JSON格式: {e}")
+        except Exception as e:
+            logger.error(f"AI提取过程出错: {e}", exc_info=True)
+            raise
