@@ -102,7 +102,16 @@ class WebToPPTAnalyzer:
         sections_text = ""
         if article.get('sections'):
             for i, section in enumerate(article['sections'], 1):
-                content_preview = '\n'.join(section['content'][:5])  # 取前5段
+                # 取更多内容，确保AI能看到实质性内容
+                # 如果内容太少，说明提取不完整
+                content = section.get('content', [])
+                if len(content) < 3:
+                    # 内容太少，可能是提取问题，使用全部内容
+                    content_preview = '\n'.join(content)
+                else:
+                    # 取前10段，确保覆盖关键信息
+                    content_preview = '\n'.join(content[:10])
+                
                 sections_text += f"\n## {i}. {section['title']}\n{content_preview}\n"
         
         prompt = f"""

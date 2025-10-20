@@ -51,7 +51,7 @@ ai_document_analysis:
   provider: "dashscope"
   model: "qwen-max"
   temperature: 0.1
-  max_tokens: 4000
+  max_tokens: 8192  # qwen-max最大输出限制为8192 tokens
 
 # Word文档生成配置
 word_generation:
