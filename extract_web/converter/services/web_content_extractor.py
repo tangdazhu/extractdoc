@@ -521,9 +521,10 @@ class WebContentExtractor:
                 # 处理相对URL
                 if img_url.startswith("/"):
                     from urllib.parse import urljoin
+
                     img_url = urljoin(url, img_url)
                 images.append(img_url)
-        
+
         logger.info(f"提取到{len(images)}张图片")
 
         # 提取纯文本，但保留标题结构
@@ -575,38 +576,63 @@ class WebContentExtractor:
         logger.info(f"文章分为{len(batches)}个批次处理")
 
         # 构建完整的AI提示词（不简化）
-        system_prompt = """你是技术知识提取专家。
+        system_prompt = """你是技术知识提取专家。你的任务是**逐字逐句提取原文知识点**，不是概括总结。
 
-【核心规则 - 必须100%遵守】
-1. 原文说"N个要素"，必须提取N个（提取后数一遍）
-2. 有父子关系必须缩进（子项前加"  - "）
-3. 有架构图必须在content中添加"[图片]架构图"
-4. 禁止写"介绍了"等废话
+【核心原则】
+1. 原文有几个章节，就提取几个章节（不要合并）
+2. 原文说"N个要素"，就提取N个要素（不要省略）
+3. 原文有层次结构，就用缩进表示（不要平铺）
+4. 原文有图片，就添加[图片]标记（不要忽略）
+
+【致命错误 - 立即失败】
+❌ 合并章节："第1章和第2章都介绍了..."（必须分开提取）
+❌ 概括要素："介绍了11个要素"（必须列出11个）
+❌ 省略细节："包括大模型、提示词等"（"等"字说明省略了）
+❌ 平铺结构："ReactAgent、FlowAgent、SequentialAgent"（必须缩进）
+
+【正确做法】
+✅ 每个章节独立提取，不合并
+✅ 每个要素独立一行，带编号和说明
+✅ 子项必须缩进（前加"  - "）
+✅ 有图片必须添加"[图片]说明"
 
 【输出格式】
-{"title":"","sections":[{"title":"第X章","content":["知识点1","  - 子知识点1","[图片]架构图"],"level":2}],"images":[]}
+{"title":"","sections":[{"title":"第X章 标题","content":["1. **要素1**：说明","2. **要素2**：说明","  - 子项1：说明","[图片]架构图"],"level":2}],"images":[]}
 
-【示例1 - 完整列表】
-原文："AI应用11个关键要素包括：大模型、提示词、RAG..."
-✅ 正确：content中必须有11个要素，每个独立一行
-❌ 错误：只提取8个
+【示例 - 完整提取11个要素】
+原文："构建AI应用需要11个关键要素：大模型、AI开发框架、提示词、RAG、记忆、工具、网关、运行时、可观测、评估、安全"
+✅ 正确（11行，每行一个）：
+"1. **大模型**：负责核心推理决策，赋予应用思维能力"
+"2. **AI开发框架**：如LangChain、Dify，提供开发工具"
+"3. **提示词**：直接决定AI生成内容的质量"
+"4. **RAG**：检索增强生成，解决幻觉问题"
+"5. **记忆**：增强模型的会话记忆性"
+"6. **工具**：主流模型已将工具调用作为原生功能"
+"7. **网关**：解决模型切换、Token流量控制"
+"8. **运行时**：处理动态生成的任务"
+"9. **可观测**：端到端全链路追踪"
+"10. **评估**：自动化评估AI应用质量"
+"11. **安全**：防护措施，防止攻击"
 
-【示例2 - 层次结构】
-原文："FlowAgent包含SequentialAgent、ParallelAgent、LoopAgent"
-✅ 正确：
-- **FlowAgent**：包含多个ReactAgent
-  - SequentialAgent：串行执行
-  - ParallelAgent：并行执行
-  - LoopAgent：循环执行
-❌ 错误：平铺列出，无缩进
+❌ 错误（概括，只有1行）：
+"介绍了11个关键要素，包括大模型、提示词、RAG等技术"
 
-【示例3 - 图片标记】
-原文：有架构图
-✅ 正确：content中添加"[图片]AI原生应用架构图"
-❌ 错误：不添加标记
+【示例 - 层次结构】
+原文："FlowAgent包含4个子类型：SequentialAgent、ParallelAgent、LoopAgent、LlmRoutingAgent"
+✅ 正确（缩进）：
+"- **FlowAgent**：包含多个ReactAgent按特定流程协作"
+"  - SequentialAgent：顺序执行多个Agent的流程"
+"  - ParallelAgent：并行执行多个Agent的流程"
+"  - LoopAgent：循环执行多个Agent直到满足条件退出"
+"  - LlmRoutingAgent：由大模型决策执行哪个Agent"
 
-【数量验证】
-原文说"11个要素"，提取后必须有11个，不能是8个或10个"""
+❌ 错误（平铺）：
+"FlowAgent、SequentialAgent、ParallelAgent、LoopAgent"
+
+【示例 - 不要合并章节】
+原文有"第1章 AI原生应用"和"第2章 关键要素"
+✅ 正确：提取2个sections，每个独立
+❌ 错误：合并成1个section"""
 
         # 分批调用AI，收集结果
         all_sections = []
@@ -625,35 +651,55 @@ class WebContentExtractor:
             user_prompt = f"""【文章内容第{i+1}/{len(batches)}部分】
 {batch_content}
 
-【任务】提取每个章节的知识点
+【任务】
+逐字逐句提取原文知识点，禁止概括、省略、合并。
 
-【强制规则】
-1. 如果原文说"11个要素"，必须列出全部11个（不能是8个）
-2. 如果有父子关系（如"FlowAgent包含4个子类型"），子项必须缩进：
-   - **FlowAgent**：说明
-     - SequentialAgent：说明
-     - ParallelAgent：说明
-     - LoopAgent：说明
-     - LlmRoutingAgent：说明
-3. 如果原文说"介绍A和B两个技术，B包含B1和B2"，必须归类：
-   - **A**：说明
-   - **B**：说明
-     - B1：说明
-     - B2：说明
+【强制要求 - 违反立即失败】
+1️⃣ 原文说"11个要素"→必须提取11行，每行一个要素（不能是8行或10行）
+2️⃣ 原文说"包含4个子类型"→必须用缩进表示层次（父项+4个子项）
+3️⃣ 原文有架构图→必须在content中添加"[图片]架构图说明"
+4️⃣ 每个章节独立提取→不要合并多个章节
 
-【示例】
-错误❌："大模型、提示词、RAG、记忆、工具、网关、运行时、可观测"（只有8个）
-正确✅："1.大模型 2.提示词 3.RAG 4.记忆 5.工具 6.网关 7.运行时 8.可观测 9.评估 10.安全 11.XXX"（11个）
+【错误示例 - 绝对禁止】
+❌ 概括："介绍了11个关键要素"（只有1行，应该11行）
+❌ 省略："包括大模型、提示词、RAG等"（"等"字说明省略了）
+❌ 平铺："ReactAgent、FlowAgent、SequentialAgent"（应该缩进）
+❌ 合并："第1章和第2章介绍了..."（应该分开）
 
-错误❌："ReactAgent、FlowAgent、SequentialAgent、ParallelAgent"（平铺）
-正确✅："- **ReactAgent**：基础Agent
-- **FlowAgent**：包含多个ReactAgent
-  - SequentialAgent：串行
-  - ParallelAgent：并行"（缩进）
+【正确示例 - 必须遵守】
+✅ 11个要素（11行）：
+"1. **大模型**：负责核心推理决策"
+"2. **AI开发框架**：如LangChain、Dify"
+"3. **提示词**：直接决定AI生成内容质量"
+"4. **RAG**：检索增强生成"
+"5. **记忆**：增强会话记忆性"
+"6. **工具**：工具调用作为原生功能"
+"7. **网关**：模型切换、Token流量"
+"8. **运行时**：处理动态任务"
+"9. **可观测**：全链路追踪"
+"10. **评估**：自动化评估"
+"11. **安全**：防护措施"
+
+✅ 层次结构（缩进）：
+"- **FlowAgent**：包含多个ReactAgent"
+"  - SequentialAgent：串行执行"
+"  - ParallelAgent：并行执行"
+"  - LoopAgent：循环执行"
+"  - LlmRoutingAgent：大模型决策"
+
+✅ 图片标记：
+"[图片]AI原生应用架构图"
+
+【自检清单】
+提取完成后，检查：
+□ 原文说"11个要素"，我提取了11个吗？
+□ 有父子关系的，我用缩进了吗？
+□ 有架构图的，我添加[图片]标记了吗？
+□ 每个章节独立提取了吗？
 
 【去重】{dedup_hint}
 
-返回JSON：{{"title":"","sections":[{{"title":"第X章","content":["知识点","  - 子知识点"],"level":2}}],"images":[]}}"""
+返回JSON：{{"title":"","sections":[{{"title":"第X章 标题","content":["1. **要素1**：说明","  - 子项：说明","[图片]架构图"],"level":2}}],"images":[]}}"""
 
             logger.info(f"处理第{i+1}/{len(batches)}批次，长度:{len(user_prompt)}字符")
 
@@ -679,7 +725,7 @@ class WebContentExtractor:
                             {"role": "system", "content": system_prompt},
                             {"role": "user", "content": user_prompt},
                         ],
-                        temperature=self.temperature,
+                        temperature=0.01,  # 使用极低的temperature确保严格遵守规则
                         max_tokens=self.max_tokens,
                         # 不设置timeout，使用默认值
                     )
@@ -722,42 +768,74 @@ class WebContentExtractor:
                         article_author = batch_result.get("author", "")
 
                     if batch_result.get("sections"):
-                        # 去重：检查章节标题是否已存在（模糊匹配）
+                        # 去重：检查章节标题是否已存在，如果新章节更详细则替换
                         new_sections = []
                         for section in batch_result["sections"]:
                             section_title = section.get("title", "")
+                            section_content = section.get("content", [])
+                            section_content_length = sum(
+                                len(str(item)) for item in section_content
+                            )
+
                             # 提取章节编号（如"第1章"、"第2章"）
-                            match = re.search(r'第\s*(\d+)\s*章', section_title)
+                            match = re.search(r"第\s*(\d+)\s*章", section_title)
                             chapter_num = match.group(1) if match else None
-                            
+
                             # 检查是否已存在相同章节编号
-                            is_duplicate = False
+                            existing_index = -1
                             if chapter_num:
-                                for existing in all_sections:
+                                for idx, existing in enumerate(all_sections):
                                     existing_title = existing.get("title", "")
-                                    existing_match = re.search(r'第\s*(\d+)\s*章', existing_title)
-                                    if existing_match and existing_match.group(1) == chapter_num:
-                                        is_duplicate = True
-                                        logger.debug(f"跳过重复章节（章节号匹配）: {section_title} vs {existing_title}")
+                                    existing_match = re.search(
+                                        r"第\s*(\d+)\s*章", existing_title
+                                    )
+                                    if (
+                                        existing_match
+                                        and existing_match.group(1) == chapter_num
+                                    ):
+                                        existing_content = existing.get("content", [])
+                                        existing_content_length = sum(
+                                            len(str(item)) for item in existing_content
+                                        )
+
+                                        # 如果新章节内容更详细（长度>2倍），替换旧章节
+                                        if (
+                                            section_content_length
+                                            > existing_content_length * 2
+                                        ):
+                                            logger.info(
+                                                f"替换章节（新版本更详细）: {section_title}, 旧长度={existing_content_length}, 新长度={section_content_length}"
+                                            )
+                                            existing_index = idx
+                                        else:
+                                            logger.debug(
+                                                f"跳过重复章节: {section_title}, 旧长度={existing_content_length}, 新长度={section_content_length}"
+                                            )
                                         break
-                            
-                            if not is_duplicate:
-                                new_sections.append(section)
+
+                            if existing_index >= 0:
+                                # 替换旧章节
+                                all_sections[existing_index] = section
                             else:
-                                logger.debug(f"跳过重复章节: {section_title}")
+                                # 添加新章节
+                                new_sections.append(section)
 
                         all_sections.extend(new_sections)
                         logger.info(
                             f"批次{i+1}提取到{len(batch_result['sections'])}个章节，去重后新增{len(new_sections)}个，当前总计{len(all_sections)}个"
                         )
-                        
+
                         # 验证提取质量
                         for section in new_sections:
-                            content = section.get('content', [])
+                            content = section.get("content", [])
                             # 检查是否有缩进（"  - "开头）
-                            has_indent = any(str(item).startswith('  - ') for item in content)
+                            has_indent = any(
+                                str(item).startswith("  - ") for item in content
+                            )
                             if not has_indent and len(content) > 3:
-                                logger.warning(f"章节 {section.get('title')} 可能缺少层次结构（无缩进）")
+                                logger.warning(
+                                    f"章节 {section.get('title')} 可能缺少层次结构（无缩进）"
+                                )
 
                     batch_success = True
 
