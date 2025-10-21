@@ -86,12 +86,25 @@ class WebToPPTAnalyzer:
                 else:
                     raise Exception(f"AI调用失败（状态码{response.status_code}）: {response.message}")
             
+            # 记录Token使用情况
+            usage = response.usage
+            input_tokens = usage.input_tokens if usage else 0
+            output_tokens = usage.output_tokens if usage else 0
+            total_tokens = input_tokens + output_tokens
+            
             # 解析AI返回的结果
             ai_result = response.output.choices[0].message.content
-            logger.info(f"AI返回结果长度: {len(ai_result)}")
+            logger.info(f"AI返回结果长度: {len(ai_result)}，Token使用: Input={input_tokens}, Output={output_tokens}, Total={total_tokens}")
             
             # 解析JSON结构
             ppt_structure = self._parse_ai_result(ai_result, article)
+            
+            # 添加Token统计信息
+            ppt_structure["token_usage"] = {
+                "input_tokens": input_tokens,
+                "output_tokens": output_tokens,
+                "total_tokens": total_tokens
+            }
             
             logger.info(f"分析完成: 生成{len(ppt_structure['slides'])}页幻灯片")
             return ppt_structure

@@ -1034,6 +1034,7 @@ def generate_ppt_document(
     source_file_path: Optional[Path],
     source_url: str,
     template_config: dict,
+    use_cache: bool = True,
 ) -> Tuple[str, str]:
     if not PPTX_AVAILABLE:
         raise RuntimeError("python-pptx 未安装，无法生成 PPT。")
@@ -1059,12 +1060,12 @@ def generate_ppt_document(
         output_path = str(converted_dir / output_filename)
         
         # 执行转换
-        result = converter.convert(source_url, output_path)
+        result = converter.convert(source_url, output_path, use_cache=use_cache)
         
         if not result['success']:
             raise ValueError(f"URL转换失败: {result['message']}")
         
-        return output_filename, f"成功从URL生成PPT，共{result['slides_count']}页"
+        return output_filename, result['message'], result.get('token_usage', {})
     
     elif is_pdf:
         logger.info("检测到 PDF 文件，使用AI智能分析模式...")

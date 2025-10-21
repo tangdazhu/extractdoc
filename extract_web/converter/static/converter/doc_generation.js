@@ -103,7 +103,7 @@
         table.className = 'doc-gen-result-table';
         var thead = document.createElement('thead');
         var headerRow = document.createElement('tr');
-        ['源名称', '状态', '说明', '下载'].forEach(function(text) {
+        ['源名称', '状态', '说明', 'Token', '下载'].forEach(function(text) {
             var th = document.createElement('th');
             th.textContent = text;
             headerRow.appendChild(th);
@@ -120,6 +120,20 @@
             statusTd.textContent = item.status || '-';
             var messageTd = document.createElement('td');
             messageTd.textContent = item.message || '-';
+            
+            // Token列
+            var tokenTd = document.createElement('td');
+            if (item.token_usage && item.token_usage.total) {
+                var total = item.token_usage.total.total || 0;
+                if (total === 0) {
+                    tokenTd.textContent = '0（缓存）';
+                } else {
+                    tokenTd.textContent = total.toString();
+                }
+            } else {
+                tokenTd.textContent = '-';
+            }
+            
             var actionTd = document.createElement('td');
             if (item.download_url) {
                 var link = document.createElement('a');
@@ -134,6 +148,7 @@
             tr.appendChild(nameTd);
             tr.appendChild(statusTd);
             tr.appendChild(messageTd);
+            tr.appendChild(tokenTd);
             tr.appendChild(actionTd);
             tbody.appendChild(tr);
         });
@@ -214,6 +229,10 @@
         }
         if (hasUrl) {
             formData.append('source_url', docGenState.url);
+            // 添加缓存选项
+            var useCacheCheckbox = document.getElementById('docGenUseCache');
+            var useCache = useCacheCheckbox ? useCacheCheckbox.checked : true;
+            formData.append('use_cache', useCache ? 'true' : 'false');
         }
         if (currentSelectedDocGenMode === 'ppt' && docGenState.template) {
             formData.append('template', docGenState.template);

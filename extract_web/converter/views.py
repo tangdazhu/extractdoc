@@ -194,6 +194,7 @@ def document_generation_view(request):
     source_url = (request.POST.get("source_url") or "").strip()
     template_key = request.POST.get("template", "style_a").strip() or "style_a"
     uploaded_file = request.FILES.get("source_file")
+    use_cache = request.POST.get("use_cache", "true").lower() == "true"
 
     if mode not in {"ppt", "word"}:
         return format_error_response(
@@ -275,27 +276,40 @@ def document_generation_view(request):
             "source_file_path": local_file_path,
             "source_url": source_url,
             "template_config": template_config,
+            "use_cache": use_cache,
         }
 
         if mode == "ppt":
-            output_filename, message = generate_ppt_document(**generation_kwargs)
+            if source_url:
+                # URL模式返回3个值
+                output_filename, message, token_usage = generate_ppt_document(**generation_kwargs)
+            else:
+                # 文件模式返回2个值
+                output_filename, message = generate_ppt_document(**generation_kwargs)
+                token_usage = {}
         else:
             output_filename, message = generate_word_document(**generation_kwargs)
+            token_usage = {}
 
         download_url = reverse(
             "converter:download_converted_file",
             args=[request.user.username, today_date_str, output_filename],
         )
-        results.append(
-            {
-                "original_name": (
-                    uploaded_file.name if uploaded_file else source_url or "未指定来源"
-                ),
-                "status": "success",
-                "message": message or "生成成功。",
-                "download_url": download_url,
-            }
-        )
+        
+        result_item = {
+            "original_name": (
+                uploaded_file.name if uploaded_file else source_url or "未指定来源"
+            ),
+            "status": "success",
+            "message": message or "生成成功。",
+            "download_url": download_url,
+        }
+        
+        # 添加Token使用信息
+        if token_usage:
+            result_item["token_usage"] = token_usage
+        
+        results.append(result_item)
     except ValueError as user_error:
         logger.warning(
             "document_generation_view: 参数错误。RequestID=%s, Error=%s",

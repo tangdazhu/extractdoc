@@ -9,6 +9,7 @@ import re
 import json
 import logging
 import os
+import hashlib
 from typing import Dict, Optional, List
 from datetime import datetime
 from http import HTTPStatus
@@ -55,6 +56,108 @@ class WebContentExtractor:
                 base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
             )
             logger.info(f"AI内容提取已启用: model={self.model}")
+            
+            # 初始化缓存目录
+            self.cache_dir = config.get("web_extraction.cache_dir", "cache/web_extraction")
+            os.makedirs(self.cache_dir, exist_ok=True)
+            logger.info(f"缓存目录: {self.cache_dir}")
+
+    def _get_cache_key(self, url: str) -> str:
+        """
+        生成URL的缓存key
+        
+        Args:
+            url: 文章URL
+            
+        Returns:
+            缓存key（MD5哈希）
+        """
+        return hashlib.md5(url.encode('utf-8')).hexdigest()
+    
+    def _get_cache_path(self, url: str) -> str:
+        """
+        获取缓存文件路径
+        
+        Args:
+            url: 文章URL
+            
+        Returns:
+            缓存文件完整路径
+        """
+        cache_key = self._get_cache_key(url)
+        return os.path.join(self.cache_dir, f"{cache_key}.json")
+    
+    def _load_from_cache(self, url: str) -> Optional[Dict]:
+        """
+        从缓存加载提取结果
+        
+        Args:
+            url: 文章URL
+            
+        Returns:
+            缓存的提取结果，如果不存在则返回None
+        """
+        if not self.use_ai:
+            return None
+            
+        cache_path = self._get_cache_path(url)
+        if os.path.exists(cache_path):
+            try:
+                with open(cache_path, 'r', encoding='utf-8') as f:
+                    cached_data = json.load(f)
+                logger.info(f"从缓存加载: {cache_path}")
+                return cached_data
+            except Exception as e:
+                logger.warning(f"加载缓存失败: {e}")
+                return None
+        return None
+    
+    def _save_to_cache(self, url: str, data: Dict):
+        """
+        保存提取结果到缓存
+        
+        Args:
+            url: 文章URL
+            data: 提取结果
+        """
+        if not self.use_ai:
+            return
+            
+        cache_path = self._get_cache_path(url)
+        try:
+            with open(cache_path, 'w', encoding='utf-8') as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
+            logger.info(f"保存到缓存: {cache_path}")
+        except Exception as e:
+            logger.warning(f"保存缓存失败: {e}")
+    
+    def clear_cache(self, url: Optional[str] = None):
+        """
+        清理缓存
+        
+        Args:
+            url: 如果指定URL，只清理该URL的缓存；否则清理所有缓存
+        """
+        if not self.use_ai:
+            return
+            
+        if url:
+            # 清理指定URL的缓存
+            cache_path = self._get_cache_path(url)
+            if os.path.exists(cache_path):
+                os.remove(cache_path)
+                logger.info(f"已清理缓存: {cache_path}")
+            else:
+                logger.info(f"缓存不存在: {cache_path}")
+        else:
+            # 清理所有缓存
+            if os.path.exists(self.cache_dir):
+                import shutil
+                shutil.rmtree(self.cache_dir)
+                os.makedirs(self.cache_dir, exist_ok=True)
+                logger.info(f"已清理所有缓存: {self.cache_dir}")
+            else:
+                logger.info(f"缓存目录不存在: {self.cache_dir}")
 
     def extract_from_url(self, url: str) -> Dict:
         """
@@ -76,6 +179,12 @@ class WebContentExtractor:
             }
         """
         logger.info(f"开始提取URL内容: {url}")
+        
+        # 检查缓存
+        cached_result = self._load_from_cache(url)
+        if cached_result:
+            logger.info("使用缓存结果，跳过AI调用")
+            return cached_result
 
         try:
             # 如果启用AI，优先使用AI提取
@@ -468,6 +577,10 @@ class WebContentExtractor:
             文章信息字典
         """
         logger.info("使用AI提取器分析网页内容")
+        
+        # 初始化Token统计
+        total_input_tokens = 0
+        total_output_tokens = 0
 
         # 获取网页HTML
         response = requests.get(url, headers=self.headers, timeout=self.timeout)
@@ -527,28 +640,64 @@ class WebContentExtractor:
 
         logger.info(f"提取到{len(images)}张图片")
 
-        # 提取纯文本，但保留标题结构
+        # 提取纯文本，但保留标题结构和图片位置
+        # 使用descendants按文档顺序遍历所有元素
         text_parts = []
         seen_texts = set()  # 用于去重
+        processed_elements = set()  # 避免重复处理
 
-        for elem in text_soup.find_all(
-            ["h1", "h2", "h3", "h4", "h5", "h6", "p", "div", "section"]
-        ):
-            text = elem.get_text(strip=True)
-            if not text or len(text) < 5:  # 过滤太短的文本
+        for elem in text_soup.descendants:
+            # 只处理标签元素
+            if not hasattr(elem, 'name'):
                 continue
+            
+            # 避免重复处理
+            elem_id = id(elem)
+            if elem_id in processed_elements:
+                continue
+            processed_elements.add(elem_id)
+            
+            # 处理图片元素
+            if elem.name == "img":
+                img_alt = elem.get("alt", "")
+                # 添加图片标记，使用alt作为说明，如果没有alt则使用"图片"
+                img_description = img_alt if img_alt else "图片"
+                text_parts.append(f"[图片]{img_description}")
+                continue
+            
+            # 只处理这些元素的直接文本（不包括子元素）
+            if elem.name in ["h1", "h2", "h3", "h4", "h5", "h6", "p"]:
+                # 获取直接文本（不递归）
+                text = elem.get_text(strip=True)
+                if not text or len(text) < 5:
+                    continue
 
-            # 去重：避免嵌套元素导致的重复
-            # 但对于标题，即使重复也保留（因为可能是重要的章节标题）
-            is_heading = elem.name in ["h1", "h2", "h3", "h4", "h5", "h6"]
+                # 去重：避免嵌套元素导致的重复
+                is_heading = elem.name in ["h1", "h2", "h3", "h4", "h5", "h6"]
 
-            if is_heading:
-                text_parts.append(f"[标题] {text}")
-            elif text not in seen_texts:
-                text_parts.append(text)
-                seen_texts.add(text)
+                if is_heading:
+                    if text not in seen_texts:  # 标题也去重
+                        text_parts.append(f"[标题] {text}")
+                        seen_texts.add(text)
+                elif text not in seen_texts:
+                    text_parts.append(text)
+                    seen_texts.add(text)
 
         cleaned_html = "\n\n".join(text_parts)  # 使用双换行分隔，更清晰
+        
+        # 检查是否包含图片标记
+        image_markers = [part for part in text_parts if '[图片]' in part]
+        if image_markers:
+            logger.info(f"HTML提取包含{len(image_markers)}个[图片]标记: {image_markers[:5]}")  # 只显示前5个
+            # 打印每个图片标记的位置（在text_parts中的索引）
+            for i, part in enumerate(text_parts):
+                if '[图片]' in part:
+                    # 打印图片标记前后的内容
+                    prev_text = text_parts[i-1] if i > 0 else "开头"
+                    next_text = text_parts[i+1] if i < len(text_parts)-1 else "结尾"
+                    logger.info(f"图片{text_parts[:i+1].count('[图片]')}位置: 前=[{prev_text[:50]}...] 后=[{next_text[:50]}...]")
+        else:
+            logger.warning("HTML提取中没有找到[图片]标记！")
 
         logger.info(f"提取的内容长度: {len(cleaned_html)}字符")
 
@@ -681,12 +830,21 @@ class WebContentExtractor:
 逐字逐句提取原文知识点，禁止概括、省略、合并。
 
 【强制要求 - 违反立即失败】
-1️⃣ 原文说"11个要素"→必须提取11行，每行一个要素（不能是8行或10行）
-2️⃣ 原文说"包含4个子类型"→必须用缩进表示层次（父项+4个子项）
-3️⃣ 原文有架构图→必须在content中添加"[图片]架构图说明"
+1️⃣ **[图片]标记是最高优先级**：
+   - 原文有"[图片]图片"→content必须包含"[图片]图片"
+   - 原文有"[图片]架构图"→content必须包含"[图片]架构图"  
+   - 绝对禁止删除、修改、忽略任何[图片]标记
+   - **图片归属规则**：[图片]标记必须放在它**前面的文本内容**所属的章节
+     * 如果[图片]在"第1章"标题之前，且前面有文字内容 → 创建"引言"章节，把前面的文字和[图片]都放入"引言"
+     * 如果[图片]在"第1章"内容中 → 放入"第1章"的content
+     * 如果[图片]在"第1章"之后、"第2章"标题之前 → 放入"第1章"的content末尾
+2️⃣ 原文说"11个要素"→必须提取11行，每行一个要素（不能是8行或10行）
+3️⃣ 原文说"包含4个子类型"→必须用缩进表示层次（父项+4个子项）
 4️⃣ 每个章节独立提取→不要合并多个章节
 
 【错误示例 - 绝对禁止】
+❌ 删除图片标记：原文有"[图片]图片"，但content中没有 → 立即失败
+❌ 修改图片标记：把"[图片]图片"改成"图片说明" → 立即失败
 ❌ 概括："介绍了11个关键要素"（只有1行，应该11行）
 ❌ 省略："包括大模型、提示词、RAG等"（"等"字说明省略了）
 ❌ 平铺："ReactAgent、FlowAgent、SequentialAgent"（应该缩进）
@@ -716,11 +874,11 @@ class WebContentExtractor:
 ✅ 图片标记：
 "[图片]AI原生应用架构图"
 
-【自检清单】
-提取完成后，检查：
+【自检清单 - 提取完成后必须检查】
 □ 原文说"11个要素"，我提取了11个吗？
 □ 有父子关系的，我用缩进了吗？
-□ 有架构图的，我添加[图片]标记了吗？
+□ **原文有N个[图片]标记，我的content中也必须有N个[图片]标记！**
+□ 每个[图片]标记的位置与原文一致吗？
 □ 每个章节独立提取了吗？
 
 【去重】{dedup_hint}
@@ -729,7 +887,17 @@ class WebContentExtractor:
 
             batch_content_length = len(batch_content)
             prompt_total_length = len(user_prompt)
-            logger.info(f"处理第{i+1}/{len(batches)}批次，批次内容:{batch_content_length}字符，完整提示词:{prompt_total_length}字符")
+            
+            # 检查批次内容是否包含图片标记
+            batch_image_markers = batch_content.count('[图片]')
+            if batch_image_markers > 0:
+                logger.info(f"批次{i+1}内容包含{batch_image_markers}个[图片]标记")
+                # 在提示词中明确告知AI
+                user_prompt = f"""⚠️ 重要：本批次内容包含{batch_image_markers}个[图片]标记，你的返回结果中也必须包含{batch_image_markers}个[图片]标记！
+
+{user_prompt}"""
+            
+            logger.info(f"处理第{i+1}/{len(batches)}批次，批次内容:{batch_content_length}字符，完整提示词:{len(user_prompt)}字符")
 
             # 重试机制：最多重试2次
             max_retries = 2
@@ -768,7 +936,15 @@ class WebContentExtractor:
                             raise Exception(f"AI服务调用失败: {error_msg}")
 
                     elapsed = time.time() - start_time
-                    logger.info(f"批次{i+1}AI调用完成，耗时{elapsed:.1f}秒")
+                    
+                    # 记录Token使用情况
+                    usage = completion.usage
+                    input_tokens = usage.prompt_tokens if usage else 0
+                    output_tokens = usage.completion_tokens if usage else 0
+                    total_tokens = usage.total_tokens if usage else 0
+                    total_input_tokens += input_tokens
+                    total_output_tokens += output_tokens
+                    logger.info(f"批次{i+1}AI调用完成，耗时{elapsed:.1f}秒，Token使用: Input={input_tokens}, Output={output_tokens}, Total={total_tokens}")
 
                     batch_response = completion.choices[0].message.content
                     logger.debug(f"批次{i+1}返回长度: {len(batch_response)}字符")
@@ -863,8 +1039,16 @@ class WebContentExtractor:
                         )
 
                         # 验证提取质量
+                        batch_returned_markers = 0
                         for section in new_sections:
                             content = section.get("content", [])
+                            
+                            # 检查是否包含图片标记
+                            image_markers_in_section = [item for item in content if '[图片]' in str(item)]
+                            batch_returned_markers += len(image_markers_in_section)
+                            if image_markers_in_section:
+                                logger.info(f"批次{i+1}章节 {section.get('title')} 包含{len(image_markers_in_section)}个图片标记: {image_markers_in_section}")
+                            
                             # 检查是否有缩进（"  - "开头）
                             has_indent = any(
                                 str(item).startswith("  - ") for item in content
@@ -873,6 +1057,10 @@ class WebContentExtractor:
                                 logger.warning(
                                     f"章节 {section.get('title')} 可能缺少层次结构（无缩进）"
                                 )
+                        
+                        # 验证图片标记数量
+                        if batch_image_markers > 0 and batch_returned_markers != batch_image_markers:
+                            logger.error(f"批次{i+1}图片标记数量不匹配！原始={batch_image_markers}，AI返回={batch_returned_markers}")
 
                     batch_success = True
 
@@ -908,6 +1096,23 @@ class WebContentExtractor:
         )
 
         logger.info(f"所有批次处理完成，共提取{len(all_sections)}个章节")
+        
+        # 统计所有章节中的图片标记总数，并打印每个章节的图片标记情况
+        total_image_markers = 0
+        logger.info("=" * 50)
+        logger.info("章节图片标记分布：")
+        for idx, section in enumerate(all_sections):
+            content = section.get("content", [])
+            markers = [item for item in content if '[图片]' in str(item)]
+            total_image_markers += len(markers)
+            if markers:
+                logger.info(f"  章节{idx+1} [{section.get('title')}] 包含{len(markers)}个图片标记")
+        logger.info("=" * 50)
+        
+        if total_image_markers != len(images):
+            logger.warning(f"图片标记数量不匹配！原始图片数={len(images)}，AI提取的[图片]标记数={total_image_markers}")
+        else:
+            logger.info(f"图片标记数量匹配：{total_image_markers}个")
 
         # 解析JSON响应
         try:
@@ -946,10 +1151,22 @@ class WebContentExtractor:
                     else:
                         content_parts.append(str(section["content"]))
             result["content"] = "\n\n".join(content_parts)
+            
+            # 添加Token统计信息
+            result["token_usage"] = {
+                "input_tokens": total_input_tokens,
+                "output_tokens": total_output_tokens,
+                "total_tokens": total_input_tokens + total_output_tokens
+            }
 
             logger.info(
-                f"AI提取成功: 标题={result['title']}, 章节数={len(result['sections'])}, 图片数={len(result['images'])}"
+                f"AI提取成功: 标题={result['title']}, 章节数={len(result['sections'])}, 图片数={len(result['images'])}, "
+                f"Token使用: Input={total_input_tokens}, Output={total_output_tokens}, Total={total_input_tokens + total_output_tokens}"
             )
+            
+            # 保存到缓存
+            self._save_to_cache(url, result)
+            
             return result
 
         except json.JSONDecodeError as e:
