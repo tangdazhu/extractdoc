@@ -2,35 +2,39 @@ import logging
 import os
 import re
 import dashscope
+from utils.config_manager import config
 
 logger = logging.getLogger("ocr_system")
 
 
 def translate_text(text: str, target_language: str = "en") -> str:
     """
-    使用 DashScope Qwen-Long 模型翻译文本。
+    使用 DashScope 模型翻译文本。
 
     :param text: 需要翻译的文本。
     :param target_language: 目标语言代码 ('en' for English, 'zh' for Chinese).
     :return: 翻译后的文本。
     """
-    # 确保我们有可用的 API key
-    api_key = os.environ.get("DASHSCOPE_API_KEY")
+    # 从环境变量获取 API Key
+    api_key = os.getenv("DASHSCOPE_API_KEY")
     if not api_key:
-        logger.error("未在环境变量中找到 DASHSCOPE_API_KEY")
-        return "翻译错误：未配置 API key。"
+        raise ValueError("DASHSCOPE_API_KEY 环境变量未设置")
 
-    # 根据目标语言代码确定提示中使用的语言名称
-    lang_map = {"en": "English", "zh": "中文"}
-    target_lang_name = lang_map.get(target_language, "English")
+    # 从配置加载模型
+    model = config.get("ai_document_analysis.model", "qwen-max")
 
-    # 构建简洁、明确的提示
-    prompt = f'Translate the following text to {target_lang_name}. Return only the translated text, without any explanations or additional content.\n\nText to translate: "{text}"'
+    # 构建翻译提示
+    if target_language == "en":
+        prompt = f"请将以下中文文本翻译成英文：\n\n{text}"
+    elif target_language == "zh":
+        prompt = f"请将以下英文文本翻译成中文：\n\n{text}"
+    else:
+        raise ValueError(f"不支持的目标语言: {target_language}")
 
     try:
         # 调用 DashScope 的生成 API
         response = dashscope.Generation.call(
-            model="qwen-long",
+            model=model,
             prompt=prompt,
             api_key=api_key,
             temperature=0.2,  # 使用较低的温度以获得更稳定、一致的翻译结果

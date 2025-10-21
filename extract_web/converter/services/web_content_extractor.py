@@ -575,30 +575,27 @@ class WebContentExtractor:
         logger.info(f"文章分为{len(batches)}个批次处理")
 
         # 构建完整的AI提示词（不简化）
-        system_prompt = """你是技术知识提取专家。你的任务是从技术文章中提取可直接学习的知识点。
+        system_prompt = """你是技术知识提取专家。
 
-【严格要求 - 违反将视为失败】
-1. 禁止写"介绍了"、"阐述了"、"讨论了"等废话
-2. 原文提到"N个要素/框架"，必须全部列出（数一遍确认数量）
-3. 有父子关系的内容必须用缩进表示（子项前加"  - "）
-4. 原文提到"介绍X和Y两个技术"，必须将相关内容归类到X和Y下
-
-【提取优先级】
-1. 架构图/分层设计：必须详细提取各层名称、组件、职责
-2. 完整列表：原文说"11个要素"就必须提取11个，不能少
-3. 层次关系：子类型/子组件必须缩进在父项下
-4. 技术细节：保留框架名、API名、工具名、数字、案例
+【核心任务】
+从技术文章中提取知识点，必须：
+1. 完整性：原文提到"N个要素"必须提取N个（提取后数一遍）
+2. 层次性：父子关系必须用"  - "缩进
+3. 准确性：禁止写"介绍了"等废话，直接写知识点
 
 【输出格式】
-{"title":"","sections":[{"title":"第X章","content":["知识点1","知识点2"],"level":2}],"images":[]}
+{"title":"","sections":[{"title":"第X章","content":["知识点1","  - 子知识点"],"level":2}],"images":[]}
 
-【关键规则】
-- 如果原文有"X包含Y、Z、W"，必须写成：
-  - **X**：说明
-    - Y：说明
-    - Z：说明
-    - W：说明
-- 如果原文说"N个要素"，提取后数一遍，确保数量正确"""
+【缩进规则 - 强制执行】
+如果原文说"FlowAgent包含4个子类型"，必须写成：
+- **FlowAgent**：包含多个ReactAgent按预定流程协作
+  - SequentialAgent：串行执行
+  - ParallelAgent：并行执行
+  - LoopAgent：循环执行
+  - LlmRoutingAgent：大模型决策
+
+【数量验证 - 强制执行】
+如果原文说"11个要素"，提取后必须有11个，不能是8个或10个"""
 
         # 分批调用AI，收集结果
         all_sections = []
@@ -614,41 +611,38 @@ class WebContentExtractor:
                     f"\n\n已提取的章节（不要重复）：{', '.join(extracted_titles)}"
                 )
 
-            user_prompt = f"""【文章内容第{i+1}/{len(batches)}部分】（[标题]标记章节标题）
-
+            user_prompt = f"""【文章内容第{i+1}/{len(batches)}部分】
 {batch_content}
 
-【提取指令】
-1. 找出所有章节标题（通常是[标题]标记的内容）
-2. 对每个章节：
-   a) 如果提到"N个要素/框架/技术"，必须全部列出（提取后数一遍确认）
-   b) 如果有架构/分层设计，必须详细提取各层名称和组件
-   c) 如果有父子关系（如"X包含Y、Z"），子项必须缩进（前加"  - "）
-   d) 如果提到"介绍A和B两个技术"，必须将相关内容归类到A和B下
-   e) 禁止写"介绍了"、"阐述了"等废话，直接写知识点
-   f) 如果章节中有架构图/流程图，在content中添加"[图片]架构图说明"标记
+【任务】提取每个章节的知识点
 
-【缩进规则 - 必须严格遵守】
-- 如果原文说"FlowAgent包含SequentialAgent、ParallelAgent、LoopAgent"，必须写成：
-  - **FlowAgent**：说明
-    - SequentialAgent：说明
-    - ParallelAgent：说明
-    - LoopAgent：说明
+【强制规则】
+1. 如果原文说"11个要素"，必须列出全部11个（不能是8个）
+2. 如果有父子关系（如"FlowAgent包含4个子类型"），子项必须缩进：
+   - **FlowAgent**：说明
+     - SequentialAgent：说明
+     - ParallelAgent：说明
+     - LoopAgent：说明
+     - LlmRoutingAgent：说明
+3. 如果原文说"介绍A和B两个技术，B包含B1和B2"，必须归类：
+   - **A**：说明
+   - **B**：说明
+     - B1：说明
+     - B2：说明
 
-- 如果原文说"介绍Function Calling和MCP两个技术，MCP包含MCP Registry和MCP Server"，必须写成：
-  - **Function Calling**：说明
-  - **MCP**：说明
-    - MCP Registry：说明
-    - MCP Server：说明
+【示例】
+错误❌："大模型、提示词、RAG、记忆、工具、网关、运行时、可观测"（只有8个）
+正确✅："1.大模型 2.提示词 3.RAG 4.记忆 5.工具 6.网关 7.运行时 8.可观测 9.评估 10.安全 11.XXX"（11个）
 
-【数量验证】
-- 原文说"11个要素"，提取后必须有11个
-- 原文说"3类框架"，提取后必须有3类
-- 提取完成后数一遍，确保数量正确
+错误❌："ReactAgent、FlowAgent、SequentialAgent、ParallelAgent"（平铺）
+正确✅："- **ReactAgent**：基础Agent
+- **FlowAgent**：包含多个ReactAgent
+  - SequentialAgent：串行
+  - ParallelAgent：并行"（缩进）
 
 【去重】{dedup_hint}
 
-返回JSON格式：{{"title":"","sections":[{{"title":"第X章","content":["知识点1","  - 子知识点1","知识点2"],"level":2}}],"images":[]}}"""
+返回JSON：{{"title":"","sections":[{{"title":"第X章","content":["知识点","  - 子知识点"],"level":2}}],"images":[]}}"""
 
             logger.info(f"处理第{i+1}/{len(batches)}批次，长度:{len(user_prompt)}字符")
 
@@ -745,6 +739,14 @@ class WebContentExtractor:
                         logger.info(
                             f"批次{i+1}提取到{len(batch_result['sections'])}个章节，去重后新增{len(new_sections)}个，当前总计{len(all_sections)}个"
                         )
+                        
+                        # 验证提取质量
+                        for section in new_sections:
+                            content = section.get('content', [])
+                            # 检查是否有缩进（"  - "开头）
+                            has_indent = any(str(item).startswith('  - ') for item in content)
+                            if not has_indent and len(content) > 3:
+                                logger.warning(f"章节 {section.get('title')} 可能缺少层次结构（无缩进）")
 
                     batch_success = True
 

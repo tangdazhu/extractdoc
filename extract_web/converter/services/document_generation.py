@@ -860,8 +860,11 @@ def _analyze_content_with_ai(text: str, request_id: str) -> Dict[str, any]:
 }}"""
     
     try:
+        # 从配置加载模型
+        model = config.get("ai_document_analysis.model", "qwen-max")
+        
         response = Generation.call(
-            model="qwen-plus",
+            model=model,
             prompt=prompt,
             result_format="message"
         )
@@ -952,8 +955,8 @@ def generate_word_document(
         # PDF 文件：使用AI智能分析模式
         logger.info("使用AI分析文档结构...")
         
-        # 初始化AI分析器
-        ai_analyzer = AIDocumentAnalyzer(model="qwen-max")
+        # 初始化AI分析器（使用配置文件中的模型）
+        ai_analyzer = AIDocumentAnalyzer()
         
         # 分析文档整体结构
         document_structure = ai_analyzer.analyze_document_structure(multimodal_data, request_id)
@@ -1077,8 +1080,8 @@ def generate_ppt_document(
     # 2. 使用AI分析文档结构(所有文件类型统一使用AI)
     logger.info("使用AI分析文档结构...")
     
-    # 初始化AI分析器
-    ai_analyzer = AIDocumentAnalyzer(model="qwen-max")
+    # 初始化AI分析器（使用配置文件中的模型）
+    ai_analyzer = AIDocumentAnalyzer()
     
     # 如果是PDF,使用AI分析整体结构
     if is_pdf and multimodal_data:
