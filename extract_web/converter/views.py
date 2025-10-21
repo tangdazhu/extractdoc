@@ -317,8 +317,14 @@ def document_generation_view(request):
             exc_info=True,
         )
         cleanup_temp_files([str(temp_dir)], request_id, remove_dirs=True)
+        
+        # 提取具体的错误信息返回给前端
+        error_message = str(exc)
+        if not error_message or error_message == "":
+            error_message = "文档生成过程中出现异常，请稍后再试。"
+        
         return format_error_response(
-            message="文档生成过程中出现异常，请稍后再试。",
+            message=error_message,
             merge_output=False,
             request_id=request_id,
             duration_seconds=round(time.perf_counter() - start_time, 2),

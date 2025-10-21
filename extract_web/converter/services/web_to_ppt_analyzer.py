@@ -63,16 +63,28 @@ class WebToPPTAnalyzer:
             prompt = self._build_prompt(article)
             
             # 调用AI分析
-            response = dashscope.Generation.call(
-                model=self.model,
-                prompt=prompt,
-                temperature=self.temperature,
-                max_tokens=self.max_tokens,
-                result_format='message'
-            )
+            try:
+                response = dashscope.Generation.call(
+                    model=self.model,
+                    prompt=prompt,
+                    temperature=self.temperature,
+                    max_tokens=self.max_tokens,
+                    result_format='message'
+                )
+            except Exception as api_error:
+                error_msg = str(api_error)
+                if "500" in error_msg:
+                    raise Exception(f"AI服务暂时不可用（500错误），请稍后重试。")
+                elif "timeout" in error_msg.lower():
+                    raise Exception(f"AI服务响应超时，请稍后重试。")
+                else:
+                    raise Exception(f"AI服务调用失败: {error_msg}")
             
             if response.status_code != HTTPStatus.OK:
-                raise Exception(f"AI调用失败: {response.message}")
+                if response.status_code == 500:
+                    raise Exception(f"AI服务暂时不可用（500错误），请稍后重试。")
+                else:
+                    raise Exception(f"AI调用失败（状态码{response.status_code}）: {response.message}")
             
             # 解析AI返回的结果
             ai_result = response.output.choices[0].message.content
@@ -137,16 +149,16 @@ class WebToPPTAnalyzer:
    - **必须覆盖所有章节**，为每个章节生成一页PPT
    - 每个章节对应一页幻灯片，包含：
      * 标题：章节标题
-     * 要点列表：从章节内容中提取3-7个核心知识点（每个要点保留原文精华，15-50字）
-   - **严格禁止**：不要生成"总结"或"概括性语句"，只提取具体知识点
-   - **重要**：要点必须是可直接学习的知识，不能是"介绍了XX"、"阐述了XX"等描述
+     * 要点列表：**直接复制章节内容**，保留所有格式（包括缩进、[图片]标记）
+   - **严格禁止**：不要修改、简化、概括原文内容
+   - **重要**：保留原文的缩进格式（"  - "开头表示子项）和[图片]标记
 
-3. **要点提取原则**（参考原文结构）：
-   - ✅ 提取具体列表：如"上下文工程3个核心组件：外部知识库动态供给、长短期记忆系统、运行时上下文管理"
-   - ✅ 保留原文表述：如"外部知识库动态供给：为解决LLM知识陈旧和领域知识缺乏的问题"
-   - ✅ 提取定义和特点：保留关键术语的准确定义和核心特征
-   - ❌ 禁止元描述：不要写"介绍了"、"讨论了"、"阐述了"等
-   - ❌ 禁止总结语句：不要写"通过XX提升XX效果"等空话
+3. **格式保留原则**：
+   - ✅ 保留缩进：如果原文有"  - "开头的行，必须保留
+   - ✅ 保留[图片]标记：如果原文有"[图片]XXX"，必须保留
+   - ✅ 保留完整列表：如果原文有11个要素，必须全部保留
+   - ❌ 禁止简化：不要截断、省略、合并原文内容
+   - ❌ 禁止重新格式化：不要改变原文的缩进和标记
 
 请以JSON格式返回，格式如下：
 {{
@@ -241,19 +253,12 @@ class WebToPPTAnalyzer:
         
         # 从章节生成幻灯片
         sections = article.get('sections', [])
-        for section in sections[:8]:  # 最多8页
+        for section in sections:  # 不限制页数
             slide = {
                 'title': section['title'],
-                'points': [],
+                'points': section.get('content', []),  # 直接使用content，保留[图片]标记和缩进
                 'summary': ''
             }
-            
-            # 提取要点（取前5段作为要点）
-            for content in section['content'][:5]:
-                # 简化内容
-                point = content[:50] + ('...' if len(content) > 50 else '')
-                slide['points'].append(point)
-            
             slides.append(slide)
         
         # 如果没有章节，从正文创建一页

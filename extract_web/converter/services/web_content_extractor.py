@@ -553,15 +553,41 @@ class WebContentExtractor:
         logger.info(f"提取的内容长度: {len(cleaned_html)}字符")
 
         # 分批处理：将文章按段落分组，避免单个message超过30720字符
-        # 策略：每批最多25000字符（留5000给提示词）
+        # 策略：每批最多20000字符（留足够空间给提示词和JSON格式）
         text_parts_list = cleaned_html.split("\n\n")
         batches = []
         current_batch = []
         current_length = 0
-        max_batch_length = 25000
+        max_batch_length = 20000  # 降低到20000，避免加上提示词后超限
 
         for part in text_parts_list:
             part_length = len(part) + 2  # +2 for \n\n
+            
+            # 如果单个段落就超过限制，需要强制拆分
+            if part_length > max_batch_length:
+                # 先保存当前批次
+                if current_batch:
+                    batches.append("\n\n".join(current_batch))
+                    current_batch = []
+                    current_length = 0
+                
+                # 将超长段落按句子拆分
+                sentences = part.split("。")
+                temp_batch = []
+                temp_length = 0
+                for sentence in sentences:
+                    sentence_len = len(sentence) + 1  # +1 for "。"
+                    if temp_length + sentence_len > max_batch_length and temp_batch:
+                        batches.append("。".join(temp_batch) + "。")
+                        temp_batch = [sentence]
+                        temp_length = sentence_len
+                    else:
+                        temp_batch.append(sentence)
+                        temp_length += sentence_len
+                if temp_batch:
+                    batches.append("。".join(temp_batch) + "。")
+                continue
+            
             if current_length + part_length > max_batch_length and current_batch:
                 batches.append("\n\n".join(current_batch))
                 current_batch = [part]
@@ -701,7 +727,9 @@ class WebContentExtractor:
 
 返回JSON：{{"title":"","sections":[{{"title":"第X章 标题","content":["1. **要素1**：说明","  - 子项：说明","[图片]架构图"],"level":2}}],"images":[]}}"""
 
-            logger.info(f"处理第{i+1}/{len(batches)}批次，长度:{len(user_prompt)}字符")
+            batch_content_length = len(batch_content)
+            prompt_total_length = len(user_prompt)
+            logger.info(f"处理第{i+1}/{len(batches)}批次，批次内容:{batch_content_length}字符，完整提示词:{prompt_total_length}字符")
 
             # 重试机制：最多重试2次
             max_retries = 2
@@ -719,16 +747,25 @@ class WebContentExtractor:
 
                     start_time = time.time()
 
-                    completion = self.client.chat.completions.create(
-                        model=self.model,
-                        messages=[
-                            {"role": "system", "content": system_prompt},
-                            {"role": "user", "content": user_prompt},
-                        ],
-                        temperature=0.01,  # 使用极低的temperature确保严格遵守规则
-                        max_tokens=self.max_tokens,
-                        # 不设置timeout，使用默认值
-                    )
+                    try:
+                        completion = self.client.chat.completions.create(
+                            model=self.model,
+                            messages=[
+                                {"role": "system", "content": system_prompt},
+                                {"role": "user", "content": user_prompt},
+                            ],
+                            temperature=self.temperature,  # 使用配置文件中的temperature
+                            max_tokens=self.max_tokens,
+                            # 不设置timeout，使用默认值
+                        )
+                    except Exception as api_error:
+                        error_msg = str(api_error)
+                        if "500 Internal Server Error" in error_msg:
+                            raise Exception(f"AI服务暂时不可用（500错误），请稍后重试。可能原因：提示词过长或服务繁忙。")
+                        elif "timeout" in error_msg.lower():
+                            raise Exception(f"AI服务响应超时，请稍后重试。")
+                        else:
+                            raise Exception(f"AI服务调用失败: {error_msg}")
 
                     elapsed = time.time() - start_time
                     logger.info(f"批次{i+1}AI调用完成，耗时{elapsed:.1f}秒")
@@ -846,11 +883,13 @@ class WebContentExtractor:
                     )
 
                     if retry_count > max_retries:
-                        logger.error(f"批次{i+1}达到最大重试次数，跳过")
-                        # 如果是第一批次失败，抛出异常
-                        if i == 0 and not all_sections:
-                            raise Exception(f"第一批次处理失败: {e}")
-                        break
+                        logger.error(f"批次{i+1}达到最大重试次数")
+                        # 任何批次失败都要抛出异常，不能静默跳过
+                        error_detail = str(e)
+                        if "500" in error_detail:
+                            raise Exception(f"第{i+1}批次AI服务返回500错误。可能原因：批次内容过长({len(batch_text)}字符)或服务繁忙，请稍后重试。")
+                        else:
+                            raise Exception(f"第{i+1}批次处理失败: {error_detail}")
 
                     # 等待后重试
                     time.sleep(2)
