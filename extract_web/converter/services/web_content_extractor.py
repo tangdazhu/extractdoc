@@ -626,6 +626,7 @@ class WebContentExtractor:
    c) 如果有父子关系（如"X包含Y、Z"），子项必须缩进（前加"  - "）
    d) 如果提到"介绍A和B两个技术"，必须将相关内容归类到A和B下
    e) 禁止写"介绍了"、"阐述了"等废话，直接写知识点
+   f) 如果章节中有架构图/流程图，在content中添加"[图片]架构图说明"标记
 
 【缩进规则 - 必须严格遵守】
 - 如果原文说"FlowAgent包含SequentialAgent、ParallelAgent、LoopAgent"，必须写成：
@@ -716,15 +717,26 @@ class WebContentExtractor:
                         article_author = batch_result.get("author", "")
 
                     if batch_result.get("sections"):
-                        # 去重：检查章节标题是否已存在
+                        # 去重：检查章节标题是否已存在（模糊匹配）
                         new_sections = []
                         for section in batch_result["sections"]:
                             section_title = section.get("title", "")
-                            # 检查是否已存在相同标题的章节
-                            if not any(
-                                s.get("title", "") == section_title
-                                for s in all_sections
-                            ):
+                            # 提取章节编号（如"第1章"、"第2章"）
+                            match = re.search(r'第\s*(\d+)\s*章', section_title)
+                            chapter_num = match.group(1) if match else None
+                            
+                            # 检查是否已存在相同章节编号
+                            is_duplicate = False
+                            if chapter_num:
+                                for existing in all_sections:
+                                    existing_title = existing.get("title", "")
+                                    existing_match = re.search(r'第\s*(\d+)\s*章', existing_title)
+                                    if existing_match and existing_match.group(1) == chapter_num:
+                                        is_duplicate = True
+                                        logger.debug(f"跳过重复章节（章节号匹配）: {section_title} vs {existing_title}")
+                                        break
+                            
+                            if not is_duplicate:
                                 new_sections.append(section)
                             else:
                                 logger.debug(f"跳过重复章节: {section_title}")

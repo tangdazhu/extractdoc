@@ -128,14 +128,23 @@ class URLToPPTConverter:
         # 1. 创建封面页
         self._create_cover_slide(prs, ppt_structure['cover'])
         
-        # 2. 创建内容页
+        # 2. 创建内容页（同时处理图片插入）
+        image_index = 0  # 当前使用的图片索引
         for slide_data in ppt_structure['slides']:
-            self._create_content_slide(prs, slide_data)
+            # 检查是否需要插入图片
+            if image_index < len(images):
+                self._create_content_slide(prs, slide_data, images, image_index)
+                # 如果这页使用了图片，索引递增
+                if self._slide_contains_image_marker(slide_data):
+                    image_index += 1
+            else:
+                self._create_content_slide(prs, slide_data)
         
-        # 3. 添加图片页（如果有图片）
-        if images:
-            logger.info(f"添加{len(images)}张图片到PPT")
-            self._create_image_slides(prs, images)
+        # 3. 如果还有剩余图片，添加到末尾
+        if image_index < len(images):
+            remaining_images = images[image_index:]
+            logger.info(f"添加{len(remaining_images)}张剩余图片到PPT末尾")
+            self._create_image_slides(prs, remaining_images)
         
         # 保存PPT
         prs.save(output_path)
@@ -187,14 +196,23 @@ class URLToPPTConverter:
         
         logger.info(f"创建封面页: {cover_data.get('title')}")
     
-    def _create_content_slide(self, prs: Presentation, slide_data: Dict):
+    def _slide_contains_image_marker(self, slide_data: Dict) -> bool:
+        """检查幻灯片是否包含图片标记"""
+        points = slide_data.get('points', [])
+        return any('[图片]' in str(point) for point in points)
+    
+    def _create_content_slide(self, prs: Presentation, slide_data: Dict, images: list = None, image_index: int = 0):
         """
         创建内容页
         
         Args:
             prs: 演示文稿对象
             slide_data: 幻灯片数据
+            images: 图片URL列表
+            image_index: 当前图片索引
         """
+        if images is None:
+            images = []
         # 使用标题和内容布局（通常是第二个布局）
         slide_layout = prs.slide_layouts[1]
         slide = prs.slides.add_slide(slide_layout)
@@ -217,17 +235,69 @@ class URLToPPTConverter:
             
             # 添加要点
             points = slide_data.get('points', [])
+            has_image_marker = False
             for point in points:
+                # 检查是否是图片标记
+                if '[图片]' in str(point):
+                    has_image_marker = True
+                    # 跳过图片标记文本，稍后插入实际图片
+                    continue
+                
                 p = text_frame.add_paragraph()
                 p.text = point
                 p.level = 0
                 p.font.size = Pt(content_font_size)
                 p.space_before = Pt(6)
             
-            # 不再添加总结（已从设计中移除）
-            # summary字段已废弃，只保留具体知识点
+            # 如果有图片标记且有可用图片，插入图片
+            if has_image_marker and image_index < len(images):
+                self._insert_image_to_slide(slide, images[image_index])
         
         logger.debug(f"创建内容页: {slide_data.get('title')}")
+    
+    def _insert_image_to_slide(self, slide, img_url: str):
+        """
+        在幻灯片中插入图片（右侧区域）
+        
+        Args:
+            slide: 幻灯片对象
+            img_url: 图片URL
+        """
+        try:
+            import requests
+            from io import BytesIO
+            from PIL import Image as PILImage
+            
+            # 下载图片
+            response = requests.get(img_url, timeout=10)
+            response.raise_for_status()
+            
+            img_data = BytesIO(response.content)
+            pil_img = PILImage.open(img_data)
+            
+            # 计算图片位置（右侧，文字下方）
+            slide_width = slide.shapes[0].part.parent.slide_width
+            slide_height = slide.shapes[0].part.parent.slide_height
+            
+            # 图片放在右侧，宽度为幻灯片的40%
+            pic_width = slide_width * 0.4
+            img_width, img_height = pil_img.size
+            aspect_ratio = img_width / img_height
+            pic_height = pic_width / aspect_ratio
+            
+            # 位置：右侧，垂直居中
+            left = slide_width * 0.55
+            top = (slide_height - pic_height) / 2
+            
+            # 重新读取图片数据
+            img_data.seek(0)
+            
+            # 添加图片
+            slide.shapes.add_picture(img_data, left, top, width=pic_width, height=pic_height)
+            logger.info(f"在内容页插入图片: {img_url}")
+            
+        except Exception as e:
+            logger.warning(f"插入图片失败: {img_url}, 错误: {e}")
     
     def _create_image_slides(self, prs: Presentation, images: list):
         """
