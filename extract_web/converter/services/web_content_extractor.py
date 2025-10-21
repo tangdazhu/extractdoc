@@ -513,6 +513,19 @@ class WebContentExtractor:
         # 这样可以大幅减少token消耗
         text_soup = BeautifulSoup(cleaned_html, "html.parser")
 
+        # 先提取图片（在清理文本之前）
+        images = []
+        for img in text_soup.find_all("img"):
+            img_url = img.get("data-src") or img.get("src")
+            if img_url and img_url not in images:
+                # 处理相对URL
+                if img_url.startswith("/"):
+                    from urllib.parse import urljoin
+                    img_url = urljoin(url, img_url)
+                images.append(img_url)
+        
+        logger.info(f"提取到{len(images)}张图片")
+
         # 提取纯文本，但保留标题结构
         text_parts = []
         seen_texts = set()  # 用于去重
@@ -562,35 +575,30 @@ class WebContentExtractor:
         logger.info(f"文章分为{len(batches)}个批次处理")
 
         # 构建完整的AI提示词（不简化）
-        system_prompt = """你是技术知识提取专家。你的任务是从技术文章中提取可直接学习的知识点，让读者无需阅读原文就能掌握核心内容。
+        system_prompt = """你是技术知识提取专家。你的任务是从技术文章中提取可直接学习的知识点。
 
-核心原则：
-1. **提取知识，不做总结**：禁止写"介绍了XX"、"阐述了XX"、"讨论了XX"等概括性语句
-2. **保留原文精华**：直接提取定义、公式、架构、列表、案例等可学习的内容
-3. **结构化呈现**：使用列表、分层、对比等方式组织知识点
+【严格要求 - 违反将视为失败】
+1. 禁止写"介绍了"、"阐述了"、"讨论了"等废话
+2. 原文提到"N个要素/框架"，必须全部列出（数一遍确认数量）
+3. 有父子关系的内容必须用缩进表示（子项前加"  - "）
+4. 原文提到"介绍X和Y两个技术"，必须将相关内容归类到X和Y下
 
-提取标准：
-✅ 列表枚举：原文提到"11个要素"，必须列出全部11个及其核心说明
-✅ 架构图示：提取系统分层、组件关系、数据流向
-✅ 技术细节：API名称、框架名称、配置参数、代码示例
-✅ 定义概念：关键术语的准确定义（不是"介绍了XX概念"）
-✅ 数据事实：数字、百分比、性能指标、案例名称
-✅ 对比分析：不同方案的优缺点、适用场景
+【提取优先级】
+1. 架构图/分层设计：必须详细提取各层名称、组件、职责
+2. 完整列表：原文说"11个要素"就必须提取11个，不能少
+3. 层次关系：子类型/子组件必须缩进在父项下
+4. 技术细节：保留框架名、API名、工具名、数字、案例
 
-严格禁止：
-❌ "详细阐述了AI原生应用的核心要素及其作用" → 这是废话
-✅ 应该写：列出11个核心要素：1.大模型-负责核心理解 2.提示词-决定输出质量...
+【输出格式】
+{"title":"","sections":[{"title":"第X章","content":["知识点1","知识点2"],"level":2}],"images":[]}
 
-❌ "介绍了开发框架的分类" → 这是废话  
-✅ 应该写：开发框架3类：ReactAgent(基础Agent)、FlowAgent(包含SequentialAgent/ParallelAgent/LoopAgent)、A2RemoteAgent(分布式)
-
-❌ "讨论了系统架构" → 这是废话
-✅ 应该写：系统架构分3层：接入层(API网关)、处理层(Agent引擎)、存储层(向量数据库)
-
-输出格式：
-{"title":"","sections":[{"title":"第X章 具体主题","content":["知识点1","知识点2"],"level":2}],"images":[]}
-
-每个章节的content必须是可直接学习的知识点，不能是概括性总结。"""
+【关键规则】
+- 如果原文有"X包含Y、Z、W"，必须写成：
+  - **X**：说明
+    - Y：说明
+    - Z：说明
+    - W：说明
+- 如果原文说"N个要素"，提取后数一遍，确保数量正确"""
 
         # 分批调用AI，收集结果
         all_sections = []
@@ -599,37 +607,47 @@ class WebContentExtractor:
 
         for i, batch_content in enumerate(batches):
             # 构建已提取章节列表（用于去重）
-            extracted_titles = [s.get('title', '') for s in all_sections]
+            extracted_titles = [s.get("title", "") for s in all_sections]
             dedup_hint = ""
             if extracted_titles:
-                dedup_hint = f"\n\n已提取的章节（不要重复）：{', '.join(extracted_titles)}"
-            
-            user_prompt = f"""文章内容第{i+1}/{len(batches)}部分（[标题]标记章节标题）：
+                dedup_hint = (
+                    f"\n\n已提取的章节（不要重复）：{', '.join(extracted_titles)}"
+                )
+
+            user_prompt = f"""【文章内容第{i+1}/{len(batches)}部分】（[标题]标记章节标题）
 
 {batch_content}
 
-提取任务：
-从上述内容中提取可直接学习的知识点。每个章节必须包含具体的、可操作的知识，而非概括性描述。
+【提取指令】
+1. 找出所有章节标题（通常是[标题]标记的内容）
+2. 对每个章节：
+   a) 如果提到"N个要素/框架/技术"，必须全部列出（提取后数一遍确认）
+   b) 如果有架构/分层设计，必须详细提取各层名称和组件
+   c) 如果有父子关系（如"X包含Y、Z"），子项必须缩进（前加"  - "）
+   d) 如果提到"介绍A和B两个技术"，必须将相关内容归类到A和B下
+   e) 禁止写"介绍了"、"阐述了"等废话，直接写知识点
 
-提取重点：
-1. **完整列表**：如果提到"11个要素"、"3类框架"，必须逐一列出每个项目的名称和核心功能
-2. **架构层次**：如果有系统架构，提取各层名称、职责、交互关系
-3. **技术术语**：保留所有框架名、API名、工具名、概念定义
-4. **数据指标**：保留数字、百分比、性能数据、案例名称
-5. **对比分析**：不同方案的优缺点、适用场景、选型建议
+【缩进规则 - 必须严格遵守】
+- 如果原文说"FlowAgent包含SequentialAgent、ParallelAgent、LoopAgent"，必须写成：
+  - **FlowAgent**：说明
+    - SequentialAgent：说明
+    - ParallelAgent：说明
+    - LoopAgent：说明
 
-格式要求：
-- 使用"**术语**：说明"格式
-- 有层次时使用缩进（如FlowAgent下的子类型）
-- 禁止写"介绍了"、"阐述了"、"讨论了"等总结性语句
+- 如果原文说"介绍Function Calling和MCP两个技术，MCP包含MCP Registry和MCP Server"，必须写成：
+  - **Function Calling**：说明
+  - **MCP**：说明
+    - MCP Registry：说明
+    - MCP Server：说明
 
-示例对比：
-❌ 错误："详细阐述了AI应用的核心要素"
-✅ 正确："AI应用11个核心要素：**大模型**-负责核心理解和非生成任务；**提示词**-质量决定输出的相关性和准确性；**RAG**-解决幻觉问题..."
+【数量验证】
+- 原文说"11个要素"，提取后必须有11个
+- 原文说"3类框架"，提取后必须有3类
+- 提取完成后数一遍，确保数量正确
 
-**去重规则**：跳过已提取的章节。{dedup_hint}
+【去重】{dedup_hint}
 
-返回JSON格式。"""
+返回JSON格式：{{"title":"","sections":[{{"title":"第X章","content":["知识点1","  - 子知识点1","知识点2"],"level":2}}],"images":[]}}"""
 
             logger.info(f"处理第{i+1}/{len(batches)}批次，长度:{len(user_prompt)}字符")
 
@@ -703,11 +721,14 @@ class WebContentExtractor:
                         for section in batch_result["sections"]:
                             section_title = section.get("title", "")
                             # 检查是否已存在相同标题的章节
-                            if not any(s.get("title", "") == section_title for s in all_sections):
+                            if not any(
+                                s.get("title", "") == section_title
+                                for s in all_sections
+                            ):
                                 new_sections.append(section)
                             else:
                                 logger.debug(f"跳过重复章节: {section_title}")
-                        
+
                         all_sections.extend(new_sections)
                         logger.info(
                             f"批次{i+1}提取到{len(batch_result['sections'])}个章节，去重后新增{len(new_sections)}个，当前总计{len(all_sections)}个"
@@ -739,7 +760,7 @@ class WebContentExtractor:
                 "author": article_author,
                 "publish_time": "",
                 "sections": all_sections,
-                "images": [],
+                "images": images,  # 使用提取到的图片
             },
             ensure_ascii=False,
         )

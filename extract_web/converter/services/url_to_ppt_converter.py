@@ -72,7 +72,10 @@ class URLToPPTConverter:
             
             # 3. 生成PPT
             logger.info("步骤3: 生成PPT文件")
-            self._create_ppt(ppt_structure, output_path)
+            # 传递图片列表给PPT生成器
+            images = article.get('images', [])
+            logger.info(f"文章包含{len(images)}张图片")
+            self._create_ppt(ppt_structure, output_path, images)
             
             # 计算总耗时
             elapsed_time = time.time() - start_time
@@ -98,14 +101,17 @@ class URLToPPTConverter:
                 'message': f"转换失败: {str(e)}"
             }
     
-    def _create_ppt(self, ppt_structure: Dict, output_path: str):
+    def _create_ppt(self, ppt_structure: Dict, output_path: str, images: list = None):
         """
         创建PPT文件
         
         Args:
             ppt_structure: PPT结构字典
             output_path: 输出文件路径
+            images: 图片URL列表
         """
+        if images is None:
+            images = []
         # 加载模板或创建新演示文稿
         template_path = self.style_config.get('template_path')
         if template_path and Path(template_path).exists():
@@ -125,6 +131,11 @@ class URLToPPTConverter:
         # 2. 创建内容页
         for slide_data in ppt_structure['slides']:
             self._create_content_slide(prs, slide_data)
+        
+        # 3. 添加图片页（如果有图片）
+        if images:
+            logger.info(f"添加{len(images)}张图片到PPT")
+            self._create_image_slides(prs, images)
         
         # 保存PPT
         prs.save(output_path)
@@ -217,3 +228,71 @@ class URLToPPTConverter:
             # summary字段已废弃，只保留具体知识点
         
         logger.debug(f"创建内容页: {slide_data.get('title')}")
+    
+    def _create_image_slides(self, prs: Presentation, images: list):
+        """
+        创建图片页
+        
+        Args:
+            prs: 演示文稿对象
+            images: 图片URL列表
+        """
+        import requests
+        from io import BytesIO
+        from PIL import Image as PILImage
+        
+        for i, img_url in enumerate(images):
+            try:
+                logger.debug(f"下载图片{i+1}/{len(images)}: {img_url}")
+                
+                # 下载图片
+                response = requests.get(img_url, timeout=10)
+                response.raise_for_status()
+                
+                # 使用PIL验证图片
+                img_data = BytesIO(response.content)
+                pil_img = PILImage.open(img_data)
+                
+                # 创建空白幻灯片
+                blank_slide_layout = prs.slide_layouts[6]  # 空白布局
+                slide = prs.slides.add_slide(blank_slide_layout)
+                
+                # 计算图片位置和大小（居中显示，保持宽高比）
+                slide_width = prs.slide_width
+                slide_height = prs.slide_height
+                
+                img_width, img_height = pil_img.size
+                aspect_ratio = img_width / img_height
+                
+                # 设置最大尺寸（留边距）
+                max_width = slide_width * 0.9
+                max_height = slide_height * 0.9
+                
+                if img_width > max_width or img_height > max_height:
+                    if aspect_ratio > max_width / max_height:
+                        # 宽度为限制因素
+                        pic_width = max_width
+                        pic_height = max_width / aspect_ratio
+                    else:
+                        # 高度为限制因素
+                        pic_height = max_height
+                        pic_width = max_height * aspect_ratio
+                else:
+                    pic_width = Inches(img_width / 96)  # 假设96 DPI
+                    pic_height = Inches(img_height / 96)
+                
+                # 居中位置
+                left = (slide_width - pic_width) / 2
+                top = (slide_height - pic_height) / 2
+                
+                # 重新读取图片数据（PIL已经消耗了流）
+                img_data.seek(0)
+                
+                # 添加图片
+                slide.shapes.add_picture(img_data, left, top, width=pic_width, height=pic_height)
+                
+                logger.info(f"成功添加图片{i+1}: {img_url}")
+                
+            except Exception as e:
+                logger.warning(f"添加图片{i+1}失败: {img_url}, 错误: {e}")
+                continue
