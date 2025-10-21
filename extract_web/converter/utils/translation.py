@@ -1,7 +1,15 @@
 import logging
 import os
 import re
+import sys
+from pathlib import Path
 import dashscope
+
+# 添加项目根目录到Python路径，确保导入正确的utils模块
+project_root = Path(__file__).resolve().parents[3]  # extract_doc目录
+if str(project_root) not in sys.path:
+    sys.path.insert(0, str(project_root))
+
 from utils.config_manager import config
 
 logger = logging.getLogger("ocr_system")
