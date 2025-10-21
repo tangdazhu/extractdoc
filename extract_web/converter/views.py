@@ -280,12 +280,13 @@ def document_generation_view(request):
         }
 
         if mode == "ppt":
-            if source_url:
-                # URL模式返回3个值
-                output_filename, message, token_usage = generate_ppt_document(**generation_kwargs)
+            result = generate_ppt_document(**generation_kwargs)
+            if len(result) == 3:
+                # 返回3个值：有Token统计
+                output_filename, message, token_usage = result
             else:
-                # 文件模式返回2个值
-                output_filename, message = generate_ppt_document(**generation_kwargs)
+                # 返回2个值：没有Token统计
+                output_filename, message = result
                 token_usage = {}
         else:
             output_filename, message = generate_word_document(**generation_kwargs)

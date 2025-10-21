@@ -1220,6 +1220,28 @@ def generate_ppt_document(
     presentation.save(str(output_path))
 
     total_pages = len(presentation.slides)
+    
+    # 获取Token统计（如果使用了AI分析器）
+    token_usage = {}
+    if is_pdf and 'ai_analyzer' in locals():
+        token_stats = ai_analyzer.get_token_usage()
+        token_usage = {
+            "step1": {"input": 0, "output": 0, "total": 0},  # PDF没有步骤1
+            "step2": {
+                "input": token_stats["input_tokens"],
+                "output": token_stats["output_tokens"],
+                "total": token_stats["total_tokens"]
+            },
+            "total": {
+                "input": token_stats["input_tokens"],
+                "output": token_stats["output_tokens"],
+                "total": token_stats["total_tokens"]
+            }
+        }
+        message = f"PPT 文档生成成功，共 {total_pages} 页，Token使用: 步骤2（AI分析）={token_stats['total_tokens']}(I:{token_stats['input_tokens']}/O:{token_stats['output_tokens']}), 总计={token_stats['total_tokens']}"
+    else:
+        message = f"PPT 文档生成成功，共 {total_pages} 页。"
+    
     logger.info(
         "PPT 文档生成完成: %s，共 %d 页 (user=%s, request=%s)",
         output_path,
@@ -1227,7 +1249,11 @@ def generate_ppt_document(
         username,
         request_id,
     )
-    return output_filename, f"PPT 文档生成成功，共 {total_pages} 页。"
+    
+    if token_usage:
+        return output_filename, message, token_usage
+    else:
+        return output_filename, message
 
 
 def _generate_ppt_from_pdf_pages(

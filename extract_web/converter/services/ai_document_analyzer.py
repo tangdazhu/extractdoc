@@ -40,6 +40,10 @@ class AIDocumentAnalyzer:
             self.model = model
             self.temperature = 0.1
             self.max_tokens = 4000
+        
+        # 初始化Token统计
+        self.total_input_tokens = 0
+        self.total_output_tokens = 0
 
     def analyze_document_structure(
         self, multimodal_data: dict, request_id: str
@@ -545,8 +549,17 @@ Whitepaper 的目的：为产研和解决方案开发团队提供系统架构范
 
         if response.status_code == 200:
             content = response.output.choices[0].message.content
+            
+            # 记录Token使用情况
+            usage = response.usage
+            input_tokens = usage.input_tokens if usage else 0
+            output_tokens = usage.output_tokens if usage else 0
+            self.total_input_tokens += input_tokens
+            self.total_output_tokens += output_tokens
+            
             logger.debug(
-                "AI调用成功,RequestID=%s,返回长度=%d", request_id, len(content)
+                "AI调用成功,RequestID=%s,返回长度=%d,Token使用: Input=%d, Output=%d", 
+                request_id, len(content), input_tokens, output_tokens
             )
             return content
         else:
@@ -554,6 +567,19 @@ Whitepaper 的目的：为产研和解决方案开发团队提供系统架构范
             logger.error(error_msg)
             raise RuntimeError(error_msg)
 
+    def get_token_usage(self) -> dict:
+        """
+        获取累积的Token使用情况
+        
+        Returns:
+            Token使用统计字典
+        """
+        return {
+            "input_tokens": self.total_input_tokens,
+            "output_tokens": self.total_output_tokens,
+            "total_tokens": self.total_input_tokens + self.total_output_tokens
+        }
+    
     def _summarize_table(self, table_data: dict) -> str:
         """总结表格信息"""
         data = table_data.get("data", [])
