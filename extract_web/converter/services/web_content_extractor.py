@@ -562,9 +562,35 @@ class WebContentExtractor:
         logger.info(f"文章分为{len(batches)}个批次处理")
 
         # 构建完整的AI提示词（不简化）
-        system_prompt = """你是专业的技术文章分析师。提取每个章节的核心要点：定义、架构、要素、方案、数据。
-禁止空话如"介绍了..."。
-返回JSON：{"title":"","sections":[{"title":"第X章","content":["要点1","要点2"],"level":2}],"images":[]}"""
+        system_prompt = """你是技术知识提取专家。你的任务是从技术文章中提取可直接学习的知识点，让读者无需阅读原文就能掌握核心内容。
+
+核心原则：
+1. **提取知识，不做总结**：禁止写"介绍了XX"、"阐述了XX"、"讨论了XX"等概括性语句
+2. **保留原文精华**：直接提取定义、公式、架构、列表、案例等可学习的内容
+3. **结构化呈现**：使用列表、分层、对比等方式组织知识点
+
+提取标准：
+✅ 列表枚举：原文提到"11个要素"，必须列出全部11个及其核心说明
+✅ 架构图示：提取系统分层、组件关系、数据流向
+✅ 技术细节：API名称、框架名称、配置参数、代码示例
+✅ 定义概念：关键术语的准确定义（不是"介绍了XX概念"）
+✅ 数据事实：数字、百分比、性能指标、案例名称
+✅ 对比分析：不同方案的优缺点、适用场景
+
+严格禁止：
+❌ "详细阐述了AI原生应用的核心要素及其作用" → 这是废话
+✅ 应该写：列出11个核心要素：1.大模型-负责核心理解 2.提示词-决定输出质量...
+
+❌ "介绍了开发框架的分类" → 这是废话  
+✅ 应该写：开发框架3类：ReactAgent(基础Agent)、FlowAgent(包含SequentialAgent/ParallelAgent/LoopAgent)、A2RemoteAgent(分布式)
+
+❌ "讨论了系统架构" → 这是废话
+✅ 应该写：系统架构分3层：接入层(API网关)、处理层(Agent引擎)、存储层(向量数据库)
+
+输出格式：
+{"title":"","sections":[{"title":"第X章 具体主题","content":["知识点1","知识点2"],"level":2}],"images":[]}
+
+每个章节的content必须是可直接学习的知识点，不能是概括性总结。"""
 
         # 分批调用AI，收集结果
         all_sections = []
@@ -572,11 +598,38 @@ class WebContentExtractor:
         article_author = ""
 
         for i, batch_content in enumerate(batches):
-            user_prompt = f"""文章内容第{i+1}部分（[标题]是章节标题）：
+            # 构建已提取章节列表（用于去重）
+            extracted_titles = [s.get('title', '') for s in all_sections]
+            dedup_hint = ""
+            if extracted_titles:
+                dedup_hint = f"\n\n已提取的章节（不要重复）：{', '.join(extracted_titles)}"
+            
+            user_prompt = f"""文章内容第{i+1}/{len(batches)}部分（[标题]标记章节标题）：
 
 {batch_content}
 
-提取这部分的所有章节及其实质性内容，返回JSON。"""
+提取任务：
+从上述内容中提取可直接学习的知识点。每个章节必须包含具体的、可操作的知识，而非概括性描述。
+
+提取重点：
+1. **完整列表**：如果提到"11个要素"、"3类框架"，必须逐一列出每个项目的名称和核心功能
+2. **架构层次**：如果有系统架构，提取各层名称、职责、交互关系
+3. **技术术语**：保留所有框架名、API名、工具名、概念定义
+4. **数据指标**：保留数字、百分比、性能数据、案例名称
+5. **对比分析**：不同方案的优缺点、适用场景、选型建议
+
+格式要求：
+- 使用"**术语**：说明"格式
+- 有层次时使用缩进（如FlowAgent下的子类型）
+- 禁止写"介绍了"、"阐述了"、"讨论了"等总结性语句
+
+示例对比：
+❌ 错误："详细阐述了AI应用的核心要素"
+✅ 正确："AI应用11个核心要素：**大模型**-负责核心理解和非生成任务；**提示词**-质量决定输出的相关性和准确性；**RAG**-解决幻觉问题..."
+
+**去重规则**：跳过已提取的章节。{dedup_hint}
+
+返回JSON格式。"""
 
             logger.info(f"处理第{i+1}/{len(batches)}批次，长度:{len(user_prompt)}字符")
 
@@ -645,9 +698,19 @@ class WebContentExtractor:
                         article_author = batch_result.get("author", "")
 
                     if batch_result.get("sections"):
-                        all_sections.extend(batch_result["sections"])
+                        # 去重：检查章节标题是否已存在
+                        new_sections = []
+                        for section in batch_result["sections"]:
+                            section_title = section.get("title", "")
+                            # 检查是否已存在相同标题的章节
+                            if not any(s.get("title", "") == section_title for s in all_sections):
+                                new_sections.append(section)
+                            else:
+                                logger.debug(f"跳过重复章节: {section_title}")
+                        
+                        all_sections.extend(new_sections)
                         logger.info(
-                            f"批次{i+1}提取到{len(batch_result['sections'])}个章节，当前总计{len(all_sections)}个"
+                            f"批次{i+1}提取到{len(batch_result['sections'])}个章节，去重后新增{len(new_sections)}个，当前总计{len(all_sections)}个"
                         )
 
                     batch_success = True

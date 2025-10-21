@@ -213,13 +213,7 @@ class URLToPPTConverter:
                 p.font.size = Pt(content_font_size)
                 p.space_before = Pt(6)
             
-            # 添加总结（如果有）
-            summary = slide_data.get('summary', '')
-            if summary:
-                p = text_frame.add_paragraph()
-                p.text = f"\n{summary}"
-                p.font.size = Pt(content_font_size - 2)
-                p.font.italic = True
-                p.font.color.rgb = RGBColor(96, 96, 96)
+            # 不再添加总结（已从设计中移除）
+            # summary字段已废弃，只保留具体知识点
         
         logger.debug(f"创建内容页: {slide_data.get('title')}")
