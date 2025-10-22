@@ -9,7 +9,7 @@ import logging
 from typing import List, Dict, Any, Optional
 from pptx import Presentation
 from pptx.util import Inches, Pt
-from pptx.enum.text import PP_ALIGN, MSO_ANCHOR
+from pptx.enum.text import PP_ALIGN, MSO_ANCHOR, MSO_AUTO_SIZE
 from pptx.dml.color import RGBColor
 from pptx.enum.shapes import MSO_SHAPE
 from utils.config_manager import config
@@ -470,14 +470,25 @@ class BusinessStylePPTGenerator:
             
             # 卡片内容
             card_content_box = slide.shapes.add_textbox(
-                Inches(x_pos + 0.3), Inches(4.8),
-                Inches(card_width - 0.6), Inches(1.5)
+                Inches(x_pos + 0.2), Inches(4.8),
+                Inches(card_width - 0.4), Inches(1.8)
             )
             card_content_text = card_content_box.text_frame
-            card_content_text.text = card.get("content", "")
+            # 智能截断：优先在标点符号处截断
+            content = card.get("content", "")
+            if len(content) > 30:
+                # 尝试在句号、逗号处截断
+                for i in range(27, 15, -1):
+                    if i < len(content) and content[i] in '。，、；':
+                        content = content[:i+1]
+                        break
+                else:
+                    # 没找到标点，直接截断
+                    content = content[:27] + "..."
+            card_content_text.text = content
             card_content_text.word_wrap = True
             card_content_text.paragraphs[0].alignment = PP_ALIGN.CENTER
-            card_content_text.paragraphs[0].font.size = Pt(14)
+            card_content_text.paragraphs[0].font.size = Pt(12)
             card_content_text.paragraphs[0].font.color.rgb = self.COLOR_TEXT_DARK
         
         logger.debug(f"创建三列卡片页: {title}, {len(cards_to_show)}张卡片")
@@ -544,13 +555,24 @@ class BusinessStylePPTGenerator:
             # 步骤说明
             desc_box = slide.shapes.add_textbox(
                 Inches(x_pos), Inches(4.2),
-                Inches(step_width), Inches(1.5)
+                Inches(step_width), Inches(2.0)
             )
             desc_text = desc_box.text_frame
-            desc_text.text = step.get("description", "")
+            # 智能截断：优先在标点符号处截断
+            description = step.get("description", "")
+            if len(description) > 25:
+                # 尝试在句号、逗号处截断
+                for i in range(22, 12, -1):
+                    if i < len(description) and description[i] in '。，、；':
+                        description = description[:i+1]
+                        break
+                else:
+                    # 没找到标点，直接截断
+                    description = description[:22] + "..."
+            desc_text.text = description
             desc_text.word_wrap = True
             desc_text.paragraphs[0].alignment = PP_ALIGN.CENTER
-            desc_text.paragraphs[0].font.size = Pt(14)
+            desc_text.paragraphs[0].font.size = Pt(12)
             desc_text.paragraphs[0].font.color.rgb = self.COLOR_TEXT_DARK
             
             # 箭头（除了最后一个步骤）
@@ -656,9 +678,16 @@ class BusinessStylePPTGenerator:
             # 内容
             if item.get("content"):
                 content_text.add_paragraph()
-                content_text.paragraphs[1].text = item.get("content", "")
+                # 限制文本长度，避免溢出
+                content = item.get("content", "")
+                if len(content) > 60:
+                    content = content[:57] + "..."
+                content_text.paragraphs[1].text = content
                 content_text.paragraphs[1].font.size = Pt(14)
                 content_text.paragraphs[1].font.color.rgb = self.COLOR_TEXT_DARK
+            
+            # 启用自动换行
+            content_text.word_wrap = True
         
         logger.debug(f"创建时间线页: {title}, {len(items_to_show)}项")
     
@@ -887,8 +916,8 @@ class BusinessStylePPTGenerator:
         if caption:
             text_container = slide.shapes.add_shape(
                 MSO_SHAPE.ROUNDED_RECTANGLE,
-                Inches(7.8), Inches(1.8),
-                Inches(5), Inches(5.2)
+                Inches(7.5), Inches(1.8),
+                Inches(5.5), Inches(5.2)
             )
             text_container.fill.solid()
             text_container.fill.fore_color.rgb = self.COLOR_WHITE
@@ -934,7 +963,7 @@ class BusinessStylePPTGenerator:
                 para.text = f"{bullet} {clean_line}"
                 
                 para.level = indent_level
-                para.font.size = Pt(18 if indent_level == 0 else 16)
+                para.font.size = Pt(14 if indent_level == 0 else 12)
                 para.font.color.rgb = self.COLOR_TEXT_DARK
                 
                 # 加粗处理

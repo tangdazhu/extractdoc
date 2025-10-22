@@ -481,6 +481,55 @@ else:
 
 ---
 
+### 4. 文本溢出防护
+
+**问题**：长文本在卡片、流程图等布局中溢出框架
+
+**解决方案**：
+
+#### 三列卡片布局
+```python
+# 限制内容长度
+content = card.get("content", "")
+if len(content) > 50:
+    content = content[:47] + "..."
+
+# 启用自动调整
+card_content_text.auto_size = MSO_AUTO_SIZE.TEXT_TO_FIT_SHAPE
+card_content_text.word_wrap = True
+```
+
+#### 流程图布局
+```python
+# 限制描述长度
+description = step.get("description", "")
+if len(description) > 40:
+    description = description[:37] + "..."
+
+# 启用自动调整
+desc_text.auto_size = MSO_AUTO_SIZE.TEXT_TO_FIT_SHAPE
+desc_text.word_wrap = True
+```
+
+#### 时间线布局
+```python
+# 限制内容长度
+content = item.get("content", "")
+if len(content) > 60:
+    content = content[:57] + "..."
+
+# 启用换行
+content_text.word_wrap = True
+```
+
+**文本长度限制**：
+- 三列卡片：50字（卡片宽度较窄）
+- 流程图：40字（步骤框较小）
+- 时间线：60字（横向空间较大）
+- 左右对比：60字（从配置读取）
+
+---
+
 ## 技术实现
 
 ### 1. 配置化原则
@@ -701,6 +750,13 @@ ppt_generation:
 ---
 
 ## 更新日志
+
+### v2.2 (2025-10-22 下午)
+- ✅ 修复所有布局的文本溢出问题
+- ✅ 三列卡片：限制内容50字，启用自动调整
+- ✅ 流程图：限制描述40字，启用自动调整
+- ✅ 时间线：限制内容60字，启用换行
+- ✅ 商务+学术风格全部修复
 
 ### v2.1 (2025-10-22 下午)
 - ✅ 修复自动布局检测过于宽泛的问题
