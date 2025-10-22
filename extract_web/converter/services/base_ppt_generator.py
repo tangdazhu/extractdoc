@@ -65,12 +65,18 @@ class BasePPTGenerator:
             2: config.get("text_formatting.bullet_level_2", "▪")
         }
         
-        # 处理内容行
+        # 清空第一个默认段落，但不使用它
+        # PowerPoint的第一个默认段落有无法修改的缩进
+        if text_frame.paragraphs:
+            first_para = text_frame.paragraphs[0]
+            first_para.text = ""  # 清空但保留
+        
+        logger.debug(f"[缩进修复] 开始添加{len(content_lines)}行内容")
+        
+        # 处理内容行 - 所有段落都用add_paragraph创建（跳过第一个默认段落）
         for i, line in enumerate(content_lines):
-            if i > 0:
-                text_frame.add_paragraph()
-            
-            para = text_frame.paragraphs[i]
+            # 所有段落都通过add_paragraph创建，避免使用默认段落
+            para = text_frame.add_paragraph()
             
             # 检测缩进层级
             indent_level = 0
@@ -88,9 +94,14 @@ class BasePPTGenerator:
             # 清理Markdown标记
             clean_line, is_bold = self._clean_markdown_text(clean_line)
             
-            # 添加bullet符号
+            # 添加bullet符号（不添加空格，让PowerPoint的默认缩进作为左边距）
             bullet = bullet_symbols.get(indent_level, "●")
-            para.text = f"{bullet} {clean_line}"
+            # 1级缩进使用4个空格
+            indent_spaces = "    " if indent_level == 1 else ""
+            para.text = f"{indent_spaces}{bullet} {clean_line}"
+            
+            if i == 0:
+                logger.debug(f"[缩进修复] 第一行文本: '{para.text[:30]}...'")
             
             # 设置字体（必须在设置text之后）
             font_size = font_sizes.get(indent_level, 18)
@@ -99,17 +110,9 @@ class BasePPTGenerator:
             if is_bold:
                 para.font.bold = True
             
-            # 设置段落格式（缩进、行距）
-            try:
-                pf = para.paragraph_format
-                pf.left_indent = Inches(0.3 * indent_level)
-                pf.first_line_indent = Inches(0)
-                pf.space_before = Pt(0)
-                pf.space_after = Pt(6)
-                pf.line_spacing = 1.2
-            except (AttributeError, TypeError) as e:
-                # 某些段落对象可能不支持paragraph_format
-                logger.debug(f"段落格式设置失败（可能是特殊段落类型）: {e}")
+            # 不设置para.level！它会自动添加缩进
+            # 如果需要缩进，通过在文本前添加空格实现
+            # （因为paragraph_format不可用）
     
     def _setup_text_frame_margins(self, text_frame):
         """
@@ -119,18 +122,11 @@ class BasePPTGenerator:
             text_frame: 文本框对象
         """
         text_frame.word_wrap = True
-        text_frame.margin_left = Inches(0.3)
-        text_frame.margin_right = Inches(0.3)
-        text_frame.margin_top = Inches(0.3)
-        
-        # 清除第一个段落的默认缩进
-        if text_frame.paragraphs:
-            try:
-                first_para = text_frame.paragraphs[0]
-                first_para.space_before = Pt(0)
-                first_para.space_after = Pt(0)
-            except (AttributeError, TypeError) as e:
-                logger.debug(f"第一个段落格式设置失败: {e}")
+        text_frame.margin_left = Inches(0)  # 完全去除左边距
+        text_frame.margin_right = Inches(0.2)
+        text_frame.margin_top = Inches(0.2)
+        text_frame.margin_bottom = Inches(0.2)
+        logger.debug(f"[缩进修复] 文本框边距设置: left=0, right=0.2, top=0.2")
     
     def save(self, output_path: str):
         """保存PPT"""
