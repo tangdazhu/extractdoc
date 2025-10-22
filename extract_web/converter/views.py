@@ -278,6 +278,9 @@ def document_generation_view(request):
             "template_config": template_config,
             "use_cache": use_cache,
         }
+        
+        # 添加日志：记录模板选择
+        logger.info(f"document_generation_view: mode={mode}, template_key={template_key}, RequestID={request_id}")
 
         if mode == "ppt":
             result = generate_ppt_document(**generation_kwargs)

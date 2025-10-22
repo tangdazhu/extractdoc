@@ -21,6 +21,8 @@ from .template_based_ppt_generator import TemplateBasedPPTGenerator
 from .business_style_ppt_generator import BusinessStylePPTGenerator
 from .academic_style_ppt_generator import AcademicStylePPTGenerator
 from .placeholder_helper import PlaceholderHelper
+from .layout_detector import LayoutDetector
+from .content_parser import ContentParser
 from utils.config_manager import config
 from utils.token_cost import TokenCostCalculator
 
@@ -43,6 +45,8 @@ class URLToPPTConverter:
         # 初始化组件
         self.content_extractor = WebContentExtractor()
         self.content_analyzer = WebToPPTAnalyzer()
+        self.layout_detector = LayoutDetector()
+        self.content_parser = ContentParser()
 
         logger.info(f"初始化URLToPPTConverter: style={style}")
 
@@ -171,11 +175,14 @@ class URLToPPTConverter:
             images = []
         
         # 根据style选择生成器
+        logger.info(f"选择PPT生成器: style={self.style}")
         if self.style == "style_b":
             # 学术风格
+            logger.info("使用学术风格生成器")
             generator = AcademicStylePPTGenerator()
         else:
             # 默认商务风格
+            logger.info("使用商务风格生成器")
             generator = BusinessStylePPTGenerator()
 
         # 1. 创建封面页
@@ -196,7 +203,7 @@ class URLToPPTConverter:
             })
         generator.create_catalog_slide(catalog_items)
 
-        # 3. 创建内容页
+        # 3. 创建内容页（使用自动布局选择）
         image_index = 0
         for slide_data in ppt_structure["slides"]:
             title = slide_data.get("title", "未知标题")
@@ -206,11 +213,8 @@ class URLToPPTConverter:
             has_image = self._slide_contains_image_marker(slide_data)
             
             if has_image and image_index < len(images):
-                # 创建图文页（使用图片占位符布局）
-                # 移除[图片]标记
+                # 创建图文页
                 text_points = [p for p in points if "[图片]" not in str(p)]
-                
-                # 下载图片
                 image_path = self._download_image(images[image_index])
                 if image_path:
                     generator.create_picture_slide(
@@ -219,13 +223,15 @@ class URLToPPTConverter:
                         caption="\n".join(text_points) if text_points else ""
                     )
                 else:
-                    # 图片下载失败，创建普通内容页
                     generator.create_content_slide(title, text_points)
-                
                 image_index += 1
             else:
-                # 创建普通内容页
-                generator.create_content_slide(title, points)
+                # 自动检测布局类型
+                content_dict = {"title": title, "content": points}
+                layout_type = self.layout_detector.detect_layout_type(content_dict)
+                
+                # 根据布局类型创建页面
+                self._create_slide_by_layout(generator, layout_type, content_dict)
 
         # 3. 如果还有剩余图片，添加到末尾
         if image_index < len(images):
@@ -242,6 +248,48 @@ class URLToPPTConverter:
         # 保存PPT
         generator.save(output_path)
         logger.info(f"PPT已保存: {output_path}")
+    
+    def _create_slide_by_layout(self, generator, layout_type: str, content: Dict):
+        """
+        根据布局类型创建页面
+        
+        Args:
+            generator: PPT生成器
+            layout_type: 布局类型
+            content: 内容字典
+        """
+        title = content.get("title", "")
+        points = content.get("content", [])
+        
+        try:
+            if layout_type == "two_column":
+                # 左右对比布局
+                left, right, left_title, right_title = self.content_parser.parse_two_column_content(content)
+                generator.create_two_column_slide(title, left, right, left_title, right_title)
+                
+            elif layout_type == "three_column":
+                # 三列卡片布局
+                cards = self.content_parser.parse_three_column_content(content)
+                generator.create_three_column_slide(title, cards)
+                
+            elif layout_type == "flow_diagram":
+                # 流程图布局
+                steps = self.content_parser.parse_flow_diagram_content(content)
+                generator.create_flow_diagram_slide(title, steps)
+                
+            elif layout_type == "timeline":
+                # 时间线布局
+                items = self.content_parser.parse_timeline_content(content)
+                generator.create_timeline_slide(title, items)
+                
+            else:
+                # 默认：bullet list
+                generator.create_content_slide(title, points)
+                
+        except Exception as e:
+            # 如果特殊布局失败，回退到默认布局
+            logger.warning(f"布局{layout_type}创建失败，回退到默认布局: {e}")
+            generator.create_content_slide(title, points)
     
     def _slide_contains_image_marker(self, slide_data: Dict) -> bool:
         """检查幻灯片是否包含图片标记"""

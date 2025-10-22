@@ -158,15 +158,41 @@ ppt_generation:
     prefer_concise_content: false    # 不简化内容,保留完整性
     skip_low_importance: false       # 不跳过低重要度内容
     max_elements_per_slide: 5        # 每页最多元素数
-    max_catalog_items: 20           # 目录页最多显示项数
+    catalog_max_items: 20            # 目录最多显示项数
+    catalog_min_item_height: 0.4     # 目录项最小高度（英寸）
+    catalog_max_item_height: 0.7     # 目录项最大高度（英寸）
+    catalog_available_height: 5.0    # 目录可用高度（英寸）
     prefer_layouts:                  # 布局优先级
       - title_and_table
       - title_and_image
       - title_and_text
   
+  # 布局类型配置
+  layout_types:
+    bullet_list:                     # 要点列表布局
+      enabled: true
+      max_items: 6
+      indent_support: true
+    two_column:                      # 左右对比布局
+      enabled: true
+      split_ratio: 0.5               # 左右比例
+    three_column:                    # 三列卡片布局
+      enabled: true
+      card_style: true
+    flow_diagram:                    # 流程图布局
+      enabled: true
+      arrow_style: true
+    comparison:                      # 对比框布局
+      enabled: true
+      highlight_differences: true
+    timeline:                        # 时间线布局
+      enabled: true
+      vertical: true
+  
   # 样式模板配置
   styles:
     style_a:
+      style_name: "style_a"  # 样式标识符
       name: "简约商务风格"
       description: "适合商务汇报、项目展示"
       template_path: "config/templates/business_template.pptx"
@@ -176,6 +202,7 @@ ppt_generation:
       title_font_size: 44
       content_font_size: 18
     style_b:
+      style_name: "style_b"  # 样式标识符
       name: "学术报告风格"
       description: "适合学术论文、研究报告"
       template_path: "config/templates/academic_template.pptx"
@@ -195,3 +222,19 @@ text_processing:
   enable_ocr_error_correction: true
   group_nearby_elements: true
   proximity_threshold: 30
+
+# 文本格式化配置
+text_formatting:
+  # Bullet符号
+  bullet_level_0: "●"  # 一级：实心圆
+  bullet_level_1: "○"  # 二级：空心圆
+  bullet_level_2: "▪"  # 三级：方块
+  
+  # 字体大小（磅）
+  font_size_level_0: 20
+  font_size_level_1: 18
+  font_size_level_2: 16
+  
+  # 缩进设置（英寸）
+  indent_base: 0.3
+  indent_increment: 0.4

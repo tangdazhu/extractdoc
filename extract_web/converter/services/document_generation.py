@@ -1054,6 +1054,7 @@ def generate_ppt_document(
         
         # 获取样式名称
         style_name = template_config.get('style_name', 'style_a')
+        logger.info(f"URL转PPT: 使用样式={style_name}, template_config={template_config}")
         
         # 创建转换器
         converter = URLToPPTConverter(style=style_name)

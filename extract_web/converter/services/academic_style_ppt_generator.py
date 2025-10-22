@@ -152,7 +152,7 @@ class AcademicStylePPTGenerator:
     
     def create_catalog_slide(self, catalog_items: List[Dict[str, str]]):
         """
-        创建目录页
+        创建目录页（动态高度，单列布局）
         
         Args:
             catalog_items: 目录项列表，每项包含 {"number": "01", "title": "标题"}
@@ -182,36 +182,62 @@ class AcademicStylePPTGenerator:
         subtitle_frame.paragraphs[0].font.size = Pt(24)
         subtitle_frame.paragraphs[0].font.color.rgb = self.COLOR_TEXT_LIGHT
         
-        # 目录项（从配置读取最大显示数量）
-        max_items = config.get("ppt_generation.generation_preferences.max_catalog_items", 15)
-        start_y = 2.2
-        item_height = 0.8
+        # 从配置读取参数
+        max_items = config.get("ppt_generation.generation_preferences.catalog_max_items", 20)
+        min_height = config.get("ppt_generation.generation_preferences.catalog_min_item_height", 0.4)
+        max_height = config.get("ppt_generation.generation_preferences.catalog_max_item_height", 0.7)
+        available_height = config.get("ppt_generation.generation_preferences.catalog_available_height", 4.8)
         
-        for i, item in enumerate(catalog_items[:max_items]):
+        # 限制显示数量
+        items_to_show = catalog_items[:max_items]
+        total_items = len(items_to_show)
+        
+        # 动态计算每项高度
+        if total_items > 0:
+            calculated_height = available_height / total_items
+            # 限制在最小和最大高度之间
+            item_height = max(min_height, min(calculated_height, max_height))
+        else:
+            item_height = max_height
+        
+        # 计算起始位置
+        start_y = 2.0
+        
+        # 动态调整字体大小
+        if item_height >= 0.6:
+            font_size = 20
+        elif item_height >= 0.5:
+            font_size = 18
+        else:
+            font_size = 16
+        
+        for i, item in enumerate(items_to_show):
             number = item.get("number", f"{i+1:02d}")
             title = item.get("title", "")
             
             y_pos = start_y + i * item_height
             
-            # 目录项框
+            # 目录项框（动态高度）
+            item_box_height = item_height * 0.75
             item_shape = slide.shapes.add_shape(
                 MSO_SHAPE.ROUNDED_RECTANGLE,
                 Inches(1.5), Inches(y_pos),
-                Inches(10), Inches(0.6)
+                Inches(10), Inches(item_box_height)
             )
             item_shape.fill.solid()
             item_shape.fill.fore_color.rgb = self.COLOR_WHITE
             item_shape.fill.fore_color.brightness = -0.1
-            item_shape.line.fill.background()
+            item_shape.line.color.rgb = self.COLOR_ACCENT
+            item_shape.line.width = Pt(1.5)
             
             item_text = item_shape.text_frame
             item_text.text = f"{number}  {title}"
-            item_text.paragraphs[0].font.size = Pt(20)
+            item_text.paragraphs[0].font.size = Pt(font_size)
             item_text.paragraphs[0].font.color.rgb = self.COLOR_TEXT_DARK
             item_text.vertical_anchor = MSO_ANCHOR.MIDDLE
             item_text.margin_left = Inches(0.3)
         
-        logger.info(f"创建目录页: {len(catalog_items)}项")
+        logger.info(f"创建目录页: {total_items}项，每项高度{item_height:.2f}英寸")
     
     def create_content_slide(self, title: str, content_lines: List[str]):
         """
@@ -261,6 +287,18 @@ class AcademicStylePPTGenerator:
         content_text.margin_right = Inches(0.5)
         content_text.margin_top = Inches(0.3)
         
+        # 从配置读取格式化参数
+        bullet_symbols = {
+            0: config.get("text_formatting.bullet_level_0", "●"),
+            1: config.get("text_formatting.bullet_level_1", "○"),
+            2: config.get("text_formatting.bullet_level_2", "▪")
+        }
+        font_sizes = {
+            0: config.get("text_formatting.font_size_level_0", 20),
+            1: config.get("text_formatting.font_size_level_1", 18),
+            2: config.get("text_formatting.font_size_level_2", 16)
+        }
+        
         # 处理内容行
         for i, line in enumerate(content_lines):
             if i > 0:
@@ -284,9 +322,13 @@ class AcademicStylePPTGenerator:
             # 清理Markdown标记
             clean_line, is_bold = self._clean_markdown_text(clean_line)
             
-            para.text = clean_line
+            # 添加bullet符号
+            bullet = bullet_symbols.get(indent_level, "●")
+            para.text = f"{bullet} {clean_line}"
+            
+            # 设置字体
             para.level = indent_level
-            para.font.size = Pt(20 if indent_level == 0 else 18)
+            para.font.size = Pt(font_sizes.get(indent_level, 18))
             para.font.color.rgb = self.COLOR_TEXT_DARK
             
             # 加粗处理
@@ -294,6 +336,278 @@ class AcademicStylePPTGenerator:
                 para.font.bold = True
         
         logger.debug(f"创建内容页: {title} ({len(content_lines)}行)")
+    
+    def create_two_column_slide(self, title: str, left_content: List[str], right_content: List[str], 
+                                left_title: str = "传统方式", right_title: str = "AI方式"):
+        """创建左右对比页"""
+        slide = self.prs.slides.add_slide(self.prs.slide_layouts[6])
+        self._add_gradient_background(slide)
+        self._add_top_accent_bar(slide)
+        
+        # 标题栏
+        title_bar = slide.shapes.add_shape(
+            MSO_SHAPE.RECTANGLE,
+            0, Inches(0.3),
+            Inches(13.33), Inches(0.9)
+        )
+        title_bar.fill.solid()
+        title_bar.fill.fore_color.rgb = self.COLOR_WHITE
+        title_bar.line.fill.background()
+        
+        title_text = title_bar.text_frame
+        title_text.text = title
+        title_text.paragraphs[0].font.size = Pt(32)
+        title_text.paragraphs[0].font.bold = True
+        title_text.paragraphs[0].font.color.rgb = self.COLOR_PRIMARY_DARK
+        title_text.vertical_anchor = MSO_ANCHOR.MIDDLE
+        title_text.margin_left = Inches(0.5)
+        
+        split_ratio = config.get("ppt_generation.layout_types.two_column.split_ratio", 0.5)
+        total_width = 11.73
+        gap = 0.5
+        left_width = (total_width - gap) * split_ratio
+        right_width = total_width - gap - left_width
+        
+        # 左侧
+        left_box = slide.shapes.add_shape(
+            MSO_SHAPE.ROUNDED_RECTANGLE,
+            Inches(0.8), Inches(1.8),
+            Inches(left_width), Inches(5)
+        )
+        left_box.fill.solid()
+        left_box.fill.fore_color.rgb = self.COLOR_WHITE
+        left_box.line.color.rgb = self.COLOR_ACCENT
+        left_box.line.width = Pt(2)
+        
+        left_title_box = slide.shapes.add_textbox(Inches(0.8), Inches(1.5), Inches(left_width), Inches(0.4))
+        left_title_box.text_frame.text = left_title
+        left_title_box.text_frame.paragraphs[0].font.size = Pt(18)
+        left_title_box.text_frame.paragraphs[0].font.bold = True
+        left_title_box.text_frame.paragraphs[0].font.color.rgb = self.COLOR_PRIMARY_DARK
+        left_title_box.text_frame.paragraphs[0].alignment = PP_ALIGN.CENTER
+        
+        left_text = left_box.text_frame
+        left_text.word_wrap = True
+        left_text.margin_left = Inches(0.3)
+        left_text.margin_top = Inches(0.5)
+        for i, line in enumerate(left_content):
+            if i > 0:
+                left_text.add_paragraph()
+            left_text.paragraphs[i].text = f"● {line}"
+            left_text.paragraphs[i].font.size = Pt(16)
+            left_text.paragraphs[i].font.color.rgb = self.COLOR_TEXT_DARK
+        
+        # 右侧
+        right_box = slide.shapes.add_shape(
+            MSO_SHAPE.ROUNDED_RECTANGLE,
+            Inches(0.8 + left_width + gap), Inches(1.8),
+            Inches(right_width), Inches(5)
+        )
+        right_box.fill.solid()
+        right_box.fill.fore_color.rgb = self.COLOR_WHITE
+        right_box.line.color.rgb = self.COLOR_ACCENT
+        right_box.line.width = Pt(2)
+        
+        right_title_box = slide.shapes.add_textbox(Inches(0.8 + left_width + gap), Inches(1.5), Inches(right_width), Inches(0.4))
+        right_title_box.text_frame.text = right_title
+        right_title_box.text_frame.paragraphs[0].font.size = Pt(18)
+        right_title_box.text_frame.paragraphs[0].font.bold = True
+        right_title_box.text_frame.paragraphs[0].font.color.rgb = self.COLOR_PRIMARY_DARK
+        right_title_box.text_frame.paragraphs[0].alignment = PP_ALIGN.CENTER
+        
+        right_text = right_box.text_frame
+        right_text.word_wrap = True
+        right_text.margin_left = Inches(0.3)
+        right_text.margin_top = Inches(0.5)
+        for i, line in enumerate(right_content):
+            if i > 0:
+                right_text.add_paragraph()
+            right_text.paragraphs[i].text = f"● {line}"
+            right_text.paragraphs[i].font.size = Pt(16)
+            right_text.paragraphs[i].font.color.rgb = self.COLOR_TEXT_DARK
+        
+        logger.debug(f"创建左右对比页: {title}")
+    
+    def create_three_column_slide(self, title: str, cards: List[Dict[str, str]]):
+        """创建三列卡片页"""
+        slide = self.prs.slides.add_slide(self.prs.slide_layouts[6])
+        self._add_gradient_background(slide)
+        self._add_top_accent_bar(slide)
+        
+        title_bar = slide.shapes.add_shape(MSO_SHAPE.RECTANGLE, 0, Inches(0.3), Inches(13.33), Inches(0.9))
+        title_bar.fill.solid()
+        title_bar.fill.fore_color.rgb = self.COLOR_WHITE
+        title_bar.line.fill.background()
+        
+        title_text = title_bar.text_frame
+        title_text.text = title
+        title_text.paragraphs[0].font.size = Pt(32)
+        title_text.paragraphs[0].font.bold = True
+        title_text.paragraphs[0].font.color.rgb = self.COLOR_PRIMARY_DARK
+        title_text.vertical_anchor = MSO_ANCHOR.MIDDLE
+        title_text.margin_left = Inches(0.5)
+        
+        card_width = 3.5
+        card_gap = 0.5
+        start_x = 1.0
+        cards_to_show = cards[:3]
+        
+        for i, card in enumerate(cards_to_show):
+            x_pos = start_x + i * (card_width + card_gap)
+            
+            card_box = slide.shapes.add_shape(MSO_SHAPE.ROUNDED_RECTANGLE, Inches(x_pos), Inches(2.0), Inches(card_width), Inches(4.5))
+            card_box.fill.solid()
+            card_box.fill.fore_color.rgb = self.COLOR_WHITE
+            card_box.line.color.rgb = self.COLOR_ACCENT
+            card_box.line.width = Pt(2)
+            
+            icon_circle = slide.shapes.add_shape(MSO_SHAPE.OVAL, Inches(x_pos + 1.0), Inches(2.5), Inches(1.5), Inches(1.5))
+            icon_circle.fill.solid()
+            icon_circle.fill.fore_color.rgb = self.COLOR_PRIMARY_DARK
+            icon_circle.line.fill.background()
+            
+            icon_text = icon_circle.text_frame
+            icon_text.text = card.get("icon", f"{i+1}")
+            icon_text.paragraphs[0].alignment = PP_ALIGN.CENTER
+            icon_text.paragraphs[0].font.size = Pt(48)
+            icon_text.paragraphs[0].font.bold = True
+            icon_text.paragraphs[0].font.color.rgb = self.COLOR_WHITE
+            icon_text.vertical_anchor = MSO_ANCHOR.MIDDLE
+            
+            card_title_box = slide.shapes.add_textbox(Inches(x_pos + 0.3), Inches(4.2), Inches(card_width - 0.6), Inches(0.5))
+            card_title_box.text_frame.text = card.get("title", "")
+            card_title_box.text_frame.paragraphs[0].alignment = PP_ALIGN.CENTER
+            card_title_box.text_frame.paragraphs[0].font.size = Pt(18)
+            card_title_box.text_frame.paragraphs[0].font.bold = True
+            card_title_box.text_frame.paragraphs[0].font.color.rgb = self.COLOR_PRIMARY_DARK
+            
+            card_content_box = slide.shapes.add_textbox(Inches(x_pos + 0.3), Inches(4.8), Inches(card_width - 0.6), Inches(1.5))
+            card_content_box.text_frame.text = card.get("content", "")
+            card_content_box.text_frame.word_wrap = True
+            card_content_box.text_frame.paragraphs[0].alignment = PP_ALIGN.CENTER
+            card_content_box.text_frame.paragraphs[0].font.size = Pt(14)
+            card_content_box.text_frame.paragraphs[0].font.color.rgb = self.COLOR_TEXT_DARK
+        
+        logger.debug(f"创建三列卡片页: {title}, {len(cards_to_show)}张卡片")
+    
+    def create_flow_diagram_slide(self, title: str, steps: List[Dict[str, str]]):
+        """创建流程图页"""
+        slide = self.prs.slides.add_slide(self.prs.slide_layouts[6])
+        self._add_gradient_background(slide)
+        self._add_top_accent_bar(slide)
+        
+        title_bar = slide.shapes.add_shape(MSO_SHAPE.RECTANGLE, 0, Inches(0.3), Inches(13.33), Inches(0.9))
+        title_bar.fill.solid()
+        title_bar.fill.fore_color.rgb = self.COLOR_WHITE
+        title_bar.line.fill.background()
+        
+        title_text = title_bar.text_frame
+        title_text.text = title
+        title_text.paragraphs[0].font.size = Pt(32)
+        title_text.paragraphs[0].font.bold = True
+        title_text.paragraphs[0].font.color.rgb = self.COLOR_PRIMARY_DARK
+        title_text.vertical_anchor = MSO_ANCHOR.MIDDLE
+        title_text.margin_left = Inches(0.5)
+        
+        steps_to_show = steps[:4]
+        step_count = len(steps_to_show)
+        step_width = 2.5
+        arrow_width = 0.8
+        total_width = step_count * step_width + (step_count - 1) * arrow_width
+        start_x = (13.33 - total_width) / 2
+        
+        for i, step in enumerate(steps_to_show):
+            x_pos = start_x + i * (step_width + arrow_width)
+            
+            step_box = slide.shapes.add_shape(MSO_SHAPE.ROUNDED_RECTANGLE, Inches(x_pos), Inches(2.5), Inches(step_width), Inches(1.5))
+            step_box.fill.solid()
+            step_box.fill.fore_color.rgb = self.COLOR_PRIMARY_DARK
+            step_box.line.fill.background()
+            
+            step_title_text = step_box.text_frame
+            step_title_text.text = step.get("title", f"步骤{i+1}")
+            step_title_text.paragraphs[0].alignment = PP_ALIGN.CENTER
+            step_title_text.paragraphs[0].font.size = Pt(18)
+            step_title_text.paragraphs[0].font.bold = True
+            step_title_text.paragraphs[0].font.color.rgb = self.COLOR_WHITE
+            step_title_text.vertical_anchor = MSO_ANCHOR.MIDDLE
+            
+            desc_box = slide.shapes.add_textbox(Inches(x_pos), Inches(4.2), Inches(step_width), Inches(1.5))
+            desc_text = desc_box.text_frame
+            desc_text.text = step.get("description", "")
+            desc_text.word_wrap = True
+            desc_text.paragraphs[0].alignment = PP_ALIGN.CENTER
+            desc_text.paragraphs[0].font.size = Pt(14)
+            desc_text.paragraphs[0].font.color.rgb = self.COLOR_TEXT_DARK
+            
+            if i < step_count - 1:
+                arrow = slide.shapes.add_shape(MSO_SHAPE.RIGHT_ARROW, Inches(x_pos + step_width), Inches(2.9), Inches(arrow_width), Inches(0.7))
+                arrow.fill.solid()
+                arrow.fill.fore_color.rgb = self.COLOR_ACCENT
+                arrow.line.fill.background()
+        
+        logger.debug(f"创建流程图页: {title}, {step_count}个步骤")
+    
+    def create_timeline_slide(self, title: str, timeline_items: List[Dict[str, str]]):
+        """创建时间线页"""
+        slide = self.prs.slides.add_slide(self.prs.slide_layouts[6])
+        self._add_gradient_background(slide)
+        self._add_top_accent_bar(slide)
+        
+        title_bar = slide.shapes.add_shape(MSO_SHAPE.RECTANGLE, 0, Inches(0.3), Inches(13.33), Inches(0.9))
+        title_bar.fill.solid()
+        title_bar.fill.fore_color.rgb = self.COLOR_WHITE
+        title_bar.line.fill.background()
+        
+        title_text = title_bar.text_frame
+        title_text.text = title
+        title_text.paragraphs[0].font.size = Pt(32)
+        title_text.paragraphs[0].font.bold = True
+        title_text.paragraphs[0].font.color.rgb = self.COLOR_PRIMARY_DARK
+        title_text.vertical_anchor = MSO_ANCHOR.MIDDLE
+        title_text.margin_left = Inches(0.5)
+        
+        line_x = 3.0
+        start_y = 2.0
+        item_height = 1.2
+        items_to_show = timeline_items[:4]
+        
+        for i in range(len(items_to_show)):
+            y_pos = start_y + i * item_height
+            
+            node_circle = slide.shapes.add_shape(MSO_SHAPE.OVAL, Inches(line_x - 0.15), Inches(y_pos), Inches(0.3), Inches(0.3))
+            node_circle.fill.solid()
+            node_circle.fill.fore_color.rgb = self.COLOR_PRIMARY_DARK
+            node_circle.line.fill.background()
+            
+            if i < len(items_to_show) - 1:
+                connector = slide.shapes.add_shape(MSO_SHAPE.RECTANGLE, Inches(line_x - 0.02), Inches(y_pos + 0.3), Inches(0.04), Inches(item_height - 0.3))
+                connector.fill.solid()
+                connector.fill.fore_color.rgb = self.COLOR_ACCENT
+                connector.line.fill.background()
+            
+            item = items_to_show[i]
+            content_box = slide.shapes.add_shape(MSO_SHAPE.ROUNDED_RECTANGLE, Inches(line_x + 0.5), Inches(y_pos - 0.1), Inches(9), Inches(1.0))
+            content_box.fill.solid()
+            content_box.fill.fore_color.rgb = self.COLOR_WHITE
+            content_box.line.color.rgb = self.COLOR_ACCENT
+            content_box.line.width = Pt(1.5)
+            
+            content_text = content_box.text_frame
+            content_text.margin_left = Inches(0.3)
+            content_text.margin_top = Inches(0.1)
+            content_text.text = item.get("title", "")
+            content_text.paragraphs[0].font.size = Pt(16)
+            content_text.paragraphs[0].font.bold = True
+            content_text.paragraphs[0].font.color.rgb = self.COLOR_PRIMARY_DARK
+            
+            if item.get("content"):
+                content_text.add_paragraph()
+                content_text.paragraphs[1].text = item.get("content", "")
+                content_text.paragraphs[1].font.size = Pt(14)
+                content_text.paragraphs[1].font.color.rgb = self.COLOR_TEXT_DARK
+        
+        logger.debug(f"创建时间线页: {title}, {len(items_to_show)}项")
     
     def create_section_slide(self, number: str, title: str):
         """
@@ -412,6 +726,13 @@ class AcademicStylePPTGenerator:
             text_frame.margin_top = Inches(0.3)
             text_frame.margin_bottom = Inches(0.3)
             
+            # 从配置读取格式化参数
+            bullet_symbols = {
+                0: config.get("text_formatting.bullet_level_0", "●"),
+                1: config.get("text_formatting.bullet_level_1", "○"),
+                2: config.get("text_formatting.bullet_level_2", "▪")
+            }
+            
             # 处理文字内容（支持多行）
             lines = caption.split('\n') if caption else []
             for i, line in enumerate(lines):
@@ -433,7 +754,10 @@ class AcademicStylePPTGenerator:
                 # 清理Markdown标记
                 clean_line, is_bold = self._clean_markdown_text(clean_line)
                 
-                para.text = clean_line
+                # 添加bullet符号
+                bullet = bullet_symbols.get(indent_level, "●")
+                para.text = f"{bullet} {clean_line}"
+                
                 para.level = indent_level
                 para.font.size = Pt(18 if indent_level == 0 else 16)
                 para.font.color.rgb = self.COLOR_TEXT_DARK
