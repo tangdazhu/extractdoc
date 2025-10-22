@@ -17,6 +17,8 @@ from .web_content_extractor import WebContentExtractor
 from .web_to_ppt_analyzer import WebToPPTAnalyzer
 from .text_formatter import TextFormatter
 from .template_manager import TemplateManager
+from .template_based_ppt_generator import TemplateBasedPPTGenerator
+from .placeholder_helper import PlaceholderHelper
 from utils.config_manager import config
 from utils.token_cost import TokenCostCalculator
 
@@ -157,7 +159,7 @@ class URLToPPTConverter:
 
     def _create_ppt(self, ppt_structure: Dict, output_path: str, images: list = None):
         """
-        创建PPT文件
+        创建PPT文件（使用模板占位符机制）
 
         Args:
             ppt_structure: PPT结构字典
@@ -167,272 +169,117 @@ class URLToPPTConverter:
         if images is None:
             images = []
         
-        # 使用统一的模板管理器加载模板
+        # 获取模板路径
         from django.conf import settings
         base_dir = Path(settings.BASE_DIR).parent
-        prs = TemplateManager.load_template(self.style_config, base_dir)
+        template_path = TemplateManager.get_template_path(self.style_config, base_dir)
+        
+        if not template_path:
+            raise FileNotFoundError("未找到PPT模板文件")
+        
+        # 使用新的模板生成器
+        generator = TemplateBasedPPTGenerator(template_path)
 
         # 1. 创建封面页
-        self._create_cover_slide(prs, ppt_structure["cover"])
+        cover_data = ppt_structure["cover"]
+        subtitle_parts = []
+        if cover_data.get("subtitle"):
+            subtitle_parts.append(cover_data["subtitle"])
+        if cover_data.get("author"):
+            subtitle_parts.append(f"作者: {cover_data['author']}")
+        if cover_data.get("date"):
+            subtitle_parts.append(f"日期: {cover_data['date']}")
+        
+        generator.create_cover_slide(
+            title=cover_data.get("title", "未知标题"),
+            subtitle="\n".join(subtitle_parts)
+        )
 
-        # 2. 创建内容页（同时处理图片插入）
-        image_index = 0  # 当前使用的图片索引
+        # 2. 创建内容页
+        image_index = 0
         for slide_data in ppt_structure["slides"]:
-            # 检查是否需要插入图片
-            if image_index < len(images):
-                self._create_content_slide(prs, slide_data, images, image_index)
-                # 如果这页使用了图片，索引递增
-                if self._slide_contains_image_marker(slide_data):
-                    image_index += 1
+            title = slide_data.get("title", "未知标题")
+            points = slide_data.get("points", [])
+            
+            # 检查是否有图片标记
+            has_image = self._slide_contains_image_marker(slide_data)
+            
+            if has_image and image_index < len(images):
+                # 创建图文页（使用图片占位符布局）
+                # 移除[图片]标记
+                text_points = [p for p in points if "[图片]" not in str(p)]
+                
+                # 下载图片
+                image_path = self._download_image(images[image_index])
+                if image_path:
+                    generator.create_picture_slide(
+                        title=title,
+                        image_path=image_path,
+                        caption="\n".join(text_points) if text_points else ""
+                    )
+                else:
+                    # 图片下载失败，创建普通内容页
+                    generator.create_content_slide(title, text_points)
+                
+                image_index += 1
             else:
-                self._create_content_slide(prs, slide_data)
+                # 创建普通内容页
+                generator.create_content_slide(title, points)
 
         # 3. 如果还有剩余图片，添加到末尾
         if image_index < len(images):
             remaining_images = images[image_index:]
-            logger.info(f"添加{len(remaining_images)}张剩余图片到PPT末尾")
-            self._create_image_slides(prs, remaining_images)
+            logger.info(f"添加{len(remaining_images)}张剩余图片")
+            for img_url in remaining_images:
+                image_path = self._download_image(img_url)
+                if image_path:
+                    generator.create_picture_slide(
+                        title="补充图片",
+                        image_path=image_path
+                    )
 
         # 保存PPT
-        prs.save(output_path)
+        generator.save(Path(output_path))
         logger.info(f"PPT已保存: {output_path}")
-
-    def _create_cover_slide(self, prs: Presentation, cover_data: Dict):
-        """
-        创建封面页
-
-        Args:
-            prs: 演示文稿对象
-            cover_data: 封面数据
-        """
-        # 使用标题幻灯片布局（通常是第一个布局）
-        slide_layout = prs.slide_layouts[0]
-        slide = prs.slides.add_slide(slide_layout)
-
-        # 设置标题
-        title = slide.shapes.title
-        title.text = cover_data.get("title", "未知标题")
-
-        # 设置字体
-        title_font_size = self.style_config.get("title_font_size", 44)
-        for paragraph in title.text_frame.paragraphs:
-            paragraph.font.size = Pt(title_font_size)
-            paragraph.font.bold = True
-            paragraph.font.color.rgb = RGBColor(0, 0, 0)
-
-        # 设置副标题（包含作者和时间）
-        if len(slide.placeholders) > 1:
-            subtitle = slide.placeholders[1]
-            subtitle_parts = []
-
-            if cover_data.get("subtitle"):
-                subtitle_parts.append(cover_data["subtitle"])
-
-            if cover_data.get("author"):
-                subtitle_parts.append(f"作者: {cover_data['author']}")
-
-            if cover_data.get("date"):
-                subtitle_parts.append(f"日期: {cover_data['date']}")
-
-            subtitle.text = "\n".join(subtitle_parts)
-
-            # 设置副标题字体
-            for paragraph in subtitle.text_frame.paragraphs:
-                paragraph.font.size = Pt(18)
-                paragraph.font.color.rgb = RGBColor(64, 64, 64)
-
-        logger.info(f"创建封面页: {cover_data.get('title')}")
-
+    
     def _slide_contains_image_marker(self, slide_data: Dict) -> bool:
         """检查幻灯片是否包含图片标记"""
         points = slide_data.get("points", [])
         return any("[图片]" in str(point) for point in points)
-
-    def _create_content_slide(
-        self,
-        prs: Presentation,
-        slide_data: Dict,
-        images: list = None,
-        image_index: int = 0,
-    ):
+    
+    def _download_image(self, img_url: str) -> Optional[Path]:
         """
-        创建内容页
-
+        下载图片到临时文件
+        
         Args:
-            prs: 演示文稿对象
-            slide_data: 幻灯片数据
-            images: 图片URL列表
-            image_index: 当前图片索引
-        """
-        if images is None:
-            images = []
-        # 使用标题和内容布局（通常是第二个布局）
-        slide_layout = prs.slide_layouts[1]
-        slide = prs.slides.add_slide(slide_layout)
-
-        # 设置标题
-        title = slide.shapes.title
-        title.text = slide_data.get("title", "未知标题")
-
-        # 设置标题字体
-        content_font_size = self.style_config.get("content_font_size", 18)
-        for paragraph in title.text_frame.paragraphs:
-            paragraph.font.size = Pt(content_font_size + 6)
-            paragraph.font.bold = True
-
-        # 设置内容
-        if len(slide.placeholders) > 1:
-            content = slide.placeholders[1]
-            text_frame = content.text_frame
-            text_frame.clear()
-
-            # 添加要点
-            points = slide_data.get("points", [])
-            has_image_marker = False
-            
-            # 合并所有要点为一个文本块，以便统一解析Markdown
-            points_text = "\n".join(str(p) for p in points)
-            
-            # 检查是否有图片标记
-            if "[图片]" in points_text:
-                has_image_marker = True
-                # 移除图片标记
-                points_text = points_text.replace("[图片]", "").strip()
-            
-            # 解析Markdown格式
-            parsed_lines = TextFormatter.parse_markdown_text(points_text)
-            
-            # 添加解析后的文本
-            for line_text, indent_level, is_bold in parsed_lines:
-                p = text_frame.add_paragraph()
-                p.text = line_text
-                p.level = min(indent_level, 8)  # 设置缩进级别
-                p.font.size = Pt(content_font_size)
-                p.space_before = Pt(6)
-                
-                # 应用加粗
-                if is_bold:
-                    p.font.bold = True
-
-            # 如果有图片标记且有可用图片，插入图片
-            if has_image_marker and image_index < len(images):
-                self._insert_image_to_slide(prs, slide, images[image_index])
-
-        logger.debug(f"创建内容页: {slide_data.get('title')}")
-
-    def _insert_image_to_slide(self, prs: Presentation, slide, img_url: str):
-        """
-        在幻灯片中插入图片（右侧区域）
-
-        Args:
-            prs: 演示文稿对象
-            slide: 幻灯片对象
             img_url: 图片URL
+            
+        Returns:
+            临时文件路径，失败返回None
         """
         try:
             import requests
+            import tempfile
             from io import BytesIO
             from PIL import Image as PILImage
-
+            
             # 下载图片
             response = requests.get(img_url, timeout=10)
             response.raise_for_status()
-
+            
+            # 验证图片
             img_data = BytesIO(response.content)
             pil_img = PILImage.open(img_data)
-
-            # 计算图片位置（右侧，文字下方）
-            slide_width = prs.slide_width
-            slide_height = prs.slide_height
-
-            # 图片放在右侧，宽度为幻灯片的40%
-            pic_width = slide_width * 0.4
-            img_width, img_height = pil_img.size
-            aspect_ratio = img_width / img_height
-            pic_height = pic_width / aspect_ratio
-
-            # 位置：右侧，垂直居中
-            left = slide_width * 0.55
-            top = (slide_height - pic_height) / 2
-
-            # 重新读取图片数据
-            img_data.seek(0)
-
-            # 添加图片
-            slide.shapes.add_picture(
-                img_data, left, top, width=pic_width, height=pic_height
-            )
-            logger.info(f"在内容页插入图片: {img_url}")
-
+            
+            # 保存到临时文件
+            suffix = Path(img_url).suffix or '.jpg'
+            temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
+            pil_img.save(temp_file.name)
+            temp_file.close()
+            
+            logger.debug(f"下载图片成功: {img_url}")
+            return Path(temp_file.name)
+            
         except Exception as e:
-            logger.warning(f"插入图片失败: {img_url}, 错误: {e}")
-
-    def _create_image_slides(self, prs: Presentation, images: list):
-        """
-        创建图片页
-
-        Args:
-            prs: 演示文稿对象
-            images: 图片URL列表
-        """
-        import requests
-        from io import BytesIO
-        from PIL import Image as PILImage
-
-        for i, img_url in enumerate(images):
-            try:
-                logger.debug(f"下载图片{i+1}/{len(images)}: {img_url}")
-
-                # 下载图片
-                response = requests.get(img_url, timeout=10)
-                response.raise_for_status()
-
-                # 使用PIL验证图片
-                img_data = BytesIO(response.content)
-                pil_img = PILImage.open(img_data)
-
-                # 创建空白幻灯片
-                blank_slide_layout = prs.slide_layouts[6]  # 空白布局
-                slide = prs.slides.add_slide(blank_slide_layout)
-
-                # 计算图片位置和大小（居中显示，保持宽高比）
-                slide_width = prs.slide_width
-                slide_height = prs.slide_height
-
-                img_width, img_height = pil_img.size
-                aspect_ratio = img_width / img_height
-
-                # 设置最大尺寸（留边距）
-                max_width = slide_width * 0.9
-                max_height = slide_height * 0.9
-
-                if img_width > max_width or img_height > max_height:
-                    if aspect_ratio > max_width / max_height:
-                        # 宽度为限制因素
-                        pic_width = max_width
-                        pic_height = max_width / aspect_ratio
-                    else:
-                        # 高度为限制因素
-                        pic_height = max_height
-                        pic_width = max_height * aspect_ratio
-                else:
-                    pic_width = Inches(img_width / 96)  # 假设96 DPI
-                    pic_height = Inches(img_height / 96)
-
-                # 居中位置
-                left = (slide_width - pic_width) / 2
-                top = (slide_height - pic_height) / 2
-
-                # 重新读取图片数据（PIL已经消耗了流）
-                img_data.seek(0)
-
-                # 添加图片
-                slide.shapes.add_picture(
-                    img_data, left, top, width=pic_width, height=pic_height
-                )
-
-                logger.info(f"成功添加图片{i+1}: {img_url}")
-
-            except Exception as e:
-                logger.warning(f"添加图片{i+1}失败: {img_url}, 错误: {e}")
-                continue
+            logger.warning(f"下载图片失败: {img_url}, 错误: {e}")
+            return None

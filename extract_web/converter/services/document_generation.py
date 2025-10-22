@@ -24,6 +24,7 @@ from dashscope import Generation
 from .ai_document_analyzer import AIDocumentAnalyzer
 from .smart_ppt_generator import SmartPPTGenerator
 from .template_manager import TemplateManager
+from .template_based_ppt_generator import TemplateBasedPPTGenerator
 from .ocr_table_extractor import get_ocr_extractor
 from utils.token_cost import TokenCostCalculator
 
@@ -1134,44 +1135,20 @@ def generate_ppt_document(
         # 非 PDF 文件：传统AI分析模式
         logger.info("使用传统AI分析模式生成PPT...")
         
-        # 使用统一的模板管理器加载模板
-        presentation = TemplateManager.load_template(template_config, base_dir)
+        # 使用新的模板生成器
+        if not tpl_path:
+            raise FileNotFoundError("未找到PPT模板文件")
         
-        # 删除模板示例页
-        if len(presentation.slides) > 1:
-            xml_slides = presentation.slides._sldIdLst
-            for idx in reversed(range(1, len(xml_slides))):
-                rId = xml_slides[idx].rId
-                presentation.part.drop_rel(rId)
-                del xml_slides[idx]
+        generator = TemplateBasedPPTGenerator(tpl_path)
         
         # 创建标题页
         title_text = structure.get("title", template_config.get("title", "文档演示"))
         subtitle_text = structure.get("subtitle", template_config.get("subtitle", "AI 智能生成"))
-        
-        if len(presentation.slides) > 0:
-            title_slide = presentation.slides[0]
-            if title_slide.shapes.title:
-                title_slide.shapes.title.text = title_text
-            if len(title_slide.placeholders) > 1:
-                title_slide.placeholders[1].text = subtitle_text
-        else:
-            title_layout = presentation.slide_layouts[0]
-            title_slide = presentation.slides.add_slide(title_layout)
-            title_slide.shapes.title.text = title_text
-            if len(title_slide.placeholders) > 1:
-                title_slide.placeholders[1].text = subtitle_text
-        
+        generator.create_cover_slide(title_text, subtitle_text)
         logger.info("已创建标题页: %s", title_text)
         
         # 创建内容页
         sections = structure.get("sections", [])
-        bullet_layout_index = template_config.get("bullet_layout_index", 1)
-        try:
-            body_layout = presentation.slide_layouts[bullet_layout_index]
-        except IndexError:
-            body_layout = presentation.slide_layouts[1]
-
         for idx, section in enumerate(sections, start=1):
             section_title = section.get("title", f"章节 {idx}")
             points = section.get("points", [])
@@ -1179,39 +1156,12 @@ def generate_ppt_document(
             if not points:
                 continue
             
-            slide = presentation.slides.add_slide(body_layout)
-            
-            if slide.shapes.title:
-                slide.shapes.title.text = section_title
-            
-            body_shape = None
-            for shape in slide.shapes:
-                if shape.has_text_frame and shape != slide.shapes.title:
-                    body_shape = shape
-                    break
-            
-            if not body_shape:
-                logger.warning("幻灯片 %d 未找到内容占位符，已跳过。", idx)
-                continue
-            
-            text_frame = body_shape.text_frame
-            text_frame.clear()
-            
-            for point_idx, point in enumerate(points):
-                if not point.strip():
-                    continue
-                
-                if point_idx == 0:
-                    text_frame.text = point
-                    if text_frame.paragraphs:
-                        text_frame.paragraphs[0].font.size = PptPt(18)
-                else:
-                    p = text_frame.add_paragraph()
-                    p.text = point
-                    p.level = 0
-                    p.font.size = PptPt(16)
-            
+            # 使用新的生成器创建内容页（自动支持Markdown格式）
+            generator.create_content_slide(section_title, points)
             logger.debug("已创建章节页: %s (%d 个要点)", section_title, len(points))
+        
+        # 获取生成的presentation对象
+        presentation = generator.prs
 
     # 6. 保存 PPT
     output_filename = f"{request_id}_slides.pptx"

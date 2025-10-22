@@ -15,6 +15,7 @@ from pptx.enum.text import MSO_AUTO_SIZE
 from .fixed_layout_manager import FixedLayoutManager
 from .autofit_renderer import AutoFitRenderer
 from .text_formatter import TextFormatter
+from .template_based_ppt_generator import TemplateBasedPPTGenerator
 
 logger = logging.getLogger("converter")
 
