@@ -7,17 +7,17 @@
 """
 import logging
 from typing import List, Dict, Any, Optional
-from pptx import Presentation
 from pptx.util import Inches, Pt
 from pptx.enum.text import PP_ALIGN, MSO_ANCHOR, MSO_AUTO_SIZE
 from pptx.dml.color import RGBColor
 from pptx.enum.shapes import MSO_SHAPE
 from utils.config_manager import config
+from .base_ppt_generator import BasePPTGenerator
 
 logger = logging.getLogger(__name__)
 
 
-class AcademicStylePPTGenerator:
+class AcademicStylePPTGenerator(BasePPTGenerator):
     """
     学术风格PPT生成器
     
@@ -38,9 +38,7 @@ class AcademicStylePPTGenerator:
     
     def __init__(self):
         """初始化生成器"""
-        self.prs = Presentation()
-        self.prs.slide_width = Inches(13.33)  # 16:9
-        self.prs.slide_height = Inches(7.5)
+        super().__init__()  # 调用基类初始化
         logger.info("初始化学术风格PPT生成器")
     
     def _clean_markdown_text(self, text: str) -> tuple:
@@ -280,60 +278,19 @@ class AcademicStylePPTGenerator:
         content_box.fill.fore_color.rgb = self.COLOR_WHITE
         content_box.line.fill.background()
         
-        # 内容文字
+        # 内容文字（使用基类统一方法）
         content_text = content_box.text_frame
-        content_text.word_wrap = True
-        content_text.margin_left = Inches(0.5)
-        content_text.margin_right = Inches(0.5)
-        content_text.margin_top = Inches(0.3)
+        self._setup_text_frame_margins(content_text)
         
-        # 从配置读取格式化参数
-        bullet_symbols = {
-            0: config.get("text_formatting.bullet_level_0", "●"),
-            1: config.get("text_formatting.bullet_level_1", "○"),
-            2: config.get("text_formatting.bullet_level_2", "▪")
-        }
+        # 从配置读取字体大小
         font_sizes = {
             0: config.get("text_formatting.font_size_level_0", 20),
             1: config.get("text_formatting.font_size_level_1", 18),
             2: config.get("text_formatting.font_size_level_2", 16)
         }
         
-        # 处理内容行
-        for i, line in enumerate(content_lines):
-            if i > 0:
-                content_text.add_paragraph()
-            
-            para = content_text.paragraphs[i]
-            
-            # 检测缩进层级
-            indent_level = 0
-            clean_line = line
-            if line.startswith("  - "):
-                indent_level = 1
-                clean_line = line[4:]
-            elif line.startswith("- "):
-                indent_level = 0
-                clean_line = line[2:]
-            elif line.startswith("• "):
-                indent_level = 0
-                clean_line = line[2:]
-            
-            # 清理Markdown标记
-            clean_line, is_bold = self._clean_markdown_text(clean_line)
-            
-            # 添加bullet符号
-            bullet = bullet_symbols.get(indent_level, "●")
-            para.text = f"{bullet} {clean_line}"
-            
-            # 设置字体
-            para.level = indent_level
-            para.font.size = Pt(font_sizes.get(indent_level, 18))
-            para.font.color.rgb = self.COLOR_TEXT_DARK
-            
-            # 加粗处理
-            if is_bold:
-                para.font.bold = True
+        # 使用基类统一方法添加内容
+        self._add_bullet_content(content_text, content_lines, font_sizes, self.COLOR_TEXT_DARK)
         
         logger.debug(f"创建内容页: {title} ({len(content_lines)}行)")
     
@@ -749,51 +706,13 @@ class AcademicStylePPTGenerator:
             text_container.line.fill.background()
             
             text_frame = text_container.text_frame
-            text_frame.word_wrap = True
-            text_frame.margin_left = Inches(0.3)
-            text_frame.margin_right = Inches(0.3)
-            text_frame.margin_top = Inches(0.3)
+            self._setup_text_frame_margins(text_frame)
             text_frame.margin_bottom = Inches(0.3)
             
-            # 从配置读取格式化参数
-            bullet_symbols = {
-                0: config.get("text_formatting.bullet_level_0", "●"),
-                1: config.get("text_formatting.bullet_level_1", "○"),
-                2: config.get("text_formatting.bullet_level_2", "▪")
-            }
-            
-            # 处理文字内容（支持多行）
+            # 使用基类统一方法添加内容
             lines = caption.split('\n') if caption else []
-            for i, line in enumerate(lines):
-                if i > 0:
-                    text_frame.add_paragraph()
-                
-                para = text_frame.paragraphs[i]
-                
-                # 检测缩进
-                indent_level = 0
-                clean_line = line
-                if line.startswith("  - "):
-                    indent_level = 1
-                    clean_line = line[4:]
-                elif line.startswith("- "):
-                    indent_level = 0
-                    clean_line = line[2:]
-                
-                # 清理Markdown标记
-                clean_line, is_bold = self._clean_markdown_text(clean_line)
-                
-                # 添加bullet符号
-                bullet = bullet_symbols.get(indent_level, "●")
-                para.text = f"{bullet} {clean_line}"
-                
-                para.level = indent_level
-                para.font.size = Pt(14 if indent_level == 0 else 12)
-                para.font.color.rgb = self.COLOR_TEXT_DARK
-                
-                # 加粗处理
-                if is_bold:
-                    para.font.bold = True
+            font_sizes = {0: 14, 1: 12}
+            self._add_bullet_content(text_frame, lines, font_sizes, self.COLOR_TEXT_DARK)
         
         logger.debug(f"创建图片页: {title}")
     
