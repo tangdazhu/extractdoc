@@ -123,7 +123,11 @@
             
             // Token列
             var tokenTd = document.createElement('td');
-            if (item.token_usage && item.token_usage.total) {
+            if (item.token_usage && item.token_usage.description) {
+                // 使用详细描述
+                tokenTd.textContent = item.token_usage.description;
+            } else if (item.token_usage && item.token_usage.total) {
+                // 兼容旧格式：只显示总数
                 var total = item.token_usage.total.total || 0;
                 if (total === 0) {
                     tokenTd.textContent = '0（缓存）';

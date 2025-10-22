@@ -18,6 +18,8 @@ from .web_to_ppt_analyzer import WebToPPTAnalyzer
 from .text_formatter import TextFormatter
 from .template_manager import TemplateManager
 from .template_based_ppt_generator import TemplateBasedPPTGenerator
+from .business_style_ppt_generator import BusinessStylePPTGenerator
+from .academic_style_ppt_generator import AcademicStylePPTGenerator
 from .placeholder_helper import PlaceholderHelper
 from utils.config_manager import config
 from utils.token_cost import TokenCostCalculator
@@ -110,19 +112,17 @@ class URLToPPTConverter:
             # 计算总耗时
             elapsed_time = time.time() - start_time
 
-            # 构建消息
-            token_msg = ""
+            # 计算费用
             if step1_total > 0 or step2_total > 0:
-                # 计算费用
                 total_cost = TokenCostCalculator.calculate_and_format(total_input, total_output)
-                token_msg = f"，Token使用: 步骤1（提取内容）={step1_total}(I:{step1_input}/O:{step1_output}), 步骤2（分析PPT结构）={step2_total}(I:{step2_input}/O:{step2_output}), 总计={total_tokens}，费用={total_cost}"
+                token_description = f"步骤1（提取内容）={step1_total}(I:{step1_input}/O:{step1_output}), 步骤2（分析PPT结构）={step2_total}(I:{step2_input}/O:{step2_output}), 总计={total_tokens}，费用={total_cost}"
             else:
-                token_msg = "，Token使用: 0（从缓存获取），费用=0元"
+                token_description = "0（从缓存获取），费用=0元"
 
             result = {
                 "success": True,
                 "output_path": output_path,
-                "slides_count": len(ppt_structure["slides"]) + 1,  # +1 for cover
+                "slides_count": len(ppt_structure["slides"]) + 2,  # +2 for cover and catalog
                 "title": ppt_structure["cover"]["title"],
                 "elapsed_time": elapsed_time,
                 "token_usage": {
@@ -141,8 +141,9 @@ class URLToPPTConverter:
                         "output": total_output,
                         "total": total_tokens,
                     },
+                    "description": token_description,  # 添加描述字段
                 },
-                "message": f"成功生成PPT，共{len(ppt_structure['slides']) + 1}页，耗时{elapsed_time:.1f}秒{token_msg}",
+                "message": f"成功生成PPT，共{len(ppt_structure['slides']) + 2}页，耗时{elapsed_time:.1f}秒",
             }
 
             logger.info(f"转换成功: {result['message']}")
@@ -159,7 +160,7 @@ class URLToPPTConverter:
 
     def _create_ppt(self, ppt_structure: Dict, output_path: str, images: list = None):
         """
-        创建PPT文件（使用模板占位符机制）
+        创建PPT文件（使用风格生成器）
 
         Args:
             ppt_structure: PPT结构字典
@@ -169,33 +170,33 @@ class URLToPPTConverter:
         if images is None:
             images = []
         
-        # 获取模板路径
-        from django.conf import settings
-        base_dir = Path(settings.BASE_DIR).parent
-        template_path = TemplateManager.get_template_path(self.style_config, base_dir)
-        
-        if not template_path:
-            raise FileNotFoundError("未找到PPT模板文件")
-        
-        # 使用新的模板生成器
-        generator = TemplateBasedPPTGenerator(template_path)
+        # 根据style选择生成器
+        if self.style == "style_b":
+            # 学术风格
+            generator = AcademicStylePPTGenerator()
+        else:
+            # 默认商务风格
+            generator = BusinessStylePPTGenerator()
 
         # 1. 创建封面页
         cover_data = ppt_structure["cover"]
-        subtitle_parts = []
-        if cover_data.get("subtitle"):
-            subtitle_parts.append(cover_data["subtitle"])
-        if cover_data.get("author"):
-            subtitle_parts.append(f"作者: {cover_data['author']}")
-        if cover_data.get("date"):
-            subtitle_parts.append(f"日期: {cover_data['date']}")
-        
         generator.create_cover_slide(
             title=cover_data.get("title", "未知标题"),
-            subtitle="\n".join(subtitle_parts)
+            subtitle=cover_data.get("subtitle", ""),
+            reporter=cover_data.get("author", ""),
+            date=cover_data.get("date", "")
         )
 
-        # 2. 创建内容页
+        # 2. 创建目录页
+        catalog_items = []
+        for i, slide_data in enumerate(ppt_structure["slides"]):
+            catalog_items.append({
+                "number": f"{i+1:02d}",
+                "title": slide_data.get("title", "未知标题")
+            })
+        generator.create_catalog_slide(catalog_items)
+
+        # 3. 创建内容页
         image_index = 0
         for slide_data in ppt_structure["slides"]:
             title = slide_data.get("title", "未知标题")
@@ -214,7 +215,7 @@ class URLToPPTConverter:
                 if image_path:
                     generator.create_picture_slide(
                         title=title,
-                        image_path=image_path,
+                        image_path=str(image_path),
                         caption="\n".join(text_points) if text_points else ""
                     )
                 else:
@@ -235,11 +236,11 @@ class URLToPPTConverter:
                 if image_path:
                     generator.create_picture_slide(
                         title="补充图片",
-                        image_path=image_path
+                        image_path=str(image_path)
                     )
 
         # 保存PPT
-        generator.save(Path(output_path))
+        generator.save(output_path)
         logger.info(f"PPT已保存: {output_path}")
     
     def _slide_contains_image_marker(self, slide_data: Dict) -> bool:
