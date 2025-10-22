@@ -49,9 +49,37 @@ pdf_extraction:
 # AI文档分析配置
 ai_document_analysis:
   provider: "dashscope"
-  model: "qwen-max"
+  model: "qwen3-max"  # 使用最新的Qwen3-Max模型
   temperature: 0.1
-  max_tokens: 8192  # qwen-max最大输出限制为8192 tokens
+  max_tokens: 8192  # qwen3-max最大输出限制为65536 tokens，这里设置为8192以控制成本
+  
+  # 模型定价配置（单位：元/千Token）
+  # 数据来源：https://help.aliyun.com/zh/model-studio/models
+  # 更新时间：2025年1月
+  pricing:
+    # qwen-max (Qwen2.5-Max) - 降价88%后的新价格
+    qwen-max:
+      input: 0.0024   # 输入每千token 0.0024元
+      output: 0.0096  # 输出每千token 0.0096元
+    
+    # qwen3-max - 阶梯计价（0-32K范围）
+    qwen3-max:
+      input: 0.006    # 输入每千token 0.006元（0-32K）
+      output: 0.024   # 输出每千token 0.024元
+    
+    # qwen-plus
+    qwen-plus:
+      input: 0.0008   # 输入每千token 0.0008元
+      output: 0.002   # 输出每千token 0.002元
+    
+    # qwen-turbo
+    qwen-turbo:
+      input: 0.0003   # 输入每千token 0.0003元
+      output: 0.0006  # 输出每千token 0.0006元
+   # qwen-long - 长文本模型
+    qwen-long:
+      input: 0.0005   # 输入每千token 0.0005元
+      output: 0.002   # 输出每千token 0.002元
 
 # 网页提取配置
 web_extraction:

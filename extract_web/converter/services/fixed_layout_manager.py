@@ -46,21 +46,21 @@ class FixedLayoutManager:
             },
         ],
         
-        # 标题+图片布局
+        # 标题+图片布局（左右分栏：文字在左，图片在右）
         'title_and_image': [
-            {
-                'type': 'image',
-                'left': CONTENT_LEFT,
-                'top': CONTENT_TOP,
-                'width': CONTENT_WIDTH,
-                'height': 2.8,  # 图片缩小到2.8英寸高(从3.5减小)
-            },
             {
                 'type': 'text',
                 'left': CONTENT_LEFT,
-                'top': CONTENT_TOP + 3.0,  # 图片后0.2英寸间距
-                'width': CONTENT_WIDTH,
-                'height': 2.5,  # 文本增大到2.5英寸高(从1.8增大)
+                'top': CONTENT_TOP,
+                'width': CONTENT_WIDTH * 0.45,  # 文字占45%宽度
+                'height': CONTENT_HEIGHT,  # 占满全部高度
+            },
+            {
+                'type': 'image',
+                'left': CONTENT_LEFT + CONTENT_WIDTH * 0.5,  # 图片从50%位置开始
+                'top': CONTENT_TOP,
+                'width': CONTENT_WIDTH * 0.5,  # 图片占50%宽度
+                'height': CONTENT_HEIGHT,  # 占满全部高度
             },
         ],
         

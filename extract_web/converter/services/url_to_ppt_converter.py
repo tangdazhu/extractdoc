@@ -15,7 +15,10 @@ from pptx.dml.color import RGBColor
 
 from .web_content_extractor import WebContentExtractor
 from .web_to_ppt_analyzer import WebToPPTAnalyzer
+from .text_formatter import TextFormatter
+from .template_manager import TemplateManager
 from utils.config_manager import config
+from utils.token_cost import TokenCostCalculator
 
 logger = logging.getLogger(__name__)
 
@@ -108,9 +111,11 @@ class URLToPPTConverter:
             # 构建消息
             token_msg = ""
             if step1_total > 0 or step2_total > 0:
-                token_msg = f"，Token使用: 步骤1（提取内容）={step1_total}(I:{step1_input}/O:{step1_output}), 步骤2（分析PPT结构）={step2_total}(I:{step2_input}/O:{step2_output}), 总计={total_tokens}"
+                # 计算费用
+                total_cost = TokenCostCalculator.calculate_and_format(total_input, total_output)
+                token_msg = f"，Token使用: 步骤1（提取内容）={step1_total}(I:{step1_input}/O:{step1_output}), 步骤2（分析PPT结构）={step2_total}(I:{step2_input}/O:{step2_output}), 总计={total_tokens}，费用={total_cost}"
             else:
-                token_msg = "，Token使用: 0（从缓存获取）"
+                token_msg = "，Token使用: 0（从缓存获取），费用=0元"
 
             result = {
                 "success": True,
@@ -161,18 +166,11 @@ class URLToPPTConverter:
         """
         if images is None:
             images = []
-        # 加载模板或创建新演示文稿
-        template_path = self.style_config.get("template_path")
-        if template_path and Path(template_path).exists():
-            logger.info(f"使用模板: {template_path}")
-            prs = Presentation(template_path)
-        else:
-            logger.info("创建新演示文稿")
-            prs = Presentation()
-            # 设置幻灯片尺寸
-            slide_size = config.get("ppt_generation.slide_size", {})
-            prs.slide_width = Inches(slide_size.get("width", 10.0))
-            prs.slide_height = Inches(slide_size.get("height", 7.5))
+        
+        # 使用统一的模板管理器加载模板
+        from django.conf import settings
+        base_dir = Path(settings.BASE_DIR).parent
+        prs = TemplateManager.load_template(self.style_config, base_dir)
 
         # 1. 创建封面页
         self._create_cover_slide(prs, ppt_structure["cover"])
@@ -291,18 +289,30 @@ class URLToPPTConverter:
             # 添加要点
             points = slide_data.get("points", [])
             has_image_marker = False
-            for point in points:
-                # 检查是否是图片标记
-                if "[图片]" in str(point):
-                    has_image_marker = True
-                    # 跳过图片标记文本，稍后插入实际图片
-                    continue
-
+            
+            # 合并所有要点为一个文本块，以便统一解析Markdown
+            points_text = "\n".join(str(p) for p in points)
+            
+            # 检查是否有图片标记
+            if "[图片]" in points_text:
+                has_image_marker = True
+                # 移除图片标记
+                points_text = points_text.replace("[图片]", "").strip()
+            
+            # 解析Markdown格式
+            parsed_lines = TextFormatter.parse_markdown_text(points_text)
+            
+            # 添加解析后的文本
+            for line_text, indent_level, is_bold in parsed_lines:
                 p = text_frame.add_paragraph()
-                p.text = point
-                p.level = 0
+                p.text = line_text
+                p.level = min(indent_level, 8)  # 设置缩进级别
                 p.font.size = Pt(content_font_size)
                 p.space_before = Pt(6)
+                
+                # 应用加粗
+                if is_bold:
+                    p.font.bold = True
 
             # 如果有图片标记且有可用图片，插入图片
             if has_image_marker and image_index < len(images):

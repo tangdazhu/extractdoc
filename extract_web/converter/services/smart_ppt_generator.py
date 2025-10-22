@@ -14,6 +14,7 @@ from pptx.enum.text import MSO_AUTO_SIZE
 
 from .fixed_layout_manager import FixedLayoutManager
 from .autofit_renderer import AutoFitRenderer
+from .text_formatter import TextFormatter
 
 logger = logging.getLogger("converter")
 
@@ -353,19 +354,25 @@ class SmartPPTGenerator:
             text_frame.margin_top = 0
             text_frame.margin_bottom = 0
             
+            # 解析Markdown格式文本
+            parsed_lines = TextFormatter.parse_markdown_text(content['text'])
+            
             # 添加文本
-            lines = content['text'].split('\n')
-            for idx, line in enumerate(lines):
-                if not line.strip():
-                    continue
+            for idx, (line_text, indent_level, is_bold) in enumerate(parsed_lines):
                 if idx == 0:
                     p = text_frame.paragraphs[0]
                 else:
                     p = text_frame.add_paragraph()
-                p.text = line.strip()
+                
+                p.text = line_text
+                p.level = min(indent_level, 8)  # 设置缩进级别
                 p.font.size = PptPt(9)  # 固定字体9pt
+                
+                # 应用加粗
+                if is_bold:
+                    p.font.bold = True
             
-            logger.debug("已渲染文本到textbox: %d行", len(lines))
+            logger.debug("已渲染文本到textbox: %d行", len(parsed_lines))
     
     def _render_text_only_layout(self, slide, content: dict, zones: list):
         """渲染纯文本布局"""

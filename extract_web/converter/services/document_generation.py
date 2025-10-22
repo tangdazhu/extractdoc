@@ -23,7 +23,9 @@ from dashscope import Generation
 
 from .ai_document_analyzer import AIDocumentAnalyzer
 from .smart_ppt_generator import SmartPPTGenerator
+from .template_manager import TemplateManager
 from .ocr_table_extractor import get_ocr_extractor
+from utils.token_cost import TokenCostCalculator
 
 logger = logging.getLogger("converter")
 
@@ -1106,15 +1108,14 @@ def generate_ppt_document(
         document_structure = None
         page_analyses = None
     
-    # 3. 加载预定义模板
-    template_path = template_config.get("template_path")
-    if template_path:
-        tpl_path = Path(settings.BASE_DIR).parent / template_path
-        if not tpl_path.exists():
-            logger.warning("PPT 模板 %s 不存在，使用空白模板。", tpl_path)
-            tpl_path = None
+    # 3. 获取模板路径（用于SmartPPTGenerator）
+    base_dir = Path(settings.BASE_DIR).parent
+    tpl_path = TemplateManager.get_template_path(template_config, base_dir)
+    
+    if tpl_path:
+        logger.info("使用PPT模板: %s", tpl_path)
     else:
-        tpl_path = None
+        logger.warning("没有可用的PPT模板")
     
     # 4. 根据文件类型选择生成模式
     if is_pdf and multimodal_data and document_structure and page_analyses:
@@ -1123,7 +1124,7 @@ def generate_ppt_document(
         
         smart_generator = SmartPPTGenerator()
         presentation = smart_generator.generate_ppt(
-            tpl_path if tpl_path else Path(settings.BASE_DIR).parent / "config" / "templates" / "academic_template.pptx",
+            tpl_path,
             document_structure,
             page_analyses,
             multimodal_data,
@@ -1133,18 +1134,16 @@ def generate_ppt_document(
         # 非 PDF 文件：传统AI分析模式
         logger.info("使用传统AI分析模式生成PPT...")
         
-        # 加载模板
-        if tpl_path and tpl_path.exists():
-            presentation = Presentation(str(tpl_path))
-            # 删除模板示例页
-            if len(presentation.slides) > 1:
-                xml_slides = presentation.slides._sldIdLst
-                for idx in reversed(range(1, len(xml_slides))):
-                    rId = xml_slides[idx].rId
-                    presentation.part.drop_rel(rId)
-                    del xml_slides[idx]
-        else:
-            presentation = Presentation()
+        # 使用统一的模板管理器加载模板
+        presentation = TemplateManager.load_template(template_config, base_dir)
+        
+        # 删除模板示例页
+        if len(presentation.slides) > 1:
+            xml_slides = presentation.slides._sldIdLst
+            for idx in reversed(range(1, len(xml_slides))):
+                rId = xml_slides[idx].rId
+                presentation.part.drop_rel(rId)
+                del xml_slides[idx]
         
         # 创建标题页
         title_text = structure.get("title", template_config.get("title", "文档演示"))
@@ -1238,7 +1237,12 @@ def generate_ppt_document(
                 "total": token_stats["total_tokens"]
             }
         }
-        message = f"PPT 文档生成成功，共 {total_pages} 页，Token使用: 步骤2（AI分析）={token_stats['total_tokens']}(I:{token_stats['input_tokens']}/O:{token_stats['output_tokens']}), 总计={token_stats['total_tokens']}"
+        # 计算费用
+        total_cost = TokenCostCalculator.calculate_and_format(
+            token_stats['input_tokens'], 
+            token_stats['output_tokens']
+        )
+        message = f"PPT 文档生成成功，共 {total_pages} 页，Token使用: 步骤2（AI分析）={token_stats['total_tokens']}(I:{token_stats['input_tokens']}/O:{token_stats['output_tokens']}), 总计={token_stats['total_tokens']}，费用={total_cost}"
     else:
         message = f"PPT 文档生成成功，共 {total_pages} 页。"
     

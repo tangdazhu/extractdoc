@@ -10,6 +10,8 @@ from pathlib import Path
 from pptx.util import Inches, Pt as PptPt
 from pptx.enum.text import MSO_AUTO_SIZE
 
+from .text_formatter import TextFormatter
+
 logger = logging.getLogger(__name__)
 
 
@@ -75,27 +77,29 @@ class AutoFitRenderer:
         # 不使用auto-size(太复杂且不可靠),使用固定小字体
         text_frame.auto_size = MSO_AUTO_SIZE.NONE
         
-        # 添加文本内容(不裁剪)
-        lines = text.split('\n')
-        for idx, line in enumerate(lines):
-            if not line.strip():
-                continue
-            
+        # 解析Markdown格式文本
+        parsed_lines = TextFormatter.parse_markdown_text(text)
+        
+        # 添加文本内容
+        for idx, (line_text, indent_level, is_bold) in enumerate(parsed_lines):
             if idx == 0:
                 p = text_frame.paragraphs[0]
             else:
                 p = text_frame.add_paragraph()
             
-            p.text = line.strip()
+            p.text = line_text
+            
+            # 设置缩进级别（PPT支持0-8级）
+            p.level = min(indent_level, 8)
             
             # 使用固定小字体(保证不溢出)
             p.font.size = PptPt(9)
             
-            # 识别列表项
-            if line.strip().startswith('•') or line.strip().startswith('-'):
-                p.level = 0
+            # 应用加粗
+            if is_bold:
+                p.font.bold = True
         
-        logger.debug("已渲染文本: %d行, 字体=9pt, 使用placeholder=%s", len(lines), content_placeholder is not None)
+        logger.debug("已渲染文本: %d行, 字体=9pt, 使用placeholder=%s", len(parsed_lines), content_placeholder is not None)
     
     @staticmethod
     def render_table(slide, table_data: list, zone: dict, enable_autofit: bool = True):
