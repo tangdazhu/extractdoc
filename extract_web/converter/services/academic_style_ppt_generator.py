@@ -12,6 +12,7 @@ from pptx.util import Inches, Pt
 from pptx.enum.text import PP_ALIGN, MSO_ANCHOR
 from pptx.dml.color import RGBColor
 from pptx.enum.shapes import MSO_SHAPE
+from utils.config_manager import config
 
 logger = logging.getLogger(__name__)
 
@@ -41,6 +42,29 @@ class AcademicStylePPTGenerator:
         self.prs.slide_width = Inches(13.33)  # 16:9
         self.prs.slide_height = Inches(7.5)
         logger.info("初始化学术风格PPT生成器")
+    
+    def _clean_markdown_text(self, text: str) -> tuple:
+        """
+        清理Markdown格式标记
+        
+        Args:
+            text: 原始文本（可能包含**加粗**标记）
+        
+        Returns:
+            (清理后的文本, 是否加粗)
+        """
+        import re
+        
+        # 检测是否有加粗标记
+        is_bold = '**' in text
+        
+        # 移除加粗标记 **文本**
+        cleaned_text = re.sub(r'\*\*(.+?)\*\*', r'\1', text)
+        
+        # 移除单个星号 *文本*
+        cleaned_text = re.sub(r'\*(.+?)\*', r'\1', cleaned_text)
+        
+        return cleaned_text, is_bold
     
     def _add_gradient_background(self, slide, angle=90.0):
         """添加渐变背景"""
@@ -158,11 +182,12 @@ class AcademicStylePPTGenerator:
         subtitle_frame.paragraphs[0].font.size = Pt(24)
         subtitle_frame.paragraphs[0].font.color.rgb = self.COLOR_TEXT_LIGHT
         
-        # 目录项（最多显示5项）
+        # 目录项（从配置读取最大显示数量）
+        max_items = config.get("ppt_generation.generation_preferences.max_catalog_items", 15)
         start_y = 2.2
         item_height = 0.8
         
-        for i, item in enumerate(catalog_items[:5]):
+        for i, item in enumerate(catalog_items[:max_items]):
             number = item.get("number", f"{i+1:02d}")
             title = item.get("title", "")
             
@@ -256,13 +281,16 @@ class AcademicStylePPTGenerator:
                 indent_level = 0
                 clean_line = line[2:]
             
+            # 清理Markdown标记
+            clean_line, is_bold = self._clean_markdown_text(clean_line)
+            
             para.text = clean_line
             para.level = indent_level
             para.font.size = Pt(20 if indent_level == 0 else 18)
             para.font.color.rgb = self.COLOR_TEXT_DARK
             
             # 加粗处理
-            if "**" in clean_line:
+            if is_bold:
                 para.font.bold = True
         
         logger.debug(f"创建内容页: {title} ({len(content_lines)}行)")
@@ -307,12 +335,12 @@ class AcademicStylePPTGenerator:
     
     def create_picture_slide(self, title: str, image_path: str, caption: str = ""):
         """
-        创建图片页
+        创建图片页（左右布局：左侧图片，右侧文字说明）
         
         Args:
             title: 页面标题
             image_path: 图片路径
-            caption: 图片说明
+            caption: 图片说明（文字内容）
         """
         slide = self.prs.slides.add_slide(self.prs.slide_layouts[6])
         self._add_gradient_background(slide)
@@ -336,11 +364,11 @@ class AcademicStylePPTGenerator:
         title_text.vertical_anchor = MSO_ANCHOR.MIDDLE
         title_text.margin_left = Inches(0.5)
         
-        # 图片容器
+        # 左侧：图片容器
         pic_container = slide.shapes.add_shape(
             MSO_SHAPE.ROUNDED_RECTANGLE,
-            Inches(2), Inches(2),
-            Inches(9.33), Inches(4.5)
+            Inches(0.8), Inches(1.8),
+            Inches(6.5), Inches(5.2)
         )
         pic_container.fill.solid()
         pic_container.fill.fore_color.rgb = self.COLOR_WHITE
@@ -350,32 +378,69 @@ class AcademicStylePPTGenerator:
         try:
             pic = slide.shapes.add_picture(
                 image_path,
-                Inches(2.5), Inches(2.3),
-                width=Inches(8.33)
+                Inches(1), Inches(2),
+                width=Inches(6)
             )
-            # 调整图片大小
-            if pic.height > Inches(3.8):
-                pic.height = Inches(3.8)
-                pic.width = int(pic.width * (Inches(3.8) / pic.height))
+            # 调整图片大小以适应容器
+            if pic.height > Inches(4.8):
+                ratio = Inches(4.8) / pic.height
+                pic.height = Inches(4.8)
+                pic.width = int(pic.width * ratio)
             
             # 居中图片
-            pic.left = Inches(6.665) - int(pic.width / 2)
-            pic.top = Inches(4) - int(pic.height / 2)
+            pic.left = Inches(4.05) - int(pic.width / 2)
+            pic.top = Inches(4.4) - int(pic.height / 2)
             
         except Exception as e:
             logger.error(f"插入图片失败: {e}")
         
-        # 图片说明
+        # 右侧：文字说明区域
         if caption:
-            caption_box = slide.shapes.add_textbox(
-                Inches(2), Inches(6.7),
-                Inches(9.33), Inches(0.5)
+            text_container = slide.shapes.add_shape(
+                MSO_SHAPE.ROUNDED_RECTANGLE,
+                Inches(7.8), Inches(1.8),
+                Inches(5), Inches(5.2)
             )
-            caption_frame = caption_box.text_frame
-            caption_frame.text = caption
-            caption_frame.paragraphs[0].alignment = PP_ALIGN.CENTER
-            caption_frame.paragraphs[0].font.size = Pt(14)
-            caption_frame.paragraphs[0].font.color.rgb = self.COLOR_WHITE
+            text_container.fill.solid()
+            text_container.fill.fore_color.rgb = self.COLOR_WHITE
+            text_container.line.fill.background()
+            
+            text_frame = text_container.text_frame
+            text_frame.word_wrap = True
+            text_frame.margin_left = Inches(0.3)
+            text_frame.margin_right = Inches(0.3)
+            text_frame.margin_top = Inches(0.3)
+            text_frame.margin_bottom = Inches(0.3)
+            
+            # 处理文字内容（支持多行）
+            lines = caption.split('\n') if caption else []
+            for i, line in enumerate(lines):
+                if i > 0:
+                    text_frame.add_paragraph()
+                
+                para = text_frame.paragraphs[i]
+                
+                # 检测缩进
+                indent_level = 0
+                clean_line = line
+                if line.startswith("  - "):
+                    indent_level = 1
+                    clean_line = line[4:]
+                elif line.startswith("- "):
+                    indent_level = 0
+                    clean_line = line[2:]
+                
+                # 清理Markdown标记
+                clean_line, is_bold = self._clean_markdown_text(clean_line)
+                
+                para.text = clean_line
+                para.level = indent_level
+                para.font.size = Pt(18 if indent_level == 0 else 16)
+                para.font.color.rgb = self.COLOR_TEXT_DARK
+                
+                # 加粗处理
+                if is_bold:
+                    para.font.bold = True
         
         logger.debug(f"创建图片页: {title}")
     

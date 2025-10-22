@@ -158,6 +158,7 @@ ppt_generation:
     prefer_concise_content: false    # 不简化内容,保留完整性
     skip_low_importance: false       # 不跳过低重要度内容
     max_elements_per_slide: 5        # 每页最多元素数
+    max_catalog_items: 20           # 目录页最多显示项数
     prefer_layouts:                  # 布局优先级
       - title_and_table
       - title_and_image
