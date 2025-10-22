@@ -16,8 +16,9 @@ class LayoutDetector:
     
     # 关键词定义
     COMPARISON_KEYWORDS = [
-        "vs", "对比", "比较", "传统", "AI", "新旧", "前后",
-        "优势", "劣势", "差异", "区别", "对照"
+        "vs", "对比", "比较", "新旧", "前后",
+        "优势", "劣势", "差异", "区别", "对照",
+        "传统 vs", "传统与", "相比"
     ]
     
     THREE_ELEMENT_KEYWORDS = [
@@ -89,12 +90,13 @@ class LayoutDetector:
     
     def _has_comparison(self, text: str, lines: List[str]) -> bool:
         """检测是否包含对比关系"""
-        # 检查关键词
-        if any(kw in text for kw in self.COMPARISON_KEYWORDS):
+        # 强对比关键词（优先级最高）
+        strong_keywords = ["vs", "对比", "比较", "差异", "区别", "优势", "劣势"]
+        if any(kw in text for kw in strong_keywords):
             return True
         
-        # 检查是否有明显的左右结构（如包含"vs"或"对比"）
-        if "vs" in text.lower() or "对比" in text:
+        # 检查是否有明显的对比结构
+        if "传统" in text and ("AI" in text or "新" in text):
             return True
         
         return False

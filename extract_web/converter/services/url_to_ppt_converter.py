@@ -226,12 +226,19 @@ class URLToPPTConverter:
                     generator.create_content_slide(title, text_points)
                 image_index += 1
             else:
-                # 自动检测布局类型
-                content_dict = {"title": title, "content": points}
-                layout_type = self.layout_detector.detect_layout_type(content_dict)
+                # 检查是否启用自动布局检测
+                auto_detect = config.get("ppt_generation.layout_types.auto_detect", True)
                 
-                # 根据布局类型创建页面
-                self._create_slide_by_layout(generator, layout_type, content_dict)
+                if auto_detect:
+                    # 自动检测布局类型
+                    content_dict = {"title": title, "content": points}
+                    layout_type = self.layout_detector.detect_layout_type(content_dict)
+                    
+                    # 根据布局类型创建页面
+                    self._create_slide_by_layout(generator, layout_type, content_dict)
+                else:
+                    # 使用默认布局
+                    generator.create_content_slide(title, points)
 
         # 3. 如果还有剩余图片，添加到末尾
         if image_index < len(images):

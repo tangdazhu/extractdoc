@@ -8,6 +8,7 @@
 import logging
 import re
 from typing import Dict, List, Tuple
+from utils.config_manager import config
 
 logger = logging.getLogger(__name__)
 
@@ -208,27 +209,35 @@ class ContentParser:
     
     def _split_comparison_content(self, lines: List[str]) -> Tuple[List[str], List[str]]:
         """分割左右对比内容"""
-        # 简单策略：前半部分为左侧，后半部分为右侧
-        mid = len(lines) // 2
+        # 从配置读取文本长度限制
+        max_text_length = config.get("ppt_generation.layout_types.two_column.max_text_length", 60)
         
-        left_content = []
-        right_content = []
-        
-        for i, line in enumerate(lines):
-            # 只取主要点（非缩进行）
-            if not line.startswith("  "):
-                clean_line = line.strip("- ").strip()
-                if i < mid:
-                    left_content.append(clean_line)
+        # 提取所有要点（包括主要点和子要点）
+        all_points = []
+        for line in lines:
+            clean_line = line.strip("- ").strip()
+            if clean_line:
+                # 限制每个要点长度，避免大段文字
+                if len(clean_line) > max_text_length:
+                    # 尝试在句号处分割
+                    sentences = clean_line.split("。")
+                    for sent in sentences[:2]:  # 最多取前2句
+                        if sent.strip():
+                            all_points.append(sent.strip() + "。")
                 else:
-                    right_content.append(clean_line)
+                    all_points.append(clean_line)
         
-        # 如果分割结果不均衡，调整
-        if len(left_content) == 0 or len(right_content) == 0:
-            # 平均分配
-            all_points = [line.strip("- ").strip() for line in lines if not line.startswith("  ")]
-            mid = len(all_points) // 2
-            left_content = all_points[:mid]
-            right_content = all_points[mid:]
+        # 平均分配到左右两侧
+        mid = len(all_points) // 2
+        left_content = all_points[:mid] if mid > 0 else all_points
+        right_content = all_points[mid:] if mid > 0 else []
+        
+        # 确保至少有内容
+        if not left_content and not right_content:
+            left_content = ["内容待补充"]
+            right_content = ["内容待补充"]
+        elif not right_content:
+            right_content = left_content[-1:]
+            left_content = left_content[:-1]
         
         return left_content, right_content

@@ -169,6 +169,7 @@ ppt_generation:
   
   # 布局类型配置
   layout_types:
+    auto_detect: true                # 是否启用自动布局检测
     bullet_list:                     # 要点列表布局
       enabled: true
       max_items: 6
@@ -176,6 +177,7 @@ ppt_generation:
     two_column:                      # 左右对比布局
       enabled: true
       split_ratio: 0.5               # 左右比例
+      max_text_length: 60            # 每个要点最大长度
     three_column:                    # 三列卡片布局
       enabled: true
       card_style: true
