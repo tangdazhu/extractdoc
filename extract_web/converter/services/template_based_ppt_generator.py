@@ -53,22 +53,26 @@ class TemplateBasedPPTGenerator:
         logger.info(f"加载PPT模板: {template_path}")
         self.prs = Presentation(str(template_path))
         
-        # 删除模板中的示例页（保留第一页作为参考）
+        # 删除模板中的示例页（保留第一页作为封面）
         self._remove_example_slides()
+        
+        # 标记是否已使用第一页作为封面
+        self.cover_created = False
     
     def _remove_example_slides(self):
-        """删除模板中的示例页"""
+        """删除模板中第2页及之后的示例页，保留第1页作为封面"""
         if len(self.prs.slides) > 1:
             xml_slides = self.prs.slides._sldIdLst
+            # 只删除第2页及之后的页面
             for idx in reversed(range(1, len(xml_slides))):
                 rId = xml_slides[idx].rId
                 self.prs.part.drop_rel(rId)
                 del xml_slides[idx]
-            logger.debug("已删除模板示例页")
+            logger.debug("已删除模板示例页（保留第1页）")
     
     def create_cover_slide(self, title: str, subtitle: str = "") -> bool:
         """
-        创建封面页
+        创建封面页（使用模板第一页）
         
         Args:
             title: 标题
@@ -77,8 +81,16 @@ class TemplateBasedPPTGenerator:
         Returns:
             是否成功创建
         """
-        layout = self.prs.slide_layouts[self.LAYOUT_TITLE_SLIDE]
-        slide = self.prs.slides.add_slide(layout)
+        # 使用模板第一页（已经有样式）
+        if len(self.prs.slides) > 0 and not self.cover_created:
+            slide = self.prs.slides[0]
+            self.cover_created = True
+            logger.debug("使用模板第一页作为封面")
+        else:
+            # 如果没有示例页或已经使用过，创建新的
+            layout = self.prs.slide_layouts[self.LAYOUT_TITLE_SLIDE]
+            slide = self.prs.slides.add_slide(layout)
+            logger.debug("创建新封面页")
         
         # 填充标题
         success = PlaceholderHelper.fill_title(slide, title)
