@@ -1329,6 +1329,22 @@ def _get_timeline_config(self) -> Dict:
         "base_item_height": config.get("ppt_generation.layout_types.timeline.base_item_height"),
         # ... 所有配置参数
     }
+
+def _get_catalog_config(self) -> Dict:
+    """获取目录页配置"""
+    return {
+        "max_items": config.get("ppt_generation.generation_preferences.catalog_max_items"),
+        "min_height": config.get("ppt_generation.generation_preferences.catalog_min_item_height"),
+        # ... 所有配置参数
+    }
+
+def _get_flow_diagram_config(self) -> Dict:
+    """获取流程图配置"""
+    return {
+        "max_steps": config.get("ppt_generation.layout_types.flow_diagram.max_steps"),
+        "base_step_width": config.get("ppt_generation.layout_types.flow_diagram.base_step_width"),
+        # ... 所有配置参数
+    }
 ```
 
 #### 2. 智能截断方法
@@ -1362,6 +1378,56 @@ def _calculate_timeline_layout(self, item_count: int, cfg: Dict) -> Tuple:
         content_font_size = int(cfg["content_font_size"] * 0.85)
     
     return item_height, title_font_size, content_font_size, content_max_chars
+
+def _calculate_catalog_layout(self, total_items: int, cfg: Dict) -> Tuple:
+    """计算目录页动态布局参数"""
+    if total_items > 0:
+        calculated_height = cfg["available_height"] / total_items
+        item_height = max(cfg["min_height"], min(calculated_height, cfg["max_height"]))
+    else:
+        item_height = cfg["max_height"]
+    
+    # 根据高度调整字体大小
+    if item_height >= 0.4:
+        number_font_size = 20
+        title_font_size = 18
+    elif item_height >= 0.3:
+        number_font_size = 18
+        title_font_size = 16
+    else:
+        number_font_size = 16
+        title_font_size = 14
+    
+    return item_height, number_font_size, title_font_size
+
+def _calculate_flow_diagram_layout(self, step_count: int, cfg: Dict) -> Tuple:
+    """计算流程图动态布局参数"""
+    base_total_width = step_count * cfg["base_step_width"] + (step_count - 1) * cfg["base_arrow_width"]
+    
+    if base_total_width > cfg["content_area_width"]:
+        # 需要缩小，按比例调整
+        scale_factor = cfg["content_area_width"] / base_total_width
+        step_width = max(cfg["min_step_width"], cfg["base_step_width"] * scale_factor)
+        arrow_width = max(cfg["min_arrow_width"], cfg["base_arrow_width"] * scale_factor)
+        
+        # 根据缩放调整字体大小
+        if scale_factor < 0.6:
+            step_title_font_size = int(cfg["step_title_font_size"] * 0.7)
+            step_desc_font_size = int(cfg["step_desc_font_size"] * 0.7)
+            step_desc_max_chars = int(cfg["step_desc_max_chars"] * 0.6)
+        elif scale_factor < 0.8:
+            step_title_font_size = int(cfg["step_title_font_size"] * 0.85)
+            step_desc_font_size = int(cfg["step_desc_font_size"] * 0.85)
+            step_desc_max_chars = int(cfg["step_desc_max_chars"] * 0.8)
+    else:
+        step_width = cfg["base_step_width"]
+        arrow_width = cfg["base_arrow_width"]
+        step_title_font_size = cfg["step_title_font_size"]
+        step_desc_font_size = cfg["step_desc_font_size"]
+        step_desc_max_chars = cfg["step_desc_max_chars"]
+    
+    total_width = step_count * step_width + (step_count - 1) * arrow_width
+    return step_width, arrow_width, total_width, step_title_font_size, step_desc_font_size, step_desc_max_chars
 ```
 
 ### 子类简化
@@ -1393,9 +1459,13 @@ content = self._truncate_text_smart(card.get("content", ""), cfg["card_content_m
 
 ### 重构效果
 
-- **代码减少**：净减少20行
+- **代码减少**：净减少约120行重复代码
+  - 目录页：每个生成器减少30行
+  - 流程图：每个生成器减少40行
+  - 删除重复的`_clean_markdown_text`方法
 - **维护性提升**：修复一次，两个生成器同时生效
 - **扩展性提升**：新增生成器可直接复用基类方法
+- **一致性保证**：两个风格的布局计算逻辑完全一致
 
 ---
 
@@ -1432,7 +1502,9 @@ content = self._truncate_text_smart(card.get("content", ""), cfg["card_content_m
 
 6. **代码重构**（v4.0新增）
    - 抽取通用方法到基类（配置获取、智能截断、动态计算）
-   - 减少代码重复，提升维护性
+   - 新增4个配置获取方法（三列卡片、时间线、目录页、流程图）
+   - 新增3个动态计算方法（目录页、流程图、时间线）
+   - 减少约120行重复代码
    - 修复一次，两个生成器同时生效
 
 7. **技术质量**
@@ -1472,10 +1544,12 @@ content = self._truncate_text_smart(card.get("content", ""), cfg["card_content_m
   - 配置化PPT生成器限制：流程图和时间线从4提升到6
   - 解决“五大假设只显示4个”问题
 - ✅ **代码重构**：
-  - 抽取通用方法到基类：_get_three_column_config、_get_timeline_config
-  - 智能截断方法：_truncate_text_smart
-  - 动态计算方法：_calculate_timeline_layout
-  - 减少代码重复，提升维护性
+  - 抽取通用方法到基类：
+    - 配置获取：`_get_three_column_config`、`_get_timeline_config`、`_get_catalog_config`、`_get_flow_diagram_config`
+    - 智能截断：`_truncate_text_smart`
+    - 动态计算：`_calculate_timeline_layout`、`_calculate_catalog_layout`、`_calculate_flow_diagram_layout`
+  - 删除重复的`_clean_markdown_text`方法
+  - 减少约120行重复代码，提升维护性
 
 ### v3.0 (2025-10-22 晚上)
 - ✅ **缩进问题修复**：修复第一行bullet额外缩进问题

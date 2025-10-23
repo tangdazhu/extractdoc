@@ -247,34 +247,11 @@ class AcademicStylePPTGenerator(BasePPTGenerator):
         self._add_gradient_background(slide)
         self._add_top_accent_bar(slide)
         
-        # 标题栏
-        title_bar = slide.shapes.add_shape(
-            MSO_SHAPE.RECTANGLE,
-            0, Inches(0.3),
-            Inches(13.33), Inches(0.9)
-        )
-        title_bar.fill.solid()
-        title_bar.fill.fore_color.rgb = self.COLOR_WHITE
-        title_bar.line.fill.background()
+        # 使用基类方法创建标题栏
+        self._create_title_bar(slide, 0.3, 0.9, title, 32, self.COLOR_PRIMARY_DARK)
         
-        # 标题文字
-        title_text = title_bar.text_frame
-        title_text.text = title
-        title_text.paragraphs[0].font.size = Pt(32)
-        title_text.paragraphs[0].font.bold = True
-        title_text.paragraphs[0].font.color.rgb = self.COLOR_PRIMARY_DARK
-        title_text.vertical_anchor = MSO_ANCHOR.MIDDLE
-        title_text.margin_left = Inches(0.5)
-        
-        # 内容区域
-        content_box = slide.shapes.add_shape(
-            MSO_SHAPE.ROUNDED_RECTANGLE,
-            Inches(0.8), Inches(1.8),
-            Inches(11.73), Inches(5)
-        )
-        content_box.fill.solid()
-        content_box.fill.fore_color.rgb = self.COLOR_WHITE
-        content_box.line.fill.background()
+        # 使用基类方法创建内容框
+        content_box = self._create_content_box(slide, 0.8, 1.8, 11.73, 5)
         
         # 内容文字（使用基类统一方法）
         content_text = content_box.text_frame
@@ -299,23 +276,8 @@ class AcademicStylePPTGenerator(BasePPTGenerator):
         self._add_gradient_background(slide)
         self._add_top_accent_bar(slide)
         
-        # 标题栏
-        title_bar = slide.shapes.add_shape(
-            MSO_SHAPE.RECTANGLE,
-            0, Inches(0.3),
-            Inches(13.33), Inches(0.9)
-        )
-        title_bar.fill.solid()
-        title_bar.fill.fore_color.rgb = self.COLOR_WHITE
-        title_bar.line.fill.background()
-        
-        title_text = title_bar.text_frame
-        title_text.text = title
-        title_text.paragraphs[0].font.size = Pt(32)
-        title_text.paragraphs[0].font.bold = True
-        title_text.paragraphs[0].font.color.rgb = self.COLOR_PRIMARY_DARK
-        title_text.vertical_anchor = MSO_ANCHOR.MIDDLE
-        title_text.margin_left = Inches(0.5)
+        # 使用基类方法创建标题栏
+        self._create_title_bar(slide, 0.3, 0.9, title, 32, self.COLOR_PRIMARY_DARK)
         
         split_ratio = config.get("ppt_generation.layout_types.two_column.split_ratio", 0.5)
         total_width = 11.73
@@ -323,16 +285,8 @@ class AcademicStylePPTGenerator(BasePPTGenerator):
         left_width = (total_width - gap) * split_ratio
         right_width = total_width - gap - left_width
         
-        # 左侧
-        left_box = slide.shapes.add_shape(
-            MSO_SHAPE.ROUNDED_RECTANGLE,
-            Inches(0.8), Inches(1.8),
-            Inches(left_width), Inches(5)
-        )
-        left_box.fill.solid()
-        left_box.fill.fore_color.rgb = self.COLOR_WHITE
-        left_box.line.color.rgb = self.COLOR_ACCENT
-        left_box.line.width = Pt(2)
+        # 使用基类方法创建左侧内容框
+        left_box = self._create_content_box(slide, 0.8, 1.8, left_width, 5, self.COLOR_ACCENT, 2)
         
         left_title_box = slide.shapes.add_textbox(Inches(0.8), Inches(1.5), Inches(left_width), Inches(0.4))
         left_title_box.text_frame.text = left_title
@@ -352,16 +306,8 @@ class AcademicStylePPTGenerator(BasePPTGenerator):
             left_text.paragraphs[i].font.size = Pt(16)
             left_text.paragraphs[i].font.color.rgb = self.COLOR_TEXT_DARK
         
-        # 右侧
-        right_box = slide.shapes.add_shape(
-            MSO_SHAPE.ROUNDED_RECTANGLE,
-            Inches(0.8 + left_width + gap), Inches(1.8),
-            Inches(right_width), Inches(5)
-        )
-        right_box.fill.solid()
-        right_box.fill.fore_color.rgb = self.COLOR_WHITE
-        right_box.line.color.rgb = self.COLOR_ACCENT
-        right_box.line.width = Pt(2)
+        # 使用基类方法创建右侧内容框
+        right_box = self._create_content_box(slide, 0.8 + left_width + gap, 1.8, right_width, 5, self.COLOR_ACCENT, 2)
         
         right_title_box = slide.shapes.add_textbox(Inches(0.8 + left_width + gap), Inches(1.5), Inches(right_width), Inches(0.4))
         right_title_box.text_frame.text = right_title
@@ -389,18 +335,8 @@ class AcademicStylePPTGenerator(BasePPTGenerator):
         self._add_gradient_background(slide)
         self._add_top_accent_bar(slide)
         
-        title_bar = slide.shapes.add_shape(MSO_SHAPE.RECTANGLE, 0, Inches(0.3), Inches(13.33), Inches(0.9))
-        title_bar.fill.solid()
-        title_bar.fill.fore_color.rgb = self.COLOR_WHITE
-        title_bar.line.fill.background()
-        
-        title_text = title_bar.text_frame
-        title_text.text = title
-        title_text.paragraphs[0].font.size = Pt(32)
-        title_text.paragraphs[0].font.bold = True
-        title_text.paragraphs[0].font.color.rgb = self.COLOR_PRIMARY_DARK
-        title_text.vertical_anchor = MSO_ANCHOR.MIDDLE
-        title_text.margin_left = Inches(0.5)
+        # 使用基类方法创建标题栏
+        self._create_title_bar(slide, 0.3, 0.9, title, 32, self.COLOR_PRIMARY_DARK)
         
         # 从基类获取配置
         cfg = self._get_three_column_config()
@@ -417,11 +353,8 @@ class AcademicStylePPTGenerator(BasePPTGenerator):
         for i, card in enumerate(cards_to_show):
             x_pos = start_x + i * (card_width + card_gap)
             
-            card_box = slide.shapes.add_shape(MSO_SHAPE.ROUNDED_RECTANGLE, Inches(x_pos), Inches(2.0), Inches(card_width), Inches(4.5))
-            card_box.fill.solid()
-            card_box.fill.fore_color.rgb = self.COLOR_WHITE
-            card_box.line.color.rgb = self.COLOR_ACCENT
-            card_box.line.width = Pt(2)
+            # 使用基类方法创建卡片容器
+            card_box = self._create_content_box(slide, x_pos, 2.0, card_width, 4.5, self.COLOR_ACCENT, 2)
             
             icon_circle = slide.shapes.add_shape(MSO_SHAPE.OVAL, Inches(x_pos + 1.0), Inches(2.5), Inches(1.5), Inches(1.5))
             icon_circle.fill.solid()
@@ -462,54 +395,15 @@ class AcademicStylePPTGenerator(BasePPTGenerator):
         self._add_gradient_background(slide)
         self._add_top_accent_bar(slide)
         
-        title_bar = slide.shapes.add_shape(MSO_SHAPE.RECTANGLE, 0, Inches(0.3), Inches(13.33), Inches(0.9))
-        title_bar.fill.solid()
-        title_bar.fill.fore_color.rgb = self.COLOR_WHITE
-        title_bar.line.fill.background()
+        # 使用基类方法创建标题栏
+        self._create_title_bar(slide, 0.3, 0.9, title, 32, self.COLOR_PRIMARY_DARK)
         
-        title_text = title_bar.text_frame
-        title_text.text = title
-        title_text.paragraphs[0].font.size = Pt(32)
-        title_text.paragraphs[0].font.bold = True
-        title_text.paragraphs[0].font.color.rgb = self.COLOR_PRIMARY_DARK
-        title_text.vertical_anchor = MSO_ANCHOR.MIDDLE
-        title_text.margin_left = Inches(0.5)
-        
-        # 从配置读取参数
-        max_steps = config.get("ppt_generation.layout_types.flow_diagram.max_steps")
-        base_step_width = config.get("ppt_generation.layout_types.flow_diagram.base_step_width")
-        base_arrow_width = config.get("ppt_generation.layout_types.flow_diagram.base_arrow_width")
-        min_step_width = config.get("ppt_generation.layout_types.flow_diagram.min_step_width")
-        min_arrow_width = config.get("ppt_generation.layout_types.flow_diagram.min_arrow_width")
-        content_area_width = config.get("ppt_generation.layout_types.flow_diagram.content_area_width")
-        step_title_font_size = config.get("ppt_generation.layout_types.flow_diagram.step_title_font_size")
-        step_desc_font_size = config.get("ppt_generation.layout_types.flow_diagram.step_desc_font_size")
-        step_desc_max_chars = config.get("ppt_generation.layout_types.flow_diagram.step_desc_max_chars")
-        
-        steps_to_show = steps[:max_steps]
+        # 从基类获取配置并计算布局
+        cfg = self._get_flow_diagram_config()
+        steps_to_show = steps[:cfg["max_steps"]]
         step_count = len(steps_to_show)
         
-        # 动态计算步骤框和箭头宽度
-        base_total_width = step_count * base_step_width + (step_count - 1) * base_arrow_width
-        
-        if base_total_width > content_area_width:
-            scale_factor = content_area_width / base_total_width
-            step_width = max(min_step_width, base_step_width * scale_factor)
-            arrow_width = max(min_arrow_width, base_arrow_width * scale_factor)
-            total_width = step_count * step_width + (step_count - 1) * arrow_width
-            
-            if scale_factor < 0.6:
-                step_title_font_size = int(step_title_font_size * 0.7)
-                step_desc_font_size = int(step_desc_font_size * 0.7)
-                step_desc_max_chars = int(step_desc_max_chars * 0.6)
-            elif scale_factor < 0.8:
-                step_title_font_size = int(step_title_font_size * 0.85)
-                step_desc_font_size = int(step_desc_font_size * 0.85)
-                step_desc_max_chars = int(step_desc_max_chars * 0.8)
-        else:
-            step_width = base_step_width
-            arrow_width = base_arrow_width
-            total_width = base_total_width
+        step_width, arrow_width, total_width, step_title_font_size, step_desc_font_size, step_desc_max_chars = self._calculate_flow_diagram_layout(step_count, cfg)
         
         start_x = (13.33 - total_width) / 2
         
@@ -532,16 +426,8 @@ class AcademicStylePPTGenerator(BasePPTGenerator):
             
             desc_box = slide.shapes.add_textbox(Inches(x_pos), Inches(4.2), Inches(step_width), Inches(2.0))
             desc_text = desc_box.text_frame
-            # 智能截断：优先在标点符号处截断
-            description = step.get("description", "")
-            if len(description) > step_desc_max_chars:
-                truncate_pos = int(step_desc_max_chars * 0.9)
-                for j in range(truncate_pos, max(truncate_pos - 10, 0), -1):
-                    if j < len(description) and description[j] in '。，、；':
-                        description = description[:j+1]
-                        break
-                else:
-                    description = description[:truncate_pos] + "..."
+            # 使用基类的智能截断方法
+            description = self._truncate_text_smart(step.get("description", ""), step_desc_max_chars)
             desc_text.text = description
             desc_text.word_wrap = True
             desc_text.paragraphs[0].alignment = PP_ALIGN.CENTER
@@ -562,18 +448,8 @@ class AcademicStylePPTGenerator(BasePPTGenerator):
         self._add_gradient_background(slide)
         self._add_top_accent_bar(slide)
         
-        title_bar = slide.shapes.add_shape(MSO_SHAPE.RECTANGLE, 0, Inches(0.3), Inches(13.33), Inches(0.9))
-        title_bar.fill.solid()
-        title_bar.fill.fore_color.rgb = self.COLOR_WHITE
-        title_bar.line.fill.background()
-        
-        title_text = title_bar.text_frame
-        title_text.text = title
-        title_text.paragraphs[0].font.size = Pt(32)
-        title_text.paragraphs[0].font.bold = True
-        title_text.paragraphs[0].font.color.rgb = self.COLOR_PRIMARY_DARK
-        title_text.vertical_anchor = MSO_ANCHOR.MIDDLE
-        title_text.margin_left = Inches(0.5)
+        # 使用基类方法创建标题栏
+        self._create_title_bar(slide, 0.3, 0.9, title, 32, self.COLOR_PRIMARY_DARK)
         
         # 从基类获取配置并计算布局
         cfg = self._get_timeline_config()
@@ -601,11 +477,8 @@ class AcademicStylePPTGenerator(BasePPTGenerator):
             
             item = items_to_show[i]
             box_height = item_height * 0.8
-            content_box = slide.shapes.add_shape(MSO_SHAPE.ROUNDED_RECTANGLE, Inches(line_x + 0.5), Inches(y_pos - 0.1), Inches(9), Inches(box_height))
-            content_box.fill.solid()
-            content_box.fill.fore_color.rgb = self.COLOR_WHITE
-            content_box.line.color.rgb = self.COLOR_ACCENT
-            content_box.line.width = Pt(1.5)
+            # 使用基类方法创建内容框
+            content_box = self._create_content_box(slide, line_x + 0.5, y_pos - 0.1, 9, box_height, self.COLOR_ACCENT, 1.5)
             
             content_text = content_box.text_frame
             content_text.margin_left = Inches(0.3)
@@ -679,33 +552,11 @@ class AcademicStylePPTGenerator(BasePPTGenerator):
         self._add_gradient_background(slide)
         self._add_top_accent_bar(slide)
         
-        # 标题栏
-        title_bar = slide.shapes.add_shape(
-            MSO_SHAPE.RECTANGLE,
-            0, Inches(0.3),
-            Inches(13.33), Inches(0.9)
-        )
-        title_bar.fill.solid()
-        title_bar.fill.fore_color.rgb = self.COLOR_WHITE
-        title_bar.line.fill.background()
+        # 使用基类方法创建标题栏
+        self._create_title_bar(slide, 0.3, 0.9, title, 32, self.COLOR_PRIMARY_DARK)
         
-        title_text = title_bar.text_frame
-        title_text.text = title
-        title_text.paragraphs[0].font.size = Pt(32)
-        title_text.paragraphs[0].font.bold = True
-        title_text.paragraphs[0].font.color.rgb = self.COLOR_PRIMARY_DARK
-        title_text.vertical_anchor = MSO_ANCHOR.MIDDLE
-        title_text.margin_left = Inches(0.5)
-        
-        # 左侧：图片容器
-        pic_container = slide.shapes.add_shape(
-            MSO_SHAPE.ROUNDED_RECTANGLE,
-            Inches(0.8), Inches(1.8),
-            Inches(6.5), Inches(5.2)
-        )
-        pic_container.fill.solid()
-        pic_container.fill.fore_color.rgb = self.COLOR_WHITE
-        pic_container.line.fill.background()
+        # 使用基类方法创建图片容器
+        pic_container = self._create_content_box(slide, 0.8, 1.8, 6.5, 5.2)
         
         # 插入图片
         try:
@@ -729,14 +580,8 @@ class AcademicStylePPTGenerator(BasePPTGenerator):
         
         # 右侧：文字说明区域
         if caption:
-            text_container = slide.shapes.add_shape(
-                MSO_SHAPE.ROUNDED_RECTANGLE,
-                Inches(7.5), Inches(1.8),
-                Inches(5.5), Inches(5.2)
-            )
-            text_container.fill.solid()
-            text_container.fill.fore_color.rgb = self.COLOR_WHITE
-            text_container.line.fill.background()
+            # 使用基类方法创建文字容器
+            text_container = self._create_content_box(slide, 7.5, 1.8, 5.5, 5.2)
             
             text_frame = text_container.text_frame
             self._setup_text_frame_margins(text_frame)

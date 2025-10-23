@@ -40,28 +40,6 @@ class BusinessStylePPTGenerator(BasePPTGenerator):
         super().__init__()  # 调用基类初始化
         logger.info("初始化商务风格PPT生成器")
     
-    def _clean_markdown_text_old(self, text: str) -> tuple:
-        """
-        清理Markdown格式标记
-        
-        Args:
-            text: 原始文本（可能包含**加粗**标记）
-        
-        Returns:
-            (清理后的文本, 是否加粗)
-        """
-        import re
-        
-        # 检测是否有加粗标记
-        is_bold = '**' in text
-        
-        # 移除加粗标记 **文本**
-        cleaned_text = re.sub(r'\*\*(.+?)\*\*', r'\1', text)
-        
-        # 移除单个星号 *文本*
-        cleaned_text = re.sub(r'\*(.+?)\*', r'\1', cleaned_text)
-        
-        return cleaned_text, is_bold
     
     def _add_gradient_background(self, slide, angle=135.0):
         """添加渐变背景"""
@@ -174,34 +152,11 @@ class BusinessStylePPTGenerator(BasePPTGenerator):
         slide = self.prs.slides.add_slide(self.prs.slide_layouts[6])
         self._add_gradient_background(slide)
         
-        # 标题栏（白色背景）
-        title_bar = slide.shapes.add_shape(
-            MSO_SHAPE.RECTANGLE,
-            0, 0,
-            Inches(13.33), Inches(1.2)
-        )
-        title_bar.fill.solid()
-        title_bar.fill.fore_color.rgb = self.COLOR_WHITE
-        title_bar.line.fill.background()
+        # 使用基类方法创建标题栏
+        self._create_title_bar(slide, 0, 1.2, title, 36, self.COLOR_PRIMARY_DARK)
         
-        # 标题文字
-        title_text = title_bar.text_frame
-        title_text.text = title
-        title_text.paragraphs[0].font.size = Pt(36)
-        title_text.paragraphs[0].font.bold = True
-        title_text.paragraphs[0].font.color.rgb = self.COLOR_PRIMARY_DARK
-        title_text.vertical_anchor = MSO_ANCHOR.MIDDLE
-        title_text.margin_left = Inches(0.5)
-        
-        # 内容区域（白色背景）
-        content_box = slide.shapes.add_shape(
-            MSO_SHAPE.ROUNDED_RECTANGLE,
-            Inches(0.8), Inches(1.8),
-            Inches(11.73), Inches(5)
-        )
-        content_box.fill.solid()
-        content_box.fill.fore_color.rgb = self.COLOR_WHITE
-        content_box.line.fill.background()
+        # 使用基类方法创建内容框
+        content_box = self._create_content_box(slide, 0.8, 1.8, 11.73, 5)
         
         # 内容文字（使用基类统一方法）
         content_text = content_box.text_frame
@@ -220,37 +175,22 @@ class BusinessStylePPTGenerator(BasePPTGenerator):
         logger.debug(f"创建内容页: {title} ({len(content_lines)}行)")
     
     def create_two_column_slide(self, title: str, left_content: List[str], right_content: List[str], 
-                                left_title: str = "传统方式", right_title: str = "AI方式"):
+                                left_title: str = "\u4f20\u7edf\u65b9\u5f0f", right_title: str = "AI\u65b9\u5f0f"):
         """
-        创建左右对比页
+        \u521b\u5efa\u5de6\u53f3\u5bf9\u6bd4\u9875
         
         Args:
-            title: 页面标题
-            left_content: 左侧内容列表
-            right_content: 右侧内容列表
-            left_title: 左侧标题
-            right_title: 右侧标题
+            title: \u9875\u9762\u6807\u9898
+            left_content: \u5de6\u4fa7\u5185\u5bb9\u5217\u8868
+            right_content: \u53f3\u4fa7\u5185\u5bb9\u5217\u8868
+            left_title: \u5de6\u4fa7\u6807\u9898
+            right_title: \u53f3\u4fa7\u6807\u9898
         """
         slide = self.prs.slides.add_slide(self.prs.slide_layouts[6])
         self._add_gradient_background(slide)
         
-        # 顶部标题栏
-        title_bar = slide.shapes.add_shape(
-            MSO_SHAPE.RECTANGLE,
-            0, 0,
-            Inches(13.33), Inches(1.2)
-        )
-        title_bar.fill.solid()
-        title_bar.fill.fore_color.rgb = self.COLOR_WHITE
-        title_bar.line.fill.background()
-        
-        title_text = title_bar.text_frame
-        title_text.text = title
-        title_text.paragraphs[0].font.size = Pt(36)
-        title_text.paragraphs[0].font.bold = True
-        title_text.paragraphs[0].font.color.rgb = self.COLOR_PRIMARY_DARK
-        title_text.vertical_anchor = MSO_ANCHOR.MIDDLE
-        title_text.margin_left = Inches(0.5)
+        # \u4f7f\u7528\u57fa\u7c7b\u65b9\u6cd5\u521b\u5efa\u6807\u9898\u680f
+        self._create_title_bar(slide, 0, 1.2, title, 36, self.COLOR_PRIMARY_DARK)
         
         # 从配置读取分栏比例
         split_ratio = config.get("ppt_generation.layout_types.two_column.split_ratio", 0.5)
@@ -261,17 +201,9 @@ class BusinessStylePPTGenerator(BasePPTGenerator):
         left_width = (total_width - gap) * split_ratio
         right_width = total_width - gap - left_width
         
-        # 左侧内容区
-        left_box = slide.shapes.add_shape(
-            MSO_SHAPE.ROUNDED_RECTANGLE,
-            Inches(0.8), Inches(1.8),
-            Inches(left_width), Inches(5)
-        )
-        left_box.fill.solid()
-        left_box.fill.fore_color.rgb = self.COLOR_WHITE
+        # 使用基类方法创建左侧内容区
+        left_box = self._create_content_box(slide, 0.8, 1.8, left_width, 5, self.COLOR_PRIMARY_DARK, 2)
         left_box.fill.fore_color.brightness = -0.05
-        left_box.line.color.rgb = self.COLOR_PRIMARY_DARK
-        left_box.line.width = Pt(2)
         
         # 左侧标题
         left_title_box = slide.shapes.add_textbox(
@@ -301,17 +233,9 @@ class BusinessStylePPTGenerator(BasePPTGenerator):
             para.font.color.rgb = self.COLOR_TEXT_DARK
             para.space_after = Pt(8)
         
-        # 右侧内容区
-        right_box = slide.shapes.add_shape(
-            MSO_SHAPE.ROUNDED_RECTANGLE,
-            Inches(0.8 + left_width + gap), Inches(1.8),
-            Inches(right_width), Inches(5)
-        )
-        right_box.fill.solid()
-        right_box.fill.fore_color.rgb = self.COLOR_WHITE
+        # 使用基类方法创建右侧内容区
+        right_box = self._create_content_box(slide, 0.8 + left_width + gap, 1.8, right_width, 5, self.COLOR_PRIMARY_DARK, 2)
         right_box.fill.fore_color.brightness = -0.05
-        right_box.line.color.rgb = self.COLOR_PRIMARY_DARK
-        right_box.line.width = Pt(2)
         
         # 右侧标题
         right_title_box = slide.shapes.add_textbox(
@@ -354,23 +278,8 @@ class BusinessStylePPTGenerator(BasePPTGenerator):
         slide = self.prs.slides.add_slide(self.prs.slide_layouts[6])
         self._add_gradient_background(slide)
         
-        # 顶部标题栏
-        title_bar = slide.shapes.add_shape(
-            MSO_SHAPE.RECTANGLE,
-            0, 0,
-            Inches(13.33), Inches(1.2)
-        )
-        title_bar.fill.solid()
-        title_bar.fill.fore_color.rgb = self.COLOR_WHITE
-        title_bar.line.fill.background()
-        
-        title_text = title_bar.text_frame
-        title_text.text = title
-        title_text.paragraphs[0].font.size = Pt(36)
-        title_text.paragraphs[0].font.bold = True
-        title_text.paragraphs[0].font.color.rgb = self.COLOR_PRIMARY_DARK
-        title_text.vertical_anchor = MSO_ANCHOR.MIDDLE
-        title_text.margin_left = Inches(0.5)
+        # 使用基类方法创建标题栏
+        self._create_title_bar(slide, 0, 1.2, title, 36, self.COLOR_PRIMARY_DARK)
         
         # 从基类获取配置
         cfg = self._get_three_column_config()
@@ -389,17 +298,9 @@ class BusinessStylePPTGenerator(BasePPTGenerator):
         for i, card in enumerate(cards_to_show):
             x_pos = start_x + i * (card_width + card_gap)
             
-            # 卡片容器
-            card_box = slide.shapes.add_shape(
-                MSO_SHAPE.ROUNDED_RECTANGLE,
-                Inches(x_pos), Inches(2.0),
-                Inches(card_width), Inches(4.5)
-            )
-            card_box.fill.solid()
-            card_box.fill.fore_color.rgb = self.COLOR_WHITE
+            # 使用基类方法创建卡片容器
+            card_box = self._create_content_box(slide, x_pos, 2.0, card_width, 4.5, self.COLOR_PRIMARY_DARK, 2)
             card_box.fill.fore_color.brightness = -0.05
-            card_box.line.color.rgb = self.COLOR_PRIMARY_DARK
-            card_box.line.width = Pt(2)
             
             # 图标/编号（大号圆形）
             icon_circle = slide.shapes.add_shape(
@@ -460,66 +361,15 @@ class BusinessStylePPTGenerator(BasePPTGenerator):
         slide = self.prs.slides.add_slide(self.prs.slide_layouts[6])
         self._add_gradient_background(slide)
         
-        # 顶部标题栏
-        title_bar = slide.shapes.add_shape(
-            MSO_SHAPE.RECTANGLE,
-            0, 0,
-            Inches(13.33), Inches(1.2)
-        )
-        title_bar.fill.solid()
-        title_bar.fill.fore_color.rgb = self.COLOR_WHITE
-        title_bar.line.fill.background()
+        # 使用基类方法创建标题栏
+        self._create_title_bar(slide, 0, 1.2, title, 36, self.COLOR_PRIMARY_DARK)
         
-        title_text = title_bar.text_frame
-        title_text.text = title
-        title_text.paragraphs[0].font.size = Pt(36)
-        title_text.paragraphs[0].font.bold = True
-        title_text.paragraphs[0].font.color.rgb = self.COLOR_PRIMARY_DARK
-        title_text.vertical_anchor = MSO_ANCHOR.MIDDLE
-        title_text.margin_left = Inches(0.5)
-        
-        # 计算步骤布局（横向）
-        # 从配置读取参数
-        max_steps = config.get("ppt_generation.layout_types.flow_diagram.max_steps")
-        base_step_width = config.get("ppt_generation.layout_types.flow_diagram.base_step_width")
-        base_arrow_width = config.get("ppt_generation.layout_types.flow_diagram.base_arrow_width")
-        min_step_width = config.get("ppt_generation.layout_types.flow_diagram.min_step_width")
-        min_arrow_width = config.get("ppt_generation.layout_types.flow_diagram.min_arrow_width")
-        content_area_width = config.get("ppt_generation.layout_types.flow_diagram.content_area_width")
-        step_title_font_size = config.get("ppt_generation.layout_types.flow_diagram.step_title_font_size")
-        step_desc_font_size = config.get("ppt_generation.layout_types.flow_diagram.step_desc_font_size")
-        step_desc_max_chars = config.get("ppt_generation.layout_types.flow_diagram.step_desc_max_chars")
-        
-        steps_to_show = steps[:max_steps]
+        # 从基类获取配置并计算布局
+        cfg = self._get_flow_diagram_config()
+        steps_to_show = steps[:cfg["max_steps"]]
         step_count = len(steps_to_show)
         
-        # 动态计算步骤框和箭头宽度
-        # 计算基础宽度总和
-        base_total_width = step_count * base_step_width + (step_count - 1) * base_arrow_width
-        
-        if base_total_width > content_area_width:
-            # 需要缩小，按比例调整
-            scale_factor = content_area_width / base_total_width
-            step_width = max(min_step_width, base_step_width * scale_factor)
-            arrow_width = max(min_arrow_width, base_arrow_width * scale_factor)
-            
-            # 重新计算实际宽度
-            total_width = step_count * step_width + (step_count - 1) * arrow_width
-            
-            # 根据缩放调整字体大小
-            if scale_factor < 0.6:
-                step_title_font_size = int(step_title_font_size * 0.7)
-                step_desc_font_size = int(step_desc_font_size * 0.7)
-                step_desc_max_chars = int(step_desc_max_chars * 0.6)
-            elif scale_factor < 0.8:
-                step_title_font_size = int(step_title_font_size * 0.85)
-                step_desc_font_size = int(step_desc_font_size * 0.85)
-                step_desc_max_chars = int(step_desc_max_chars * 0.8)
-        else:
-            # 不需要缩小，使用基础宽度
-            step_width = base_step_width
-            arrow_width = base_arrow_width
-            total_width = base_total_width
+        step_width, arrow_width, total_width, step_title_font_size, step_desc_font_size, step_desc_max_chars = self._calculate_flow_diagram_layout(step_count, cfg)
         
         start_x = (13.33 - total_width) / 2
         
@@ -552,18 +402,8 @@ class BusinessStylePPTGenerator(BasePPTGenerator):
                 Inches(step_width), Inches(2.0)
             )
             desc_text = desc_box.text_frame
-            # 智能截断：优先在标点符号处截断
-            description = step.get("description", "")
-            if len(description) > step_desc_max_chars:
-                # 尝试在句号、逗号处截断
-                truncate_pos = int(step_desc_max_chars * 0.9)
-                for j in range(truncate_pos, max(truncate_pos - 10, 0), -1):
-                    if j < len(description) and description[j] in '。，、；':
-                        description = description[:j+1]
-                        break
-                else:
-                    # 没找到标点，直接截断
-                    description = description[:truncate_pos] + "..."
+            # 使用基类的智能截断方法
+            description = self._truncate_text_smart(step.get("description", ""), step_desc_max_chars)
             desc_text.text = description
             desc_text.word_wrap = True
             desc_text.paragraphs[0].alignment = PP_ALIGN.CENTER
@@ -595,23 +435,8 @@ class BusinessStylePPTGenerator(BasePPTGenerator):
         slide = self.prs.slides.add_slide(self.prs.slide_layouts[6])
         self._add_gradient_background(slide)
         
-        # 顶部标题栏
-        title_bar = slide.shapes.add_shape(
-            MSO_SHAPE.RECTANGLE,
-            0, 0,
-            Inches(13.33), Inches(1.2)
-        )
-        title_bar.fill.solid()
-        title_bar.fill.fore_color.rgb = self.COLOR_WHITE
-        title_bar.line.fill.background()
-        
-        title_text = title_bar.text_frame
-        title_text.text = title
-        title_text.paragraphs[0].font.size = Pt(36)
-        title_text.paragraphs[0].font.bold = True
-        title_text.paragraphs[0].font.color.rgb = self.COLOR_PRIMARY_DARK
-        title_text.vertical_anchor = MSO_ANCHOR.MIDDLE
-        title_text.margin_left = Inches(0.5)
+        # 使用基类方法创建标题栏
+        self._create_title_bar(slide, 0, 1.2, title, 36, self.COLOR_PRIMARY_DARK)
         
         # 从基类获取配置并计算布局
         cfg = self._get_timeline_config()
@@ -649,19 +474,11 @@ class BusinessStylePPTGenerator(BasePPTGenerator):
                 connector.fill.fore_color.rgb = self.COLOR_PRIMARY_LIGHT
                 connector.line.fill.background()
             
-            # 内容框（动态高度）
+            # 使用基类方法创建内容框（动态高度）
             item = items_to_show[i]
             box_height = item_height * 0.8
-            content_box = slide.shapes.add_shape(
-                MSO_SHAPE.ROUNDED_RECTANGLE,
-                Inches(line_x + 0.5), Inches(y_pos - 0.1),
-                Inches(9), Inches(box_height)
-            )
-            content_box.fill.solid()
-            content_box.fill.fore_color.rgb = self.COLOR_WHITE
+            content_box = self._create_content_box(slide, line_x + 0.5, y_pos - 0.1, 9, box_height, self.COLOR_PRIMARY_DARK, 1)
             content_box.fill.fore_color.brightness = -0.05
-            content_box.line.color.rgb = self.COLOR_PRIMARY_DARK
-            content_box.line.width = Pt(1)
             
             # 内容文字
             content_text = content_box.text_frame
@@ -771,35 +588,13 @@ class BusinessStylePPTGenerator(BasePPTGenerator):
         pic_circle.line.color.rgb = self.COLOR_PRIMARY_DARK
         pic_circle.line.width = Pt(3)
         
-        # 从配置读取参数
-        max_items = config.get("ppt_generation.generation_preferences.catalog_max_items")
-        min_height = config.get("ppt_generation.generation_preferences.catalog_min_item_height")
-        max_height = config.get("ppt_generation.generation_preferences.catalog_max_item_height")
-        available_height = config.get("ppt_generation.generation_preferences.catalog_available_height")
-        start_y = config.get("ppt_generation.generation_preferences.catalog_start_y")
-        
-        # 限制显示数量
-        items_to_show = catalog_items[:max_items]
+        # 从基类获取配置并计算布局
+        cfg = self._get_catalog_config()
+        items_to_show = catalog_items[:cfg["max_items"]]
         total_items = len(items_to_show)
         
-        # 动态计算每项高度
-        if total_items > 0:
-            calculated_height = available_height / total_items
-            # 限制在最小和最大高度之间
-            item_height = max(min_height, min(calculated_height, max_height))
-        else:
-            item_height = max_height
-        
-        # 动态调整字体大小
-        if item_height >= 0.4:
-            number_font_size = 20
-            title_font_size = 18
-        elif item_height >= 0.3:
-            number_font_size = 18
-            title_font_size = 16
-        else:
-            number_font_size = 16
-            title_font_size = 14
+        item_height, number_font_size, title_font_size = self._calculate_catalog_layout(total_items, cfg)
+        start_y = cfg["start_y"]
         
         for i, item in enumerate(items_to_show):
             number = item.get("number", f"{i+1:02d}")
