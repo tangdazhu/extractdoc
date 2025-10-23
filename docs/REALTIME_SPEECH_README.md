@@ -3,7 +3,6 @@
 ## 概述 (Overview)
 
 本项目新增了基于阿里云DashScope API的实时语音识别功能，支持中英文混合识别，可实现低延迟的实时语音转文字。
-
 This project now includes real-time speech recognition functionality based on Alibaba Cloud DashScope API, supporting Chinese-English mixed recognition with low latency speech-to-text conversion.
 
 ## 功能特性 (Features)
