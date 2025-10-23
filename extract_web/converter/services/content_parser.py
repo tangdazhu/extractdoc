@@ -136,8 +136,11 @@ class ContentParser:
         if current_step:
             steps.append(current_step)
         
-        # 限制最多4个步骤
-        steps = steps[:4]
+        # 从配置读取最大步骤数
+        max_steps = config.get("ppt_generation.layout_types.flow_diagram.max_steps", 6)
+        if len(steps) > max_steps:
+            logger.warning(f"流程图步骤数({len(steps)})超过最大限制({max_steps})，将截断")
+            steps = steps[:max_steps]
         
         logger.info(f"解析结果: {len(steps)}个步骤")
         return steps
@@ -181,8 +184,11 @@ class ContentParser:
         if current_item:
             items.append(current_item)
         
-        # 限制最多4项
-        items = items[:4]
+        # 从配置读取最大项目数
+        max_items = config.get("ppt_generation.layout_types.timeline.max_items", 6)
+        if len(items) > max_items:
+            logger.warning(f"时间线项目数({len(items)})超过最大限制({max_items})，将截断")
+            items = items[:max_items]
         
         logger.info(f"解析结果: {len(items)}个时间线项目")
         return items

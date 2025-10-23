@@ -77,7 +77,7 @@
 ```yaml
 ppt_generation:
   generation_preferences:
-    catalog_max_items: 20
+    catalog_max_items: 30
     catalog_min_item_height: 0.4
     catalog_max_item_height: 0.7
     catalog_available_height: 5.0

@@ -158,10 +158,11 @@ ppt_generation:
     prefer_concise_content: false    # 不简化内容,保留完整性
     skip_low_importance: false       # 不跳过低重要度内容
     max_elements_per_slide: 5        # 每页最多元素数
-    catalog_max_items: 20            # 目录最多显示项数
-    catalog_min_item_height: 0.4     # 目录项最小高度（英寸）
-    catalog_max_item_height: 0.7     # 目录项最大高度（英寸）
-    catalog_available_height: 5.0    # 目录可用高度（英寸）
+    catalog_max_items: 30            # 目录最多显示项数
+    catalog_min_item_height: 0.25    # 目录项最小高度（英寸）
+    catalog_max_item_height: 0.5     # 目录项最大高度（英寸）
+    catalog_available_height: 5.5    # 目录可用高度（英寸）
+    catalog_start_y: 2.0             # 目录起始Y坐标（英寸）
     prefer_layouts:                  # 布局优先级
       - title_and_table
       - title_and_image
@@ -184,12 +185,22 @@ ppt_generation:
     flow_diagram:                    # 流程图布局
       enabled: true
       arrow_style: true
+      max_steps: 6                   # 最多显示步骤数
+      base_step_width: 2.5           # 基础步骤框宽度（英寸）
+      base_arrow_width: 0.8          # 基础箭头宽度（英寸）
+      min_step_width: 1.5            # 最小步骤框宽度（英寸）
+      min_arrow_width: 0.4           # 最小箭头宽度（英寸）
+      step_title_font_size: 20       # 步骤标题字体大小
+      step_desc_font_size: 12        # 步骤描述字体大小
+      step_desc_max_chars: 25        # 步骤描述最大字符数
+      content_area_width: 12.0       # 内容区域宽度（英寸）
     comparison:                      # 对比框布局
       enabled: true
       highlight_differences: true
     timeline:                        # 时间线布局
       enabled: true
       vertical: true
+      max_items: 6                   # 最多显示项目数
   
   # 样式模板配置
   styles:

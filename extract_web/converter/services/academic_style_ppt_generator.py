@@ -181,10 +181,11 @@ class AcademicStylePPTGenerator(BasePPTGenerator):
         subtitle_frame.paragraphs[0].font.color.rgb = self.COLOR_TEXT_LIGHT
         
         # 从配置读取参数
-        max_items = config.get("ppt_generation.generation_preferences.catalog_max_items", 20)
-        min_height = config.get("ppt_generation.generation_preferences.catalog_min_item_height", 0.4)
-        max_height = config.get("ppt_generation.generation_preferences.catalog_max_item_height", 0.7)
-        available_height = config.get("ppt_generation.generation_preferences.catalog_available_height", 4.8)
+        max_items = config.get("ppt_generation.generation_preferences.catalog_max_items")
+        min_height = config.get("ppt_generation.generation_preferences.catalog_min_item_height")
+        max_height = config.get("ppt_generation.generation_preferences.catalog_max_item_height")
+        available_height = config.get("ppt_generation.generation_preferences.catalog_available_height")
+        start_y = config.get("ppt_generation.generation_preferences.catalog_start_y")
         
         # 限制显示数量
         items_to_show = catalog_items[:max_items]
@@ -198,16 +199,13 @@ class AcademicStylePPTGenerator(BasePPTGenerator):
         else:
             item_height = max_height
         
-        # 计算起始位置
-        start_y = 2.0
-        
         # 动态调整字体大小
-        if item_height >= 0.6:
-            font_size = 20
-        elif item_height >= 0.5:
+        if item_height >= 0.4:
             font_size = 18
-        else:
+        elif item_height >= 0.3:
             font_size = 16
+        else:
+            font_size = 14
         
         for i, item in enumerate(items_to_show):
             number = item.get("number", f"{i+1:02d}")
@@ -477,11 +475,42 @@ class AcademicStylePPTGenerator(BasePPTGenerator):
         title_text.vertical_anchor = MSO_ANCHOR.MIDDLE
         title_text.margin_left = Inches(0.5)
         
-        steps_to_show = steps[:4]
+        # 从配置读取参数
+        max_steps = config.get("ppt_generation.layout_types.flow_diagram.max_steps")
+        base_step_width = config.get("ppt_generation.layout_types.flow_diagram.base_step_width")
+        base_arrow_width = config.get("ppt_generation.layout_types.flow_diagram.base_arrow_width")
+        min_step_width = config.get("ppt_generation.layout_types.flow_diagram.min_step_width")
+        min_arrow_width = config.get("ppt_generation.layout_types.flow_diagram.min_arrow_width")
+        content_area_width = config.get("ppt_generation.layout_types.flow_diagram.content_area_width")
+        step_title_font_size = config.get("ppt_generation.layout_types.flow_diagram.step_title_font_size")
+        step_desc_font_size = config.get("ppt_generation.layout_types.flow_diagram.step_desc_font_size")
+        step_desc_max_chars = config.get("ppt_generation.layout_types.flow_diagram.step_desc_max_chars")
+        
+        steps_to_show = steps[:max_steps]
         step_count = len(steps_to_show)
-        step_width = 2.5
-        arrow_width = 0.8
-        total_width = step_count * step_width + (step_count - 1) * arrow_width
+        
+        # 动态计算步骤框和箭头宽度
+        base_total_width = step_count * base_step_width + (step_count - 1) * base_arrow_width
+        
+        if base_total_width > content_area_width:
+            scale_factor = content_area_width / base_total_width
+            step_width = max(min_step_width, base_step_width * scale_factor)
+            arrow_width = max(min_arrow_width, base_arrow_width * scale_factor)
+            total_width = step_count * step_width + (step_count - 1) * arrow_width
+            
+            if scale_factor < 0.6:
+                step_title_font_size = int(step_title_font_size * 0.7)
+                step_desc_font_size = int(step_desc_font_size * 0.7)
+                step_desc_max_chars = int(step_desc_max_chars * 0.6)
+            elif scale_factor < 0.8:
+                step_title_font_size = int(step_title_font_size * 0.85)
+                step_desc_font_size = int(step_desc_font_size * 0.85)
+                step_desc_max_chars = int(step_desc_max_chars * 0.8)
+        else:
+            step_width = base_step_width
+            arrow_width = base_arrow_width
+            total_width = base_total_width
+        
         start_x = (13.33 - total_width) / 2
         
         for i, step in enumerate(steps_to_show):
@@ -495,28 +524,28 @@ class AcademicStylePPTGenerator(BasePPTGenerator):
             step_title_text = step_box.text_frame
             step_title_text.text = step.get("title", f"步骤{i+1}")
             step_title_text.paragraphs[0].alignment = PP_ALIGN.CENTER
-            step_title_text.paragraphs[0].font.size = Pt(18)
+            step_title_text.paragraphs[0].font.size = Pt(step_title_font_size)
             step_title_text.paragraphs[0].font.bold = True
             step_title_text.paragraphs[0].font.color.rgb = self.COLOR_WHITE
             step_title_text.vertical_anchor = MSO_ANCHOR.MIDDLE
+            step_title_text.word_wrap = True
             
             desc_box = slide.shapes.add_textbox(Inches(x_pos), Inches(4.2), Inches(step_width), Inches(2.0))
             desc_text = desc_box.text_frame
             # 智能截断：优先在标点符号处截断
             description = step.get("description", "")
-            if len(description) > 25:
-                # 尝试在句号、逗号处截断
-                for i in range(22, 12, -1):
-                    if i < len(description) and description[i] in '。，、；':
-                        description = description[:i+1]
+            if len(description) > step_desc_max_chars:
+                truncate_pos = int(step_desc_max_chars * 0.9)
+                for j in range(truncate_pos, max(truncate_pos - 10, 0), -1):
+                    if j < len(description) and description[j] in '。，、；':
+                        description = description[:j+1]
                         break
                 else:
-                    # 没找到标点，直接截断
-                    description = description[:22] + "..."
+                    description = description[:truncate_pos] + "..."
             desc_text.text = description
             desc_text.word_wrap = True
             desc_text.paragraphs[0].alignment = PP_ALIGN.CENTER
-            desc_text.paragraphs[0].font.size = Pt(12)
+            desc_text.paragraphs[0].font.size = Pt(step_desc_font_size)
             desc_text.paragraphs[0].font.color.rgb = self.COLOR_TEXT_DARK
             
             if i < step_count - 1:
@@ -549,7 +578,9 @@ class AcademicStylePPTGenerator(BasePPTGenerator):
         line_x = 3.0
         start_y = 2.0
         item_height = 1.2
-        items_to_show = timeline_items[:4]
+        # 从配置读取最大项目数
+        max_items = config.get("ppt_generation.layout_types.timeline.max_items", 6)
+        items_to_show = timeline_items[:max_items]
         
         for i in range(len(items_to_show)):
             y_pos = start_y + i * item_height
