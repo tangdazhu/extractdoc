@@ -32,10 +32,21 @@ class WebContentExtractor:
         Args:
             use_ai: 是否使用AI分析HTML（默认True）
         """
-        self.timeout = 30
+        # 从配置读取HTTP请求参数
+        self.timeout = config.get("web_extraction.timeout", 30)
         self.headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
         }
+        
+        # 从配置读取Playwright参数
+        self.use_browser = config.get("web_extraction.use_browser", True)
+        self.browser_type = config.get("web_extraction.browser_type", "chromium")
+        self.headless = config.get("web_extraction.headless", True)
+        self.page_load_timeout = config.get("web_extraction.page_load_timeout", 30000)
+        self.wait_for_network_idle = config.get("web_extraction.wait_for_network_idle", True)
+        self.browser_required_sites = config.get("web_extraction.browser_required_sites", [
+            "toutiao.com", "zhihu.com", "csdn.net", "juejin.cn", "bilibili.com"
+        ])
         self.use_ai = use_ai
         if use_ai:
             # 从配置加载AI参数
@@ -566,6 +577,132 @@ class WebContentExtractor:
 
         return False
 
+    def _needs_browser_rendering(self, url: str) -> bool:
+        """
+        判断URL是否需要浏览器渲染
+        
+        Args:
+            url: 文章URL
+            
+        Returns:
+            是否需要浏览器渲染
+        """
+        if not self.use_browser:
+            return False
+        
+        for site in self.browser_required_sites:
+            if site in url:
+                return True
+        return False
+    
+    def _get_html_with_playwright(self, url: str) -> str:
+        """
+        使用Playwright获取渲染后的HTML
+        
+        Args:
+            url: 文章URL
+            
+        Returns:
+            渲染后的HTML内容
+        """
+        try:
+            from playwright.sync_api import sync_playwright
+            
+            logger.info(f"使用Playwright浏览器渲染页面: {self.browser_type}")
+            
+            with sync_playwright() as p:
+                # 根据配置选择浏览器类型
+                if self.browser_type == "firefox":
+                    browser = p.firefox.launch(headless=self.headless)
+                elif self.browser_type == "webkit":
+                    browser = p.webkit.launch(headless=self.headless)
+                else:  # chromium (默认)
+                    browser = p.chromium.launch(headless=self.headless)
+                
+                try:
+                    # 创建页面并设置User-Agent
+                    page = browser.new_page(user_agent=self.headers["User-Agent"])
+                    
+                    # 设置超时时间
+                    page.set_default_timeout(self.page_load_timeout)
+                    
+                    # 访问URL
+                    logger.info(f"正在访问: {url}")
+                    page.goto(url, wait_until="domcontentloaded")
+                    
+                    # 等待网络空闲（可选）
+                    if self.wait_for_network_idle:
+                        try:
+                            page.wait_for_load_state("networkidle", timeout=10000)
+                            logger.info("网络已空闲")
+                        except Exception as e:
+                            logger.warning(f"等待网络空闲超时: {e}，继续处理")
+                    
+                    # 针对特定网站的额外等待
+                    if "toutiao.com" in url:
+                        try:
+                            page.wait_for_selector("article", timeout=10000)
+                            logger.info("头条文章内容已加载")
+                        except Exception as e:
+                            logger.warning(f"等待头条文章加载超时: {e}")
+                    elif "zhihu.com" in url:
+                        try:
+                            page.wait_for_selector(".RichText", timeout=10000)
+                            logger.info("知乎文章内容已加载")
+                        except Exception as e:
+                            logger.warning(f"等待知乎文章加载超时: {e}")
+                    
+                    # 获取渲染后的HTML
+                    html = page.content()
+                    logger.info(f"Playwright渲染完成，HTML长度: {len(html)}字符")
+                    
+                    # 对于头条，尝试移除推荐内容（在返回HTML之前）
+                    if "toutiao.com" in url:
+                        try:
+                            # 使用JavaScript移除推荐内容区域
+                            page.evaluate("""
+                                () => {
+                                    // 移除推荐引擎区域
+                                    const recommendSelectors = [
+                                        '[class*="recommend"]',
+                                        '[class*="related"]',
+                                        '[class*="feed-card"]',
+                                        '[id*="recommend"]',
+                                        '.recommend-list',
+                                        '.related-article'
+                                    ];
+                                    recommendSelectors.forEach(selector => {
+                                        document.querySelectorAll(selector).forEach(el => {
+                                            // 只移除article外部的推荐内容
+                                            const article = document.querySelector('article');
+                                            if (article && !article.contains(el)) {
+                                                el.remove();
+                                            }
+                                        });
+                                    });
+                                }
+                            """)
+                            logger.info("已在浏览器中移除头条推荐内容")
+                            html = page.content()  # 重新获取清理后的HTML
+                        except Exception as e:
+                            logger.warning(f"移除头条推荐内容失败: {e}")
+                    
+                    return html
+                finally:
+                    browser.close()
+                    
+        except ImportError:
+            logger.error("Playwright未安装，请运行: pip install playwright && playwright install")
+            raise ValueError(
+                "需要安装Playwright来访问动态网站。\n"
+                "安装步骤：\n"
+                "1. pip install playwright\n"
+                "2. playwright install chromium"
+            )
+        except Exception as e:
+            logger.error(f"Playwright渲染失败: {e}", exc_info=True)
+            raise
+    
     def _extract_with_ai(self, url: str) -> Dict:
         """
         使用AI分析HTML并提取内容
@@ -583,9 +720,13 @@ class WebContentExtractor:
         total_output_tokens = 0
 
         # 获取网页HTML
-        response = requests.get(url, headers=self.headers, timeout=self.timeout)
-        response.encoding = response.apparent_encoding or "utf-8"
-        html = response.text
+        if self._needs_browser_rendering(url):
+            logger.info(f"检测到需要浏览器渲染的网站: {url}")
+            html = self._get_html_with_playwright(url)
+        else:
+            response = requests.get(url, headers=self.headers, timeout=self.timeout)
+            response.encoding = response.apparent_encoding or "utf-8"
+            html = response.text
 
         # 使用BeautifulSoup清理HTML，移除script、style等无用标签
         soup = BeautifulSoup(html, "html.parser")
@@ -605,12 +746,24 @@ class WebContentExtractor:
         ):
             tag.decompose()
 
-        # 对于微信文章，只提取正文部分
+        # 针对不同网站提取正文部分
         content_elem = None
+        
+        # 微信文章：只提取正文
         if "mp.weixin.qq.com" in url:
             content_elem = soup.find("div", class_="rich_media_content")
             if content_elem:
                 logger.info("检测到微信文章，只提取正文内容")
+        
+        # 头条文章：只提取article标签内容，移除推荐新闻
+        elif "toutiao.com" in url:
+            content_elem = soup.find("article")
+            if content_elem:
+                logger.info("检测到头条文章，只提取article标签内容")
+                # 移除推荐内容区域（通常在article外部或底部）
+                for recommend_tag in content_elem.find_all(["div"], class_=lambda x: x and any(keyword in str(x).lower() for keyword in ["recommend", "related", "feed", "list"])):
+                    recommend_tag.decompose()
+                logger.info("已移除头条推荐内容区域")
 
         # 如果找到了正文，只用正文；否则用整个body
         if content_elem:

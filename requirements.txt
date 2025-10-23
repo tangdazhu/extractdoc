@@ -34,6 +34,9 @@ reportlab==4.2.0        # PDF generation, used for TXT→PDF and Excel→PDF con
 PyYAML==6.0.1           # YAML configuration file parsing
 beautifulsoup4==4.12.3  # HTML parsing (used for OCR HTML table output)
 
+# Web Scraping and Browser Automation
+playwright>=1.40.0      # Modern browser automation for dynamic websites (toutiao, zhihu, etc.)
+
 # Testing Dependencies (Development)
 pytest>=7.4.0           # Testing framework
 pytest-django>=4.5.2    # Django integration for pytest

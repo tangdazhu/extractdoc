@@ -84,6 +84,22 @@ ai_document_analysis:
 # 网页提取配置
 web_extraction:
   cache_dir: "cache/web_extraction"  # 缓存目录，用于存储AI提取结果，避免重复调用
+  timeout: 30  # HTTP请求超时时间（秒）
+  
+  # Playwright浏览器渲染配置（用于动态网站）
+  use_browser: true  # 是否启用浏览器渲染
+  browser_type: "chromium"  # 浏览器类型: chromium, firefox, webkit
+  headless: true  # 无头模式（不显示浏览器窗口）
+  page_load_timeout: 30000  # 页面加载超时（毫秒）
+  wait_for_network_idle: true  # 等待网络空闲
+  
+  # 需要浏览器渲染的网站列表
+  browser_required_sites:
+    - "toutiao.com"  # 头条
+    - "zhihu.com"    # 知乎
+    - "csdn.net"     # CSDN
+    - "juejin.cn"    # 掘金
+    - "bilibili.com" # B站
 
 # Word文档生成配置
 word_generation:
@@ -163,10 +179,19 @@ ppt_generation:
     catalog_max_item_height: 0.5     # 目录项最大高度（英寸）
     catalog_available_height: 5.5    # 目录可用高度（英寸）
     catalog_start_y: 2.0             # 目录起始Y坐标（英寸）
+    add_remaining_images: false      # 是否添加剩余图片（未在幻灯片中使用的图片）
     prefer_layouts:                  # 布局优先级
       - title_and_table
       - title_and_image
       - title_and_text
+  
+  # 封面标题配置
+  cover_title:
+    max_font_size: 66                # 最大字体大小（磅）
+    min_font_size: 36                # 最小字体大小（磅）
+    max_chars_per_line: 20           # 每行最大字符数（触发缩小字体）
+    text_box_width: 10.0             # 文本框宽度（英寸）
+    text_box_height: 1.5             # 文本框高度（英寸）
   
   # 布局类型配置
   layout_types:

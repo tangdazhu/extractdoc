@@ -1,8 +1,8 @@
 # PPT系统完整实现文档
 
-> **最后更新**：2025-01-23  
-> **版本**：v4.0  
-> **状态**：✅ 全部完成（包括代码重构）
+> **最后更新**：2025-10-23  
+> **版本**：v4.1  
+> **状态**：✅ 全部完成（包括代码重构 + 生成问题修复）
 
 ---
 
@@ -18,9 +18,10 @@
 8. [布局动态调整修复](#布局动态调整修复v40)
 9. [内容提取优化](#内容提取优化v40)
 10. [代码重构](#代码重构v40)
-11. [技术实现](#技术实现)
-12. [测试验证](#测试验证)
-13. [使用指南](#使用指南)
+11. [PPT生成问题修复](#ppt生成问题修复v41)
+12. [技术实现](#技术实现)
+13. [测试验证](#测试验证)
+14. [使用指南](#使用指南)
 
 ---
 
@@ -61,7 +62,12 @@
 - ✅ 基类方法优化（BasePPTGenerator）
 - ✅ 跳过默认段落机制
 
-#### 7. 技术质量
+#### 7. PPT生成问题修复（v4.1）✅
+- ✅ 封面标题动态字体大小（防止溢出）
+- ✅ 配置控制剩余图片添加（避免无关图片）
+- ✅ 缓存清理机制（解决推荐内容问题）
+
+#### 8. 技术质量
 - ✅ 所有参数配置化
 - ✅ 详细日志跟踪
 - ✅ 代码清晰可维护
@@ -1625,5 +1631,296 @@ content = self._truncate_text_smart(card.get("content", ""), cfg["card_content_m
 
 **文档维护**：
 - ✅ v4.0已合并3个修复文档（布局动态调整、三列卡片和时间线、内容提取优化）
+- ✅ v4.1已合并PPT生成问题修复（封面标题溢出、补充图片过多）
 - ✅ 所有更新都在本文档中进行，不再新增其他文档
 - ✅ 旧文档可以删除或归档
+
+---
+
+## PPT生成问题修复（v4.1）
+
+> **修复日期**: 2025-10-23  
+> **问题编号**: #001-003  
+> **版本**: v4.1
+
+### 问题描述
+
+#### 问题1: 首页标题溢出屏幕 ❌
+**现象**: 标题文字过长时超出幻灯片边界，显示不完整。
+
+**示例**: "仅0.9B！百度新开源模型一夜登顶，识别109种语言，综合分全球第一"
+
+#### 问题2: 生成了40多页PPT，包含无关内容 ❌
+**现象**: 
+- Page 7-9包含头条推荐的其他文章内容
+- 这些内容来自页面底部的推荐链接
+- 包括"河南获嘉县"、"夜幕下的稻田"、"超级大反转了"等无关文章
+
+#### 问题3: Page 12-49都是"补充图片" ❌
+**现象**:
+- AI分析生成9页幻灯片
+- 文章包含47张图片
+- 前8页使用了8张图片
+- 剩余39张图片被全部添加为"补充图片"
+- 这些图片包括：用户头像、推荐文章封面、视频缩略图等无关图片
+
+---
+
+### 根本原因分析
+
+#### 原因1: 封面标题字体大小固定
+- 代码中hardcode了字体大小为`Pt(66)`
+- 没有根据标题长度动态调整
+- 长标题无法自适应显示
+
+#### 原因2: WebContentExtractor提取了推荐内容
+- 头条页面底部包含大量推荐文章
+- Playwright渲染后，BeautifulSoup提取了这些内容
+- 需要在提取阶段过滤推荐内容（已在之前修复）
+
+#### 原因3: 无条件添加所有剩余图片
+- 代码逻辑：`if image_index < len(images)` 就添加所有剩余图片
+- 没有判断图片是否与内容相关
+- 没有配置开关控制是否添加剩余图片
+
+---
+
+### 修复方案
+
+#### 修复1: 动态调整封面标题字体大小 ✅
+
+**配置文件**: `config/application.yaml`
+
+```yaml
+# 封面标题配置
+cover_title:
+  max_font_size: 66                # 最大字体大小（磅）
+  min_font_size: 36                # 最小字体大小（磅）
+  max_chars_per_line: 20           # 每行最大字符数（触发缩小字体）
+  text_box_width: 10.0             # 文本框宽度（英寸）
+  text_box_height: 1.5             # 文本框高度（英寸）
+```
+
+**代码修改**: `extract_web/converter/services/business_style_ppt_generator.py`
+
+```python
+# 从配置读取封面标题参数
+cover_config = config.get("ppt_generation.cover_title", {})
+max_font_size = cover_config.get("max_font_size", 66)
+min_font_size = cover_config.get("min_font_size", 36)
+max_chars_per_line = cover_config.get("max_chars_per_line", 20)
+
+# 根据标题长度动态调整字体大小
+title_length = len(title)
+if title_length > max_chars_per_line * 2:
+    font_size = min_font_size  # 超长标题
+elif title_length > max_chars_per_line:
+    font_size = (max_font_size + min_font_size) // 2  # 中等长度
+else:
+    font_size = max_font_size  # 短标题
+
+title_frame.paragraphs[0].font.size = Pt(font_size)
+title_frame.word_wrap = True  # 启用自动换行
+```
+
+**效果**:
+- 短标题（≤20字符）：使用66pt字体
+- 中等标题（21-40字符）：使用51pt字体
+- 长标题（>40字符）：使用36pt字体
+- 启用自动换行，防止溢出
+
+---
+
+#### 修复2: 过滤推荐内容 ✅
+
+**说明**: 此问题已在之前的Playwright优化中修复。
+
+**方法**:
+1. 浏览器端JavaScript移除推荐区域
+2. 服务端BeautifulSoup二次清理
+3. 只提取`<article>`标签内容
+
+**注意**: 如果仍然提取到推荐内容，需要清理缓存：
+```bash
+Remove-Item -Path "extract_web\cache\web_extraction\*.json" -Force
+```
+
+---
+
+#### 修复3: 配置控制是否添加剩余图片 ✅
+
+**配置文件**: `config/application.yaml`
+
+```yaml
+generation_preferences:
+  add_remaining_images: false      # 是否添加剩余图片（未在幻灯片中使用的图片）
+```
+
+**代码修改**: `extract_web/converter/services/url_to_ppt_converter.py`
+
+```python
+# 根据配置决定是否添加剩余图片
+add_remaining = config.get("ppt_generation.generation_preferences.add_remaining_images", False)
+if add_remaining and image_index < len(images):
+    remaining_images = images[image_index:]
+    logger.info(f"添加{len(remaining_images)}张剩余图片（配置启用）")
+    for img_url in remaining_images:
+        image_path = self._download_image(img_url)
+        if image_path:
+            generator.create_picture_slide(
+                title="补充图片",
+                image_path=str(image_path)
+            )
+elif image_index < len(images):
+    remaining_count = len(images) - image_index
+    logger.info(f"跳过{remaining_count}张剩余图片（配置禁用add_remaining_images）")
+```
+
+**效果**:
+- 默认不添加剩余图片（`add_remaining_images: false`）
+- 只使用AI分析结果中标记的图片
+- 避免添加无关图片（用户头像、推荐文章封面等）
+
+---
+
+### 修复效果
+
+#### 修复前 ❌
+- 标题溢出屏幕
+- 生成50+页PPT
+- 包含大量无关内容和图片
+
+#### 修复后 ✅
+- 标题自适应显示，不溢出
+- 生成11页PPT（封面+目录+9页内容）
+- 只包含文章相关内容
+- 只使用与内容匹配的图片
+
+---
+
+### 配置参数说明
+
+#### 封面标题配置
+
+| 参数 | 类型 | 默认值 | 说明 |
+|------|------|--------|------|
+| `max_font_size` | int | 66 | 最大字体大小（磅） |
+| `min_font_size` | int | 36 | 最小字体大小（磅） |
+| `max_chars_per_line` | int | 20 | 每行最大字符数 |
+| `text_box_width` | float | 10.0 | 文本框宽度（英寸） |
+| `text_box_height` | float | 1.5 | 文本框高度（英寸） |
+
+#### 生成偏好配置
+
+| 参数 | 类型 | 默认值 | 说明 |
+|------|------|--------|------|
+| `add_remaining_images` | bool | false | 是否添加剩余图片 |
+
+---
+
+### 测试步骤
+
+#### 1. 清理缓存
+```bash
+# 删除旧缓存（重要！）
+Remove-Item -Path "extract_web\cache\web_extraction\*.json" -Force
+```
+
+#### 2. 重启服务
+```bash
+python manage.py runserver
+```
+
+#### 3. 测试URL
+使用相同的头条文章URL进行测试：
+```
+https://www.toutiao.com/article/7563183883391386164/
+```
+
+#### 4. 验证结果
+- ✅ 封面标题完整显示，不溢出
+- ✅ PPT页数正常（约11页）
+- ✅ 不包含推荐文章内容
+- ✅ 不包含"补充图片"页面
+
+---
+
+### 日志验证
+
+**修复前日志**:
+```
+INFO 2025-10-23 14:41:08,629 url_to_ppt_converter 添加39张剩余图片
+DEBUG 2025-10-23 14:41:08,779 business_style_ppt_generator 创建图片页: 补充图片
+...（重复39次）
+```
+
+**修复后日志**:
+```
+INFO 2025-10-23 15:01:55,643 url_to_ppt_converter 跳过39张剩余图片（配置禁用add_remaining_images）
+DEBUG 2025-10-23 15:01:54,718 business_style_ppt_generator 封面标题长度=34，使用字体大小=51pt
+```
+
+---
+
+### 后续优化建议
+
+#### 1. 图片过滤优化
+**问题**: 当前只是不添加剩余图片，但WebContentExtractor仍然提取了所有图片。
+
+**建议**: 在提取阶段就过滤无关图片：
+- 过滤用户头像（`user-avatar`）
+- 过滤推荐文章封面
+- 过滤视频缩略图
+- 只保留文章正文中的图片
+
+#### 2. 缓存失效机制
+**问题**: 当代码逻辑更新后，旧缓存仍然有效。
+
+**建议**: 在缓存文件中添加版本号：
+```python
+cache_data = {
+    "version": "2.0",  # 代码版本
+    "timestamp": "2025-10-23 15:00:00",
+    "content": {...}
+}
+```
+
+#### 3. 封面标题优化
+**问题**: 当前只根据字符数调整字体大小，没有考虑实际渲染宽度。
+
+**建议**:
+- 使用`python-pptx`的文本测量功能
+- 根据实际渲染宽度动态调整
+- 支持多行显示
+
+---
+
+### 修改文件清单
+
+#### 配置文件
+1. ✅ `config/application.yaml`
+   - 添加`cover_title`配置
+   - 添加`add_remaining_images`配置
+
+#### Python文件
+2. ✅ `business_style_ppt_generator.py`
+   - 动态调整封面标题字体大小
+   - 从配置读取所有参数
+
+3. ✅ `url_to_ppt_converter.py`
+   - 配置控制是否添加剩余图片
+   - 添加日志记录
+
+---
+
+### 相关Issue
+
+- Issue #001: 封面标题溢出 → ✅ 已修复
+- Issue #002: 生成无关内容 → ✅ 已修复（需清理缓存）
+- Issue #003: 补充图片过多 → ✅ 已修复
+
+---
+
+**修复完成时间**: 2025-10-23 15:00  
+**测试状态**: ✅ 已验证  
+**文档更新**: ✅ 已合并到v4.1

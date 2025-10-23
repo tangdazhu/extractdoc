@@ -240,10 +240,11 @@ class URLToPPTConverter:
                     # 使用默认布局
                     generator.create_content_slide(title, points)
 
-        # 3. 如果还有剩余图片，添加到末尾
-        if image_index < len(images):
+        # 3. 根据配置决定是否添加剩余图片
+        add_remaining = config.get("ppt_generation.generation_preferences.add_remaining_images", False)
+        if add_remaining and image_index < len(images):
             remaining_images = images[image_index:]
-            logger.info(f"添加{len(remaining_images)}张剩余图片")
+            logger.info(f"添加{len(remaining_images)}张剩余图片（配置启用）")
             for img_url in remaining_images:
                 image_path = self._download_image(img_url)
                 if image_path:
@@ -251,6 +252,9 @@ class URLToPPTConverter:
                         title="补充图片",
                         image_path=str(image_path)
                     )
+        elif image_index < len(images):
+            remaining_count = len(images) - image_index
+            logger.info(f"跳过{remaining_count}张剩余图片（配置禁用add_remaining_images）")
 
         # 保存PPT
         generator.save(output_path)
@@ -318,17 +322,30 @@ class URLToPPTConverter:
             import tempfile
             from io import BytesIO
             from PIL import Image as PILImage
+            from urllib.parse import urlparse, parse_qs
+            import mimetypes
+            
+            # 智能设置Referer（根据图片URL来源）
+            referer = self._get_referer_for_image(img_url)
+            
+            # 添加请求头（避免403/防盗链）
+            headers = {
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                "Referer": referer
+            }
             
             # 下载图片
-            response = requests.get(img_url, timeout=10)
+            response = requests.get(img_url, headers=headers, timeout=10)
             response.raise_for_status()
             
             # 验证图片
             img_data = BytesIO(response.content)
             pil_img = PILImage.open(img_data)
             
+            # 智能提取文件扩展名
+            suffix = self._extract_image_extension(img_url, pil_img.format)
+            
             # 保存到临时文件
-            suffix = Path(img_url).suffix or '.jpg'
             temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
             pil_img.save(temp_file.name)
             temp_file.close()
@@ -339,3 +356,91 @@ class URLToPPTConverter:
         except Exception as e:
             logger.warning(f"下载图片失败: {img_url}, 错误: {e}")
             return None
+    
+    def _extract_image_extension(self, img_url: str, pil_format: str = None) -> str:
+        """
+        智能提取图片扩展名
+        
+        Args:
+            img_url: 图片URL
+            pil_format: PIL检测到的图片格式（如'JPEG', 'PNG'）
+            
+        Returns:
+            文件扩展名（如'.jpg', '.png'）
+        """
+        from urllib.parse import urlparse
+        import re
+        
+        # 方法1: 优先使用PIL检测到的格式
+        if pil_format:
+            format_map = {
+                'JPEG': '.jpg',
+                'PNG': '.png',
+                'GIF': '.gif',
+                'WEBP': '.webp',
+                'BMP': '.bmp',
+                'TIFF': '.tiff'
+            }
+            ext = format_map.get(pil_format.upper())
+            if ext:
+                return ext
+        
+        # 方法2: 从URL路径提取（去除查询参数）
+        parsed = urlparse(img_url)
+        path = parsed.path
+        
+        # 匹配常见图片扩展名（忽略大小写）
+        match = re.search(r'\.(jpg|jpeg|png|gif|webp|bmp|tiff|svg)(?:[?#]|$)', path, re.IGNORECASE)
+        if match:
+            return '.' + match.group(1).lower()
+        
+        # 方法3: 检查文件名中是否包含扩展名（不在末尾的情况）
+        match = re.search(r'\.(jpg|jpeg|png|gif|webp|bmp|tiff)', path, re.IGNORECASE)
+        if match:
+            return '.' + match.group(1).lower()
+        
+        # 默认返回.jpg
+        return '.jpg'
+    
+    def _get_referer_for_image(self, img_url: str) -> str:
+        """
+        根据图片URL智能设置Referer
+        
+        Args:
+            img_url: 图片URL
+            
+        Returns:
+            适合的Referer地址
+        """
+        # 微信图片：使用微信Referer
+        if "mmbiz.qpic.cn" in img_url or "mmbiz.qlogo.cn" in img_url:
+            return "https://mp.weixin.qq.com/"
+        
+        # 头条图片：使用头条Referer
+        if "toutiaoimg.com" in img_url or "toutiaostatic.com" in img_url:
+            return "https://www.toutiao.com/"
+        
+        # 知乎图片
+        if "zhimg.com" in img_url:
+            return "https://www.zhihu.com/"
+        
+        # CSDN图片
+        if "csdnimg.cn" in img_url:
+            return "https://blog.csdn.net/"
+        
+        # 掘金图片
+        if "juejin.cn" in img_url or "juejin.im" in img_url:
+            return "https://juejin.cn/"
+        
+        # B站图片
+        if "bilibili.com" in img_url or "hdslb.com" in img_url:
+            return "https://www.bilibili.com/"
+        
+        # 默认：使用图片所在域名
+        from urllib.parse import urlparse
+        parsed = urlparse(img_url)
+        if parsed.scheme and parsed.netloc:
+            return f"{parsed.scheme}://{parsed.netloc}/"
+        
+        # 兼容性默认值
+        return "https://www.toutiao.com/"

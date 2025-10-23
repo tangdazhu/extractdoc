@@ -79,17 +79,41 @@ class BusinessStylePPTGenerator(BasePPTGenerator):
         self._add_gradient_background(slide)
         self._add_decorative_dots(slide)
         
+        # 从配置读取封面标题参数
+        cover_config = config.get("ppt_generation.cover_title", {})
+        max_font_size = cover_config.get("max_font_size", 66)
+        min_font_size = cover_config.get("min_font_size", 36)
+        max_chars_per_line = cover_config.get("max_chars_per_line", 20)
+        text_box_width = cover_config.get("text_box_width", 10.0)
+        text_box_height = cover_config.get("text_box_height", 1.5)
+        
         # 主标题
         title_box = slide.shapes.add_textbox(
             Inches(1.5), Inches(2.5),
-            Inches(10), Inches(1.5)
+            Inches(text_box_width), Inches(text_box_height)
         )
         title_frame = title_box.text_frame
         title_frame.text = title
+        title_frame.word_wrap = True  # 启用自动换行
         title_frame.paragraphs[0].alignment = PP_ALIGN.CENTER
-        title_frame.paragraphs[0].font.size = Pt(66)
+        
+        # 根据标题长度动态调整字体大小
+        title_length = len(title)
+        if title_length > max_chars_per_line * 2:
+            # 超长标题：使用最小字体
+            font_size = min_font_size
+        elif title_length > max_chars_per_line:
+            # 中等长度：使用中等字体
+            font_size = (max_font_size + min_font_size) // 2
+        else:
+            # 短标题：使用最大字体
+            font_size = max_font_size
+        
+        title_frame.paragraphs[0].font.size = Pt(font_size)
         title_frame.paragraphs[0].font.bold = True
         title_frame.paragraphs[0].font.color.rgb = self.COLOR_WHITE
+        
+        logger.debug(f"封面标题长度={title_length}，使用字体大小={font_size}pt")
         
         # 副标题
         if subtitle:
