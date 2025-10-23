@@ -7,23 +7,22 @@
 
 ## 📢 最新更新
 
-- ✅ 配置管理统一完成，所有参数集中在 `config/application.yaml`，统一通过 `utils/config_manager.py` 访问。
-- ✅ 《PPT系统完整实现文档》升级至 **v4.1**，修复封面标题溢出与补充图片过多问题。
-- ✅ 文档索引合并至本文件，提供完整的学习与参考路径。
+- ✅ 配置管理统一完成，所有参数集中在 `config/application.yaml`，统一通过 `utils.config_manager.py` 访问。
+- ✅ 《PPT系统完整实现文档》升级至 **v4.2**，整合 AI 驱动完整流程与历史修复记录。
+- ✅ `文档抽取系统设计与实现文档` 升级至 **v2.2**，合并多来源内容总结与提示词模板设计章节。
+- ✅ 《实时语音处理指南》更新至 **v3.0**，涵盖 DashScope 实时识别与 Paraformer-v2 接入规划。
 
 ---
 
 ## 📚 核心文档
 
-### 🎯 系统设计与实现（v2.0）
-- [系统设计与实现文档-Part1](./系统设计与实现文档-Part1.md)：系统概述、技术架构、网页内容提取、Playwright渲染
-- [系统设计与实现文档-Part2](./系统设计与实现文档-Part2.md)：图片下载与处理、PPT生成、开发规范、部署运维
+### 🎯 系统设计与实现（v2.2）
+- [文档抽取系统设计与实现文档](./文档抽取系统设计与实现文档.md)：系统架构、网页提取、Playwright、图片处理、PPT生成、开发规范、部署运维
 
-> **涵盖内容**：系统架构、Playwright渲染、智能图片下载、配置管理规范、部署指南、更新日志
 
 ### 📘 配置管理
-- [CONFIG_UNIFICATION_COMPLETE](./CONFIG_UNIFICATION_COMPLETE.md)：配置统一方案与规范
-- [CONFIG_COMPLETE_GUIDE](./CONFIG_COMPLETE_GUIDE.md)：配置结构、管理器使用方法、测试与常见问题
+- [CONFIG_UNIFICATION_COMPLETE](./CONFIG_UNIFICATION_COMPLETE.md)：配置统一方案、管理器使用方式与测试记录
+- `文档抽取系统设计与实现文档` 第 3 章 & 第 6 章：配置访问规范、图片/网页提取相关参数
 
 ---
 
@@ -34,16 +33,19 @@
 - [文档提取与生成系统 - 设计文档：AI提取章节](./文档抽取系统设计与实现文档.md#43-ai驱动的html内容提取)：AI驱动内容提取、通义千问集成、章节结构识别
 
 ### 🎨 文档生成
-- [PPT系统完整实现文档](./PPT系统完整实现文档.md)：双风格模板、布局检测、图片处理、v4.1修复
-- [WORD_GENERATION_COMPLETE_GUIDE](./WORD_GENERATION_COMPLETE_GUIDE.md)：Word生成流程、模板、格式控制
-- [URL_TO_PPT_FEATURE](./URL_TO_PPT_FEATURE.md)：URL转PPT流程与示例
+- [PPT系统完整实现文档](./PPT系统完整实现文档.md)：双风格模板、布局检测、AI驱动完整流程、v4.2 修复
+- [WORD_GENERATION_COMPLETE_GUIDE](./WORD_GENERATION_COMPLETE_GUIDE.md)：Word 生成流程、模板与格式控制
 
 ### 📄 文档处理
-- [PDF_EXTRACTION_WORKFLOW](./PDF_EXTRACTION_WORKFLOW.md)：PDF文本提取、OCR处理、多模态数据
+- [PDF_EXTRACTION_WORKFLOW](./PDF_EXTRACTION_WORKFLOW.md)：PDF 文本提取、OCR 处理、多模态数据
+- `文档抽取系统设计与实现文档` 第 6 章：图片下载与 Referer 防盗链策略
 
 ### 🛠️ 修复与优化记录
-- `WORD_AI_TEXT_REWRITE_FIX.md`：AI文本改写问题修复说明
-- 其他修复文档均已合并至对应主文档（例如PPT系统文档v4.1）
+- 主要修复记录均已合并至 `PPT系统完整实现文档`（v4.2）与 `文档抽取系统设计与实现文档`（v2.2）
+
+### 🎤 语音与界面体验
+- [REALTIME_SPEECH_README](./REALTIME_SPEECH_README.md)：实时语音识别、Paraformer-v2 异步识别规划、声音克隆计划
+- [GUI-Requirements](./GUI-Requirements.md)：OmniAI Transform Studio 前端布局与交互规范
 
 ---
 
@@ -105,14 +107,15 @@ word_section = config.get_section("word_generation")
 
 | 功能 | 参考文档 | 状态 | 说明 |
 |------|----------|------|------|
-| 微信文章提取 | `系统设计文档` | ✅ | HTTP请求 + 正文提取 |
+| 微信文章提取 | `文档抽取系统设计与实现文档` | ✅ | HTTP请求 + 正文提取 |
 | 头条文章提取 | `Playwright使用指南` | ✅ | Playwright渲染 + 推荐过滤 |
 | 知乎文章提取 | `Playwright使用指南` | ✅ | Playwright渲染 |
-| 图片智能下载 | `系统设计文档-Part2` | ✅ | Referer策略 + 扩展名识别 |
+| 图片智能下载 | `文档抽取系统设计与实现文档` 第 6 章 | ✅ | Referer 策略 + 扩展名识别 |
 | PPT生成 | `PPT系统完整实现文档` | ✅ | 双风格模板 + 布局检测 |
 | Word生成 | `WORD_GENERATION_COMPLETE_GUIDE` | ✅ | 双风格模板 |
-| AI内容分析 | `AI_HTML_EXTRACTION` | ✅ | 通义千问章节解析 |
-| 布局检测 | `PPT系统完整实现文档` | ✅ | 5种布局类型 |
+| AI内容分析 | `文档抽取系统设计与实现文档` 第 4.3 节 | ✅ | 通义千问章节解析 |
+| 布局检测 | `PPT系统完整实现文档` | ✅ | 5 种布局类型 |
+| 实时语音识别 | `REALTIME_SPEECH_README` | ✅ | WebSocket + Paraformer-v2 规划 |
 
 ---
 
