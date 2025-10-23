@@ -182,6 +182,12 @@ ppt_generation:
     three_column:                    # 三列卡片布局
       enabled: true
       card_style: true
+      max_cards: 10                   # 最多显示卡片数
+      card_width: 3.5                # 卡片宽度（英寸）
+      card_gap: 0.5                  # 卡片间隙（英寸）
+      card_title_font_size: 20       # 卡片标题字体大小
+      card_content_font_size: 12     # 卡片内容字体大小
+      card_content_max_chars: 80     # 卡片内容最大字符数
     flow_diagram:                    # 流程图布局
       enabled: true
       arrow_style: true
@@ -201,6 +207,13 @@ ppt_generation:
       enabled: true
       vertical: true
       max_items: 6                   # 最多显示项目数
+      base_item_height: 1.2          # 基础项目高度（英寸）
+      min_item_height: 0.8           # 最小项目高度（英寸）
+      available_height: 5.5          # 可用高度（英寸）
+      start_y: 2.0                   # 起始Y坐标（英寸）
+      title_font_size: 18            # 标题字体大小
+      content_font_size: 14          # 内容字体大小
+      content_max_chars: 60          # 内容最大字符数
   
   # 样式模板配置
   styles:

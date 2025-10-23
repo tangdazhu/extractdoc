@@ -128,6 +128,66 @@ class BasePPTGenerator:
         text_frame.margin_bottom = Inches(0.2)
         logger.debug(f"[缩进修复] 文本框边距设置: left=0, right=0.2, top=0.2")
     
+    def _get_three_column_config(self) -> Dict:
+        """获取三列卡片配置"""
+        return {
+            "max_cards": config.get("ppt_generation.layout_types.three_column.max_cards"),
+            "card_width": config.get("ppt_generation.layout_types.three_column.card_width"),
+            "card_gap": config.get("ppt_generation.layout_types.three_column.card_gap"),
+            "card_title_font_size": config.get("ppt_generation.layout_types.three_column.card_title_font_size"),
+            "card_content_font_size": config.get("ppt_generation.layout_types.three_column.card_content_font_size"),
+            "card_content_max_chars": config.get("ppt_generation.layout_types.three_column.card_content_max_chars")
+        }
+    
+    def _get_timeline_config(self) -> Dict:
+        """获取时间线配置"""
+        return {
+            "max_items": config.get("ppt_generation.layout_types.timeline.max_items"),
+            "base_item_height": config.get("ppt_generation.layout_types.timeline.base_item_height"),
+            "min_item_height": config.get("ppt_generation.layout_types.timeline.min_item_height"),
+            "available_height": config.get("ppt_generation.layout_types.timeline.available_height"),
+            "start_y": config.get("ppt_generation.layout_types.timeline.start_y"),
+            "title_font_size": config.get("ppt_generation.layout_types.timeline.title_font_size"),
+            "content_font_size": config.get("ppt_generation.layout_types.timeline.content_font_size"),
+            "content_max_chars": config.get("ppt_generation.layout_types.timeline.content_max_chars")
+        }
+    
+    def _truncate_text_smart(self, text: str, max_chars: int) -> str:
+        """智能截断文本：优先在标点符号处截断"""
+        if len(text) <= max_chars:
+            return text
+        
+        truncate_pos = int(max_chars * 0.9)
+        for j in range(truncate_pos, max(truncate_pos - 10, 0), -1):
+            if j < len(text) and text[j] in '。，、；':
+                return text[:j+1]
+        
+        return text[:truncate_pos] + "..."
+    
+    def _calculate_timeline_layout(self, item_count: int, cfg: Dict) -> Tuple[float, int, int, int]:
+        """计算时间线动态布局参数
+        
+        Returns:
+            (item_height, title_font_size, content_font_size, content_max_chars)
+        """
+        if item_count > 0:
+            calculated_height = cfg["available_height"] / item_count
+            item_height = max(cfg["min_item_height"], min(calculated_height, cfg["base_item_height"]))
+        else:
+            item_height = cfg["base_item_height"]
+        
+        title_font_size = cfg["title_font_size"]
+        content_font_size = cfg["content_font_size"]
+        content_max_chars = cfg["content_max_chars"]
+        
+        # 根据高度调整字体大小
+        if item_height < 1.0:
+            title_font_size = int(title_font_size * 0.85)
+            content_font_size = int(content_font_size * 0.85)
+            content_max_chars = int(content_max_chars * 0.8)
+        
+        return item_height, title_font_size, content_font_size, content_max_chars
+    
     def save(self, output_path: str):
         """保存PPT"""
         self.prs.save(output_path)

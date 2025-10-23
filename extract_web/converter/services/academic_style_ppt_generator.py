@@ -402,10 +402,17 @@ class AcademicStylePPTGenerator(BasePPTGenerator):
         title_text.vertical_anchor = MSO_ANCHOR.MIDDLE
         title_text.margin_left = Inches(0.5)
         
-        card_width = 3.5
-        card_gap = 0.5
+        # 从基类获取配置
+        cfg = self._get_three_column_config()
+        max_cards = cfg["max_cards"]
+        card_width = cfg["card_width"]
+        card_gap = cfg["card_gap"]
+        card_title_font_size = cfg["card_title_font_size"]
+        card_content_font_size = cfg["card_content_font_size"]
+        card_content_max_chars = cfg["card_content_max_chars"]
+        
         start_x = 1.0
-        cards_to_show = cards[:3]
+        cards_to_show = cards[:max_cards]
         
         for i, card in enumerate(cards_to_show):
             x_pos = start_x + i * (card_width + card_gap)
@@ -432,27 +439,20 @@ class AcademicStylePPTGenerator(BasePPTGenerator):
             card_title_box = slide.shapes.add_textbox(Inches(x_pos + 0.3), Inches(4.2), Inches(card_width - 0.6), Inches(0.5))
             card_title_box.text_frame.text = card.get("title", "")
             card_title_box.text_frame.paragraphs[0].alignment = PP_ALIGN.CENTER
-            card_title_box.text_frame.paragraphs[0].font.size = Pt(18)
+            card_title_box.text_frame.paragraphs[0].font.size = Pt(card_title_font_size)
             card_title_box.text_frame.paragraphs[0].font.bold = True
             card_title_box.text_frame.paragraphs[0].font.color.rgb = self.COLOR_PRIMARY_DARK
+            card_title_box.text_frame.word_wrap = True
             
             card_content_box = slide.shapes.add_textbox(Inches(x_pos + 0.2), Inches(4.8), Inches(card_width - 0.4), Inches(1.8))
-            # 智能截断：优先在标点符号处截断
-            content = card.get("content", "")
-            if len(content) > 30:
-                # 尝试在句号、逗号处截断
-                for i in range(27, 15, -1):
-                    if i < len(content) and content[i] in '。，、；':
-                        content = content[:i+1]
-                        break
-                else:
-                    # 没找到标点，直接截断
-                    content = content[:27] + "..."
+            # 使用基类的智能截断方法
+            content = self._truncate_text_smart(card.get("content", ""), card_content_max_chars)
             card_content_box.text_frame.text = content
             card_content_box.text_frame.word_wrap = True
-            card_content_box.text_frame.paragraphs[0].alignment = PP_ALIGN.CENTER
-            card_content_box.text_frame.paragraphs[0].font.size = Pt(12)
+            card_content_box.text_frame.paragraphs[0].alignment = PP_ALIGN.LEFT
+            card_content_box.text_frame.paragraphs[0].font.size = Pt(card_content_font_size)
             card_content_box.text_frame.paragraphs[0].font.color.rgb = self.COLOR_TEXT_DARK
+            card_content_box.text_frame.paragraphs[0].line_spacing = 1.2
         
         logger.debug(f"创建三列卡片页: {title}, {len(cards_to_show)}张卡片")
     
@@ -575,12 +575,15 @@ class AcademicStylePPTGenerator(BasePPTGenerator):
         title_text.vertical_anchor = MSO_ANCHOR.MIDDLE
         title_text.margin_left = Inches(0.5)
         
+        # 从基类获取配置并计算布局
+        cfg = self._get_timeline_config()
+        items_to_show = timeline_items[:cfg["max_items"]]
+        item_count = len(items_to_show)
+        
+        item_height, title_font_size, content_font_size, content_max_chars = self._calculate_timeline_layout(item_count, cfg)
+        start_y = cfg["start_y"]
+        
         line_x = 3.0
-        start_y = 2.0
-        item_height = 1.2
-        # 从配置读取最大项目数
-        max_items = config.get("ppt_generation.layout_types.timeline.max_items", 6)
-        items_to_show = timeline_items[:max_items]
         
         for i in range(len(items_to_show)):
             y_pos = start_y + i * item_height
@@ -597,7 +600,8 @@ class AcademicStylePPTGenerator(BasePPTGenerator):
                 connector.line.fill.background()
             
             item = items_to_show[i]
-            content_box = slide.shapes.add_shape(MSO_SHAPE.ROUNDED_RECTANGLE, Inches(line_x + 0.5), Inches(y_pos - 0.1), Inches(9), Inches(1.0))
+            box_height = item_height * 0.8
+            content_box = slide.shapes.add_shape(MSO_SHAPE.ROUNDED_RECTANGLE, Inches(line_x + 0.5), Inches(y_pos - 0.1), Inches(9), Inches(box_height))
             content_box.fill.solid()
             content_box.fill.fore_color.rgb = self.COLOR_WHITE
             content_box.line.color.rgb = self.COLOR_ACCENT
@@ -607,18 +611,16 @@ class AcademicStylePPTGenerator(BasePPTGenerator):
             content_text.margin_left = Inches(0.3)
             content_text.margin_top = Inches(0.1)
             content_text.text = item.get("title", "")
-            content_text.paragraphs[0].font.size = Pt(16)
+            content_text.paragraphs[0].font.size = Pt(title_font_size)
             content_text.paragraphs[0].font.bold = True
             content_text.paragraphs[0].font.color.rgb = self.COLOR_PRIMARY_DARK
             
             if item.get("content"):
                 content_text.add_paragraph()
-                # 限制文本长度，避免溢出
-                content = item.get("content", "")
-                if len(content) > 60:
-                    content = content[:57] + "..."
+                # 使用基类的智能截断方法
+                content = self._truncate_text_smart(item.get("content", ""), content_max_chars)
                 content_text.paragraphs[1].text = content
-                content_text.paragraphs[1].font.size = Pt(14)
+                content_text.paragraphs[1].font.size = Pt(content_font_size)
                 content_text.paragraphs[1].font.color.rgb = self.COLOR_TEXT_DARK
             
             # 启用自动换行

@@ -184,8 +184,19 @@ class ContentParser:
         if current_item:
             items.append(current_item)
         
+        # 如果没有解析到项目，尝试将所有行作为独立项目
+        if not items:
+            logger.warning(f"时间线解析失败，尝试将每行作为独立项目")
+            for line in lines:
+                clean_line = line.strip("- ").strip()
+                if clean_line:
+                    items.append({
+                        "title": clean_line,
+                        "content": ""
+                    })
+        
         # 从配置读取最大项目数
-        max_items = config.get("ppt_generation.layout_types.timeline.max_items", 6)
+        max_items = config.get("ppt_generation.layout_types.timeline.max_items")
         if len(items) > max_items:
             logger.warning(f"时间线项目数({len(items)})超过最大限制({max_items})，将截断")
             items = items[:max_items]
