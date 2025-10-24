@@ -169,6 +169,57 @@
         color: #6c757d;
     }
 
+    /* 多URL输入样式 */
+    .doc-gen-url-group {
+        display: flex;
+        gap: 8px;
+        margin-bottom: 8px;
+        align-items: center;
+    }
+
+    .doc-gen-url-input {
+        flex: 1;
+        min-width: 0;
+    }
+
+    .doc-gen-url-add-btn,
+    .doc-gen-url-remove-btn {
+        width: 36px;
+        height: 36px;
+        border-radius: 50%;
+        border: none;
+        font-size: 18px;
+        font-weight: bold;
+        cursor: pointer;
+        transition: all 0.2s;
+        flex-shrink: 0;
+    }
+
+    .doc-gen-url-add-btn {
+        background-color: #28a745;
+        color: white;
+    }
+
+    .doc-gen-url-add-btn:hover:not(:disabled) {
+        background-color: #218838;
+        transform: scale(1.05);
+    }
+
+    .doc-gen-url-add-btn:disabled {
+        background-color: #6c757d;
+        cursor: not-allowed;
+    }
+
+    .doc-gen-url-remove-btn {
+        background-color: #dc3545;
+        color: white;
+    }
+
+    .doc-gen-url-remove-btn:hover {
+        background-color: #c82333;
+        transform: scale(1.05);
+    }
+
     .doc-gen-template {
         margin-top: 8px;
     }
@@ -1276,7 +1327,12 @@
                             <input type="checkbox" id="docGenUseUrl">
                             网络文章URL
                         </label>
-                        <input type="url" id="docGenUrlInput" class="doc-gen-input" placeholder="例如：https://your-bucket.oss-cn-beijing.aliyuncs.com/article.html" disabled>
+                        <div id="docGenUrlContainer" style="flex: 1;">
+                            <div class="doc-gen-url-group" style="display: flex; gap: 8px; margin-bottom: 8px;">
+                                <input type="url" class="doc-gen-url-input doc-gen-input" placeholder="例如：https://mp.weixin.qq.com/s/xxxxx" disabled style="flex: 1;">
+                                <button type="button" class="doc-gen-url-add-btn" disabled title="添加更多URL">+</button>
+                            </div>
+                        </div>
                         <label class="doc-gen-checkbox-label" style="margin-left: 20px;">
                             <input type="checkbox" id="docGenUseCache" checked>
                             从缓存加载（节省Token）

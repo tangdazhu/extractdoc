@@ -1063,8 +1063,16 @@ def generate_ppt_document(
         output_filename = f"url_ppt_{request_id}.pptx"
         output_path = str(converted_dir / output_filename)
         
-        # 执行转换
-        result = converter.convert(source_url, output_path, use_cache=use_cache)
+        # 检查是否为多URL（source_url可能是列表）
+        if isinstance(source_url, list) and len(source_url) > 1:
+            logger.info(f"检测到多URL输入: {len(source_url)}个URL")
+            result = converter.convert_multiple_urls(source_url, output_path, use_cache=use_cache)
+        elif isinstance(source_url, list):
+            # 单个URL的列表形式
+            result = converter.convert(source_url[0], output_path, use_cache=use_cache)
+        else:
+            # 单个URL字符串
+            result = converter.convert(source_url, output_path, use_cache=use_cache)
         
         if not result['success']:
             raise ValueError(f"URL转换失败: {result['message']}")

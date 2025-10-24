@@ -191,10 +191,21 @@ def document_generation_view(request):
     start_time = time.perf_counter()
 
     mode = request.POST.get("mode", "ppt").lower()
-    source_url = (request.POST.get("source_url") or "").strip()
+    source_url_raw = (request.POST.get("source_url") or "").strip()
     template_key = request.POST.get("template", "style_a").strip() or "style_a"
     uploaded_file = request.FILES.get("source_file")
     use_cache = request.POST.get("use_cache", "true").lower() == "true"
+
+    # 处理多URL：尝试解析JSON数组
+    source_url = source_url_raw
+    if source_url_raw.startswith('['):
+        try:
+            import json
+            source_url = json.loads(source_url_raw)
+            logger.info(f"检测到多URL输入: {len(source_url)}个URL")
+        except json.JSONDecodeError:
+            logger.warning(f"URL JSON解析失败，当作单URL处理: {source_url_raw}")
+            source_url = source_url_raw
 
     if mode not in {"ppt", "word"}:
         return format_error_response(
@@ -212,11 +223,15 @@ def document_generation_view(request):
             duration_seconds=round(time.perf_counter() - start_time, 2),
         )
 
-    if source_url and not re.match(r"^https?://", source_url, re.IGNORECASE):
-        return format_error_response(
-            message="URL 格式无效，需以 http 或 https 开头。",
-            merge_output=False,
-            request_id=request_id,
+    # 验证URL格式（支持单个或多个）
+    if source_url:
+        urls_to_check = source_url if isinstance(source_url, list) else [source_url]
+        for url in urls_to_check:
+            if not re.match(r"^https?://", url, re.IGNORECASE):
+                return format_error_response(
+                    message=f"URL 格式无效，需以 http 或 https 开头: {url}",
+                    merge_output=False,
+                    request_id=request_id,
             duration_seconds=round(time.perf_counter() - start_time, 2),
         )
 

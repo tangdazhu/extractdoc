@@ -25,6 +25,7 @@ from .layout_detector import LayoutDetector
 from .content_parser import ContentParser
 from utils.config_manager import config
 from utils.token_cost import TokenCostCalculator
+from utils.content_merger import ContentMerger
 
 logger = logging.getLogger(__name__)
 
@@ -47,6 +48,7 @@ class URLToPPTConverter:
         self.content_analyzer = WebToPPTAnalyzer()
         self.layout_detector = LayoutDetector()
         self.content_parser = ContentParser()
+        self.content_merger = ContentMerger()
 
         logger.info(f"初始化URLToPPTConverter: style={style}")
 
@@ -160,6 +162,158 @@ class URLToPPTConverter:
                 "output_path": "",
                 "slides_count": 0,
                 "message": f"转换失败: {str(e)}",
+            }
+
+    def convert_multiple_urls(self, urls: list, output_path: str, use_cache: bool = True) -> Dict:
+        """
+        从多个URL生成PPT（合并内容）
+
+        Args:
+            urls: URL列表
+            output_path: 输出PPT文件路径
+            use_cache: 是否使用缓存（默认True）
+
+        Returns:
+            转换结果字典
+        """
+        import time
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+
+        if not urls:
+            return {
+                "success": False,
+                "message": "URL列表不能为空",
+                "output_path": "",
+                "slides_count": 0
+            }
+
+        if len(urls) == 1:
+            logger.info("只有一个URL，使用单URL转换")
+            return self.convert(urls[0], output_path, use_cache)
+
+        start_time = time.time()
+        logger.info(f"开始多URL转换: {len(urls)}个URL")
+
+        try:
+            # 如果不使用缓存，先清理所有URL的缓存
+            if not use_cache:
+                logger.info("不使用缓存，清理所有URL的缓存")
+                for url in urls:
+                    self.content_extractor.clear_cache(url)
+
+            # 1. 并行提取各URL内容
+            logger.info("步骤1: 并行提取各URL内容")
+            extracted_contents = []
+            total_step1_tokens = {"input": 0, "output": 0, "total": 0}
+
+            max_workers = config.get("web_extraction.max_parallel_workers", 5)
+            with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                future_to_url = {
+                    executor.submit(self.content_extractor.extract_from_url, url): url
+                    for url in urls
+                }
+
+                for future in as_completed(future_to_url):
+                    url = future_to_url[future]
+                    try:
+                        article = future.result()
+                        article['source_url'] = url
+                        extracted_contents.append(article)
+
+                        # 累计Token使用
+                        tokens = article.get("token_usage", {})
+                        total_step1_tokens["input"] += tokens.get("input_tokens", 0)
+                        total_step1_tokens["output"] += tokens.get("output_tokens", 0)
+                        total_step1_tokens["total"] += tokens.get("total_tokens", 0)
+
+                        logger.info(f"成功提取URL: {url}")
+                    except Exception as e:
+                        logger.error(f"提取URL失败 {url}: {e}")
+
+            if not extracted_contents:
+                raise ValueError("所有URL提取均失败")
+
+            logger.info(f"成功提取{len(extracted_contents)}/{len(urls)}个URL")
+
+            # 2. 合并内容
+            logger.info("步骤2: 合并内容并去重")
+            merged_article = self.content_merger.merge(extracted_contents)
+            logger.info(f"合并完成: {len(merged_article['sections'])}个章节, {len(merged_article['images'])}张图片")
+
+            # 3. AI分析生成PPT结构
+            logger.info("步骤3: AI分析生成PPT结构")
+            ppt_structure = self.content_analyzer.analyze_content(merged_article)
+
+            # 获取步骤3的Token使用情况
+            step3_tokens = ppt_structure.get("token_usage", {})
+            step3_input = step3_tokens.get("input_tokens", 0)
+            step3_output = step3_tokens.get("output_tokens", 0)
+            step3_total = step3_tokens.get("total_tokens", 0)
+
+            # 汇总Token使用情况
+            total_input = total_step1_tokens["input"] + step3_input
+            total_output = total_step1_tokens["output"] + step3_output
+            total_tokens = total_step1_tokens["total"] + step3_total
+
+            # 4. 生成PPT（添加来源信息）
+            logger.info("步骤4: 生成PPT文件")
+            images = merged_article.get("images", [])
+            logger.info(f"合并后包含{len(images)}张图片")
+
+            # 修改封面副标题，显示来源数量
+            if "cover" in ppt_structure:
+                original_subtitle = ppt_structure["cover"].get("subtitle", "")
+                ppt_structure["cover"]["subtitle"] = f"基于{len(urls)}个来源的综合分析"
+                if original_subtitle:
+                    ppt_structure["cover"]["subtitle"] += f" | {original_subtitle}"
+
+            self._create_ppt(ppt_structure, output_path, images)
+
+            # 计算总耗时
+            elapsed_time = time.time() - start_time
+
+            # 计算费用
+            if total_tokens > 0:
+                total_cost = TokenCostCalculator.calculate_and_format(total_input, total_output)
+                token_description = f"步骤1（提取{len(extracted_contents)}个URL）={total_step1_tokens['total']}(I:{total_step1_tokens['input']}/O:{total_step1_tokens['output']}), 步骤3（分析PPT结构）={step3_total}(I:{step3_input}/O:{step3_output}), 总计={total_tokens}，费用={total_cost}"
+            else:
+                token_description = "0（从缓存获取），费用=0元"
+
+            result = {
+                "success": True,
+                "output_path": output_path,
+                "slides_count": len(ppt_structure["slides"]) + 2,
+                "title": ppt_structure["cover"]["title"],
+                "source_urls": urls,
+                "merged_sources_count": len(extracted_contents),
+                "elapsed_time": elapsed_time,
+                "token_usage": {
+                    "step1": total_step1_tokens,
+                    "step3": {
+                        "input": step3_input,
+                        "output": step3_output,
+                        "total": step3_total,
+                    },
+                    "total": {
+                        "input": total_input,
+                        "output": total_output,
+                        "total": total_tokens,
+                    },
+                    "description": token_description,
+                },
+                "message": f"成功从{len(extracted_contents)}个来源生成PPT，共{len(ppt_structure['slides']) + 2}页，耗时{elapsed_time:.1f}秒",
+            }
+
+            logger.info(f"多URL转换成功: {result['message']}")
+            return result
+
+        except Exception as e:
+            logger.error(f"多URL转换失败: {e}", exc_info=True)
+            return {
+                "success": False,
+                "output_path": "",
+                "slides_count": 0,
+                "message": f"多URL转换失败: {str(e)}",
             }
 
     def _create_ppt(self, ppt_structure: Dict, output_path: str, images: list = None):

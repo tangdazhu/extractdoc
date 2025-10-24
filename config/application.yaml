@@ -84,7 +84,9 @@ ai_document_analysis:
 # 网页提取配置
 web_extraction:
   cache_dir: "cache/web_extraction"  # 缓存目录，用于存储AI提取结果，避免重复调用
+  cache_expiry_hours: 2400  # 缓存过期时间（小时）
   timeout: 30  # HTTP请求超时时间（秒）
+  max_parallel_workers: 5  # 多URL并行提取的最大线程数
   
   # Playwright浏览器渲染配置（用于动态网站）
   use_browser: true  # 是否启用浏览器渲染
@@ -268,6 +270,7 @@ text_processing:
   min_text_length: 2
   max_text_length: 1000
   merge_threshold: 50
+  title_similarity_threshold: 0.85  # 章节标题相似度阈值（0-1），用于多URL内容合并时去重
   table_detection_threshold: 0.7
   enable_text_cleaning: true
   enable_ocr_error_correction: true

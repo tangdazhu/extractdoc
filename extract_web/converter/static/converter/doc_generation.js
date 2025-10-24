@@ -11,7 +11,8 @@
         useLocalFile: false,
         useUrl: false,
         localFile: null,
-        url: '',
+        url: '',  // 保留用于单URL兼容
+        urls: [],  // 新增：多URL数组
         template: 'style_a'
     };
 
@@ -49,18 +50,86 @@
         updateDocumentGenerationSubmitState();
     }
 
+    function collectAllUrls() {
+        var urlInputs = document.querySelectorAll('.doc-gen-url-input');
+        var urls = [];
+        Array.prototype.forEach.call(urlInputs, function(input) {
+            var url = input.value.trim();
+            if (url && /^https?:\/\//i.test(url)) {
+                urls.push(url);
+            }
+        });
+        return urls;
+    }
+
     function updateDocumentGenerationSubmitState() {
         var startBtn = document.getElementById('docGenStartBtn');
         if (!startBtn) return;
         var hasLocal = docGenState.useLocalFile && !!docGenState.localFile;
-        var hasUrl = docGenState.useUrl && !!docGenState.url;
-        var validUrl = !docGenState.useUrl || /^https?:\/\//i.test(docGenState.url);
-        var ready = (hasLocal || hasUrl) && validUrl;
+        
+        // 收集所有URL
+        var urls = collectAllUrls();
+        docGenState.urls = urls;
+        docGenState.url = urls.length > 0 ? urls[0] : '';  // 兼容旧代码
+        
+        var hasUrl = docGenState.useUrl && urls.length > 0;
+        var ready = (hasLocal || hasUrl);
         startBtn.disabled = !ready;
-        if (!validUrl && docGenState.useUrl) {
-            if (typeof window.addNotification === 'function') {
-                window.addNotification('请输入有效的URL，需以http或https开头。', 'warning');
+    }
+
+    function initializeMultiUrlInputs() {
+        var container = document.getElementById('docGenUrlContainer');
+        if (!container) return;
+
+        // 添加URL输入框
+        container.addEventListener('click', function(e) {
+            if (e.target.classList.contains('doc-gen-url-add-btn')) {
+                var newGroup = document.createElement('div');
+                newGroup.className = 'doc-gen-url-group';
+                newGroup.style.display = 'flex';
+                newGroup.style.gap = '8px';
+                newGroup.style.marginBottom = '8px';
+                
+                var urlCheckbox = document.getElementById('docGenUseUrl');
+                var isEnabled = urlCheckbox && urlCheckbox.checked;
+                
+                newGroup.innerHTML = 
+                    '<input type="url" class="doc-gen-url-input doc-gen-input" ' +
+                    'placeholder="例如：https://mp.weixin.qq.com/s/xxxxx" ' +
+                    (isEnabled ? '' : 'disabled') + ' style="flex: 1;">' +
+                    '<button type="button" class="doc-gen-url-remove-btn" title="删除此URL">-</button>';
+                
+                container.appendChild(newGroup);
+                
+                // 为新输入框添加事件监听
+                var newInput = newGroup.querySelector('.doc-gen-url-input');
+                if (newInput) {
+                    newInput.addEventListener('input', debounce(function() {
+                        updateDocumentGenerationSubmitState();
+                    }, 300));
+                }
             }
+            
+            // 删除URL输入框
+            if (e.target.classList.contains('doc-gen-url-remove-btn')) {
+                var groups = container.querySelectorAll('.doc-gen-url-group');
+                if (groups.length > 1) {
+                    e.target.closest('.doc-gen-url-group').remove();
+                    updateDocumentGenerationSubmitState();
+                } else {
+                    if (typeof window.addNotification === 'function') {
+                        window.addNotification('至少需要保留一个URL输入框', 'warning');
+                    }
+                }
+            }
+        });
+
+        // 为初始输入框添加事件监听
+        var initialInput = container.querySelector('.doc-gen-url-input');
+        if (initialInput) {
+            initialInput.addEventListener('input', debounce(function() {
+                updateDocumentGenerationSubmitState();
+            }, 300));
         }
     }
 
@@ -232,7 +301,14 @@
             formData.append('source_file', docGenState.localFile);
         }
         if (hasUrl) {
-            formData.append('source_url', docGenState.url);
+            // 支持多URL：如果有多个URL，发送JSON数组；单个URL保持兼容
+            var urls = collectAllUrls();
+            if (urls.length > 1) {
+                formData.append('source_url', JSON.stringify(urls));
+            } else if (urls.length === 1) {
+                formData.append('source_url', urls[0]);
+            }
+            
             // 添加缓存选项
             var useCacheCheckbox = document.getElementById('docGenUseCache');
             var useCache = useCacheCheckbox ? useCacheCheckbox.checked : true;
@@ -375,18 +451,34 @@
             });
         }
 
-        if (urlCheckbox && urlInput) {
+        if (urlCheckbox) {
             urlCheckbox.addEventListener('change', function() {
                 docGenState.useUrl = urlCheckbox.checked;
+                var urlInputs = document.querySelectorAll('.doc-gen-url-input');
+                var addBtn = document.querySelector('.doc-gen-url-add-btn');
+                
+                Array.prototype.forEach.call(urlInputs, function(input) {
+                    input.disabled = !urlCheckbox.checked;
+                    if (!urlCheckbox.checked) {
+                        input.value = '';
+                    }
+                });
+                
+                if (addBtn) {
+                    addBtn.disabled = !urlCheckbox.checked;
+                }
+                
                 if (!urlCheckbox.checked) {
-                    urlInput.value = '';
+                    docGenState.urls = [];
                     docGenState.url = '';
                 }
-                urlInput.disabled = !urlCheckbox.checked;
+                
                 updateDocumentGenerationSubmitState();
             });
-            urlInput.addEventListener('input', urlDebouncedHandler);
         }
+
+        // 多URL输入框管理
+        initializeMultiUrlInputs();
 
         Array.prototype.forEach.call(templateRadios, function(radio) {
             radio.addEventListener('change', function() {
