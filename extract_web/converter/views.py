@@ -2569,9 +2569,12 @@ def process_video_extraction_view(request):
     scene_threshold_str = request.POST.get(
         "scene_detection_threshold", "10.0"
     )  # 与前端 formData.append('scene_detection_threshold', ...) 对应
-    group_size_str = request.POST.get(
-        "deduplication_group_size", "5"
-    )  # 与前端 formData.append('deduplication_group_size', ...) 对应
+    similarity_threshold_str = request.POST.get(
+        "similarity_threshold", "5"
+    )  # 新参数：相似度阈值
+    min_group_interval_str = request.POST.get(
+        "min_group_interval", "3"
+    )  # 新参数：最小场景间隔
 
     if not video_file_obj:
         logger.warning(
@@ -2584,13 +2587,14 @@ def process_video_extraction_view(request):
         )
     try:
         scene_threshold = float(scene_threshold_str)
-        group_size = int(group_size_str)
+        similarity_threshold = int(similarity_threshold_str)
+        min_group_interval = int(min_group_interval_str)
     except ValueError:
         logger.warning(
-            f"process_video_extraction_view: Invalid threshold or group size. T: {scene_threshold_str}, G: {group_size_str}. RequestID: {request_id}"
+            f"process_video_extraction_view: Invalid parameters. T: {scene_threshold_str}, S: {similarity_threshold_str}, I: {min_group_interval_str}. RequestID: {request_id}"
         )
         return format_error_response(
-            message="场景阈值或分组大小参数无效。",
+            message="场景阈值、相似度阈值或最小间隔参数无效。",
             merge_output=False,  # 视频处理不涉及合并输出
             request_id=request_id,
         )
@@ -2645,7 +2649,8 @@ def process_video_extraction_view(request):
         _temp_video_path_arg,
         _exec_temp_dir_arg,
         _scene_threshold_arg,
-        _group_size_arg,
+        _similarity_threshold_arg,
+        _min_group_interval_arg,
         _original_video_filename_arg,
         _safe_video_filename_arg,
         _user_converted_dir_arg,
@@ -2671,17 +2676,15 @@ def process_video_extraction_view(request):
                 sys.executable,
                 _script_path_arg,
                 "--video_file",
-                _temp_video_path_arg,  # MODIFIED: Changed from --video_file_path
+                _temp_video_path_arg,
                 "--output_base_dir",
                 _exec_temp_dir_arg,
                 "--threshold",
-                str(
-                    _scene_threshold_arg
-                ),  # MODIFIED: Changed from --scene_detection_thresh
-                "--group_size",
-                str(
-                    _group_size_arg
-                ),  # MODIFIED: Changed from --deduplication_group_size
+                str(_scene_threshold_arg),
+                "--similarity_threshold",
+                str(_similarity_threshold_arg),
+                "--min_group_interval",
+                str(_min_group_interval_arg),
             ]
             logger.info(
                 f"stream_video_processing_response: Executing video script for {_original_video_filename_arg} (RequestID: {_request_id_arg}): {' '.join(command_list_stream)}"
@@ -3127,7 +3130,8 @@ def process_video_extraction_view(request):
             temp_video_path,
             exec_temp_dir,
             scene_threshold,
-            group_size,
+            similarity_threshold,
+            min_group_interval,
             original_video_filename,
             safe_video_filename,
             user_converted_dir,

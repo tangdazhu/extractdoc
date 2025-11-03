@@ -49,6 +49,7 @@ dashscope==1.23.3        # Alibaba Qwen models API client
 ollama>=0.4.0           # Local LLM client (Ollama)
 
 scenedetect==0.6.6 # video scene detection
+imagehash>=4.3.1    # Perceptual image hashing for video deduplication
 
 # Speech Synthesis
 edge-tts==7.0.2         # Microsoft Edge Text-to-Speech client

@@ -59,19 +59,27 @@ async function processVideo() {
         return;
     }
     const sceneDetectionThreshold = document.getElementById('sceneDetectionThreshold').value;
-    const deduplicationGroupSize = document.getElementById('deduplicationGroupSize').value;
+    const similarityThreshold = document.getElementById('similarityThreshold').value;
+    const minGroupInterval = document.getElementById('minGroupInterval').value;
+    
     if (!sceneDetectionThreshold || parseFloat(sceneDetectionThreshold) <= 0) {
         window.addNotification('请输入有效的场景检测阈值。', 'warning');
         return;
     }
-    if (!deduplicationGroupSize || parseInt(deduplicationGroupSize) < 1) {
-        window.addNotification('请输入有效的去重分组大小 (至少为1)。', 'warning');
+    if (!similarityThreshold || parseInt(similarityThreshold) < 1) {
+        window.addNotification('请输入有效的相似度阈值 (至少为1)。', 'warning');
         return;
     }
+    if (!minGroupInterval || parseInt(minGroupInterval) < 1) {
+        window.addNotification('请输入有效的最小场景间隔 (至少为1)。', 'warning');
+        return;
+    }
+    
     const formData = new FormData();
     formData.append('video_file', window.uploadedVideoFile);
     formData.append('scene_detection_threshold', sceneDetectionThreshold);
-    formData.append('deduplication_group_size', deduplicationGroupSize);
+    formData.append('similarity_threshold', similarityThreshold);
+    formData.append('min_group_interval', minGroupInterval);
     const csrfToken = window.getCookie('csrftoken');
     const processBtn = document.querySelector('#videoAnalysisContent button[onclick="processVideo()"]');
     const spinner = document.getElementById('videoProcessingSpinner');
