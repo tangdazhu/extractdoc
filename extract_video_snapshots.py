@@ -59,6 +59,10 @@ import numpy as np
 from PIL import Image
 import imagehash
 
+# 重定向stdout到stderr，以便Django后端能够捕获所有print输出
+# 这样所有的print语句都会输出到stderr
+sys.stdout = sys.stderr
+
 # tqdm is a great library for progress bars if you process many/long videos
 # from tqdm import tqdm
 
@@ -95,8 +99,27 @@ def extract_snapshots(video_path, output_dir, scene_detector_threshold=27.0):
         video_manager.start()
 
         # Perform scene detection on video_manager.
-        print("INFO: Detecting scenes...", flush=True)
-        scene_manager.detect_scenes(frame_source=video_manager, show_progress=False)
+        print("INFO: Detecting scenes... (this may take a while)", flush=True)
+        
+        # 使用OpenCV获取视频总帧数
+        temp_cap = cv2.VideoCapture(video_path)
+        total_frames = int(temp_cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        temp_cap.release()
+        print(f"INFO: Video has {total_frames} frames total.", flush=True)
+        
+        # 使用回调函数显示场景检测进度
+        frame_count = [0]  # 使用列表以便在回调中修改
+        last_reported = [0]  # 记录上次报告的帧数
+        
+        def progress_callback(frame_img, frame_num):
+            frame_count[0] = frame_num
+            # 每处理500帧或每5%进度输出一次
+            if (frame_num - last_reported[0] >= 500) or frame_num >= total_frames:
+                percent = round(frame_num / total_frames * 100, 1) if total_frames > 0 else 0
+                print(f"Scene detection | Progress: {frame_num}/{total_frames} ({percent}%)", flush=True)
+                last_reported[0] = frame_num
+        
+        scene_manager.detect_scenes(frame_source=video_manager, show_progress=False, callback=progress_callback)
 
         # scene_list will be a list of tuples (start_timecode, end_timecode)
         scene_list = scene_manager.get_scene_list()
@@ -131,7 +154,8 @@ def extract_snapshots(video_path, output_dir, scene_detector_threshold=27.0):
 
             # print(f"Scene {i+1:03d}: Starts at frame {start_frame_num} ({start_time.get_timecode()})") # COMMENTED OUT - too verbose for many scenes
             if (i + 1) % 10 == 0 or (i + 1) == total_scenes: # ADDED: Log progress every 10 scenes or for the last scene
-                print(f"INFO: Processing scene {i+1}/{total_scenes}, Start frame: {start_frame_num}", flush=True) # ADDED
+                percent = round((i + 1) / total_scenes * 100, 1)
+                print(f"Detected: {i+1} | Progress: {i+1}/{total_scenes} ({percent}%)", flush=True) # ADDED
 
             cap.set(cv2.CAP_PROP_POS_FRAMES, start_frame_num)
             ret, frame = cap.read()

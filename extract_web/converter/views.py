@@ -2536,7 +2536,6 @@ def download_converted_file_view(request, username, date_str, filename):
         raise Http404("文件未找到。")
 
 
-@csrf_exempt  # Ensure CSRF exemption if you test directly without a form including {% csrf_token %}
 @require_POST
 def process_video_extraction_view(request):
     request_id = "".join(
@@ -2546,6 +2545,14 @@ def process_video_extraction_view(request):
     logger.info(
         f"process_video_extraction_view: Received request. RequestID: {request_id}"
     )
+    
+    # 检查用户是否已登录
+    if not request.user.is_authenticated:
+        logger.warning(f"process_video_extraction_view: Unauthenticated request. RequestID: {request_id}")
+        return StreamingHttpResponse(
+            iter([f"data: {json.dumps({'type': 'error', 'message': '请先登录后再使用视频分析功能。', 'request_id': request_id})}\n\n"]),
+            content_type="text/event-stream",
+        )
 
     user_upload_dir, user_converted_dir = "", ""
     try:
@@ -2728,7 +2735,7 @@ def process_video_extraction_view(request):
                             .strip()
                         )
                         progress_match_stream = re.search(
-                            r"(\d+)/(\d+)\\s*\\((.*?)%\\)", original_line_stream
+                            r"(\d+)/(\d+)\s*\((.*?)%\)", original_line_stream
                         )  # Regex on original_line_stream for robustness
                         if progress_match_stream:
                             _, _, percent_str_stream = progress_match_stream.groups()
