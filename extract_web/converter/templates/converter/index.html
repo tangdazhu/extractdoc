@@ -1020,15 +1020,21 @@
             </div>
 
             <div class="form-group" style="margin-top: 15px;">
-                <label for="similarityThreshold" style="font-weight: 500;">相似度阈值 (推荐 3-8):</label>
+                <label for="similarityThreshold" style="font-weight: 500;">相似度阈值 (推荐 4-8):</label>
                 <input type="number" id="similarityThreshold" name="similarityThreshold" value="5" step="1" min="1" max="20" class="form-control" style="width: 150px; padding: 8px; margin-top: 5px; display: inline-block;">
-                <small class="form-text text-muted" style="display: block; margin-top: 5px; font-size: 0.85em;">图像哈希距离阈值，越小越严格（相似图片归为一组）。</small>
+                <small class="form-text text-muted" style="display: block; margin-top: 5px; font-size: 0.85em;">
+                    图像哈希距离阈值。<strong>值越大越宽松</strong>（合并更多相似图片）。
+                    <br>渐进式PPT推荐 5-6，标准PPT推荐 4-5。<strong>不要设置太小（如2）！</strong>
+                </small>
             </div>
 
             <div class="form-group" style="margin-top: 15px;">
-                <label for="minGroupInterval" style="font-weight: 500;">最小场景间隔 (推荐 2-5):</label>
+                <label for="minGroupInterval" style="font-weight: 500;">最小场景间隔 (推荐 2-4):</label>
                 <input type="number" id="minGroupInterval" name="minGroupInterval" value="3" step="1" min="1" max="20" class="form-control" style="width: 150px; padding: 8px; margin-top: 5px; display: inline-block;">
-                <small class="form-text text-muted" style="display: block; margin-top: 5px; font-size: 0.85em;">保留的截图之间最小场景间隔，避免过度去重。</small>
+                <small class="form-text text-muted" style="display: block; margin-top: 5px; font-size: 0.85em;">
+                    保留的截图之间最小场景间隔。<strong>值越大输出越少</strong>。
+                    <br>渐进式PPT推荐 2-3，标准PPT推荐 3-4。<strong>设置为1几乎不过滤！</strong>
+                </small>
             </div>
 
             <button type="button" class="btn btn-primary" onclick="processVideo()" style="margin-top: 15px; padding: 10px 20px; font-size: 1em;">提取视频截图</button>
